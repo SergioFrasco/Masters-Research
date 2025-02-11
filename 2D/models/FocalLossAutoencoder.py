@@ -1,22 +1,20 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
 from tensorflow.keras import layers, models
 from tensorflow.keras.models import load_model
-from models import focal_mse_loss
+from utils.plotting import overlay_values_on_grid
+
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disables GPU, forcing CPU usage
+
 
 def load_trained_autoencoder(model_path="models/autoencoder_model.h5"):
     """Loads and returns the trained autoencoder model."""
-    return load_model(model_path, custom_objects={"focal_loss": focal_mse_loss})
+    return load_model(model_path, custom_objects={"focal_mse_loss": focal_mse_loss})
 
-
-# Function to overlay values on the grid
-def overlay_values_on_grid(grid, ax):
-    rows, cols = grid.shape
-    for i in range(rows):
-        for j in range(cols):
-            ax.text(j, i, f'{grid[i, j]:.2f}', ha='center', va='center', color='red', fontsize=8)
 
 # Main autoencoder creation
 def build_autoencoder(input_shape):
