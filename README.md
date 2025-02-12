@@ -25,7 +25,7 @@ To run this project, you need to set up the environment and install dependencies
 
 Clone the repository:
 
-git clone https://github.com/yourusername/masters-research.git
+git clone https://github.com/SergioFrasco/Masters-Research.git
 cd masters-research
 Create a virtual environment (optional, but recommended):
 
