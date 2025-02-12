@@ -21,6 +21,7 @@ class SimpleEnv(MiniGridEnv):
         max_steps: int | None = None,
         **kwargs,
     ):
+        self.size = size
         self.agent_start_pos = agent_start_pos
         self.agent_start_dir = agent_start_dir
 
