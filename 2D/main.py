@@ -182,6 +182,87 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
+def train_successor_agent(
+    agent,
+    env,
+    episodes=500,
+    max_steps=100,
+    epsilon_start=1.0,
+    epsilon_end=0.01,
+    epsilon_decay=0.995
+):
+    """
+    Training loop for SuccessorAgent in MiniGrid environment
+    
+    Args:
+        agent: SuccessorAgent instance
+        env: MiniGrid environment
+        episodes: Number of episodes to train
+        max_steps: Maximum steps per episode
+        epsilon_start: Starting exploration rate
+        epsilon_end: Minimum exploration rate
+        epsilon_decay: Rate at which epsilon decays
+    """
+    episode_rewards = []
+    epsilon = epsilon_start
+    
+    for episode in range(episodes):
+        obs = env.reset()
+        total_reward = 0
+        step_count = 0
+        
+        # Store first experience
+        current_state_idx = agent.get_state_index(obs)
+        current_action = agent.sample_action(obs, epsilon=epsilon)
+        current_exp = [current_state_idx, current_action, None, None, None]
+        
+        for step in range(max_steps):
+            # Take action and observe result
+            obs, reward, done, _ = env.step(current_action)
+            next_state_idx = agent.get_state_index(obs)
+            
+            # Complete current experience tuple
+            current_exp[2] = next_state_idx  # next state
+            current_exp[3] = reward          # reward
+            current_exp[4] = done            # done flag
+            
+            # Get next action
+            next_action = agent.sample_action(obs, epsilon=epsilon)
+            
+            # Create next experience tuple
+            next_exp = [next_state_idx, next_action, None, None, None]
+            
+            # Update agent
+            error_w, error_sr = agent.update(current_exp, None if done else next_exp)
+            
+            total_reward += reward
+            step_count += 1
+            
+            # Prepare for next step
+            current_exp = next_exp
+            current_action = next_action
+            
+            if done:
+                break
+        
+        # Decay epsilon
+        epsilon = max(epsilon_end, epsilon * epsilon_decay)
+        
+        # Store episode statistics
+        episode_rewards.append(total_reward)
+        
+        # Print progress
+        if (episode + 1) % 100 == 0:
+            avg_reward = np.mean(episode_rewards[-100:])
+            print(f"Episode {episode + 1}/{episodes}")
+            print(f"Average Reward: {avg_reward:.2f}")
+            print(f"Epsilon: {epsilon:.3f}")
+            print(f"Steps: {step_count}")
+            print("------------------------")
+    
+    return episode_rewards
+
+
 def main():
     # Collecting sample images from the environment
     # collect_data()
@@ -222,11 +303,17 @@ def main():
     # Now we have both the vision model and the transition dynamics. lets use them together to build WVF's
 
     # Test and visualize World Value Function
-    world_value_function, wvf_grid = test_world_value_function()
+    # world_value_function, wvf_grid = test_world_value_function()
     
-    # Create environment for trajectory visualization
+    # # Create environment for trajectory visualization
+    # env = SimpleEnv(size=10)
+    # visualize_agent_trajectory(env, wvf_grid)
+
+    # --------- Where i got up to before the meeting ------------
+    # Now we look to train the autoencoder as the agent moves through the environment
     env = SimpleEnv(size=10)
-    visualize_agent_trajectory(env, wvf_grid)
+    agent = SuccessorAgent(env)
+    rewards = train_successor_agent(agent, env)
 
 
    
