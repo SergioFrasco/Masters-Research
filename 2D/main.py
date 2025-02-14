@@ -422,6 +422,7 @@ def main():
     # # Save trained model
     # trained_autoencoder.save('trained_autoencoder.h5')
 
+    # ----------------- This code onward is testing the vision model produced by the above -------------------
     # Create a test image (example: random rewards)
     size = 10  # Match your environment size
     test_image = np.zeros((size, size, 1))
