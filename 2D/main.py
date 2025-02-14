@@ -13,6 +13,7 @@ from models import focal_mse_loss
 from utils.plotting import overlay_values_on_grid, visualize_sr
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
+from models import build_autoencoder
 
 
 # Suppress TensorFlow logging
@@ -182,86 +183,176 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(
+class GroundTruthMap:
+    """Manages the ground truth map of discovered rewards"""
+    def __init__(self, size):
+        self.size = size
+        self.reset()
+        
+    def reset(self):
+        """Initialize empty ground truth map"""
+        self.map = np.zeros((self.size, self.size, 1))
+        self.discovered_rewards = set()
+        
+    def update(self, pos):
+        """Update map with newly discovered reward"""
+        pos_tuple = tuple(pos)
+        if pos_tuple not in self.discovered_rewards:
+            self.map[pos[0], pos[1], 0] = 1
+            self.discovered_rewards.add(pos_tuple)
+            return True  # New discovery
+        return False  # Already known
+
+def train_agent_with_vision(
     agent,
     env,
-    episodes=500,
-    max_steps=100,
+    autoencoder,
+    n_episodes=100,
+    max_steps=1000,
     epsilon_start=1.0,
     epsilon_end=0.01,
-    epsilon_decay=0.995
+    epsilon_decay=0.995,
+    ae_epochs_per_update=10,
+    ae_batch_size=1
 ):
     """
-    Training loop for SuccessorAgent in MiniGrid environment
-    
-    Args:
-        agent: SuccessorAgent instance
-        env: MiniGrid environment
-        episodes: Number of episodes to train
-        max_steps: Maximum steps per episode
-        epsilon_start: Starting exploration rate
-        epsilon_end: Minimum exploration rate
-        epsilon_decay: Rate at which epsilon decays
+    Combined training loop that relies on environment reset for new reward placement
     """
-    episode_rewards = []
     epsilon = epsilon_start
+    total_rewards_history = []
+    ground_truth = GroundTruthMap(env.size)
     
-    for episode in range(episodes):
+    # Main training loop
+    for episode in range(n_episodes):
+        print(f"\nStarting Episode {episode + 1}/{n_episodes}")
+        
+        # Reset environment (this automatically places new rewards)
         obs = env.reset()
+        # Reset ground truth map for new episode
+        ground_truth.reset()
+        
         total_reward = 0
         step_count = 0
         
-        # Store first experience
+        # Initialize first experience
         current_state_idx = agent.get_state_index(obs)
         current_action = agent.sample_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
         
+        # Episode loop
         for step in range(max_steps):
-            # Take action and observe result
-            obs, reward, done, _ = env.step(current_action)
+            # Take action
+            obs, reward, done, truncated, dict = env.step(current_action)
             next_state_idx = agent.get_state_index(obs)
             
+            # Handle reward discovery
+            if reward > 0:
+                is_new_reward = ground_truth.update(env.agent_pos)
+                
+                if is_new_reward:
+                    print(f"New reward found at {env.agent_pos}")
+                    
+                    # Train autoencoder on updated ground truth map
+                    current_map = ground_truth.map[np.newaxis, ...]  # Add batch dimension
+                    history = autoencoder.fit(
+                        current_map, 
+                        current_map,
+                        epochs=ae_epochs_per_update,
+                        batch_size=ae_batch_size,
+                        verbose=0
+                    )
+                    
+                    # Print training feedback
+                    final_loss = history.history['loss'][-1]
+                    print(f"Autoencoder loss after update: {final_loss:.4f}")
+            
             # Complete current experience tuple
-            current_exp[2] = next_state_idx  # next state
-            current_exp[3] = reward          # reward
-            current_exp[4] = done            # done flag
+            current_exp[2] = next_state_idx
+            current_exp[3] = reward
+            current_exp[4] = done
             
             # Get next action
             next_action = agent.sample_action(obs, epsilon=epsilon)
-            
-            # Create next experience tuple
             next_exp = [next_state_idx, next_action, None, None, None]
             
-            # Update agent
+            # Update successor agent
             error_w, error_sr = agent.update(current_exp, None if done else next_exp)
             
             total_reward += reward
             step_count += 1
             
-            # Prepare for next step
+            # Setup for next step
             current_exp = next_exp
             current_action = next_action
             
             if done:
+                print(f"Episode finished after {step_count} steps")
+                print(f"Found {len(ground_truth.discovered_rewards)} rewards")
                 break
         
-        # Decay epsilon
+        # Update epsilon
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
         
-        # Store episode statistics
-        episode_rewards.append(total_reward)
+        # Store episode results
+        total_rewards_history.append(total_reward)
         
-        # Print progress
-        if (episode + 1) % 100 == 0:
-            avg_reward = np.mean(episode_rewards[-100:])
-            print(f"Episode {episode + 1}/{episodes}")
-            print(f"Average Reward: {avg_reward:.2f}")
-            print(f"Epsilon: {epsilon:.3f}")
-            print(f"Steps: {step_count}")
-            print("------------------------")
+        # Print episode summary
+        print(f"Episode {episode + 1} Summary:")
+        print(f"Total Reward: {total_reward}")
+        print(f"Epsilon: {epsilon:.3f}")
+        if len(total_rewards_history) >= 10:
+            print(f"Average Reward (last 10): {np.mean(total_rewards_history[-10:]):.2f}")
     
-    return episode_rewards
+    return total_rewards_history, autoencoder
 
+def test_autoencoder(model_path, test_image, save_path=None):
+    """
+    Test a trained autoencoder with a new input image and visualize results
+    
+    Args:
+        model_path (str): Path to the saved autoencoder model
+        test_image (np.array): Input image of shape (height, width, 1)
+        save_path (str, optional): Path to save the comparison plot
+    """
+    # Load the trained model
+    autoencoder = load_trained_autoencoder(model_path)
+    
+    # Ensure input image has batch dimension and correct shape
+    if len(test_image.shape) == 2:
+        test_image = test_image[..., np.newaxis]
+    test_input = test_image[np.newaxis, ...]
+    
+    # Generate reconstruction
+    reconstructed = autoencoder.predict(test_input)
+    
+    # Remove batch dimension for plotting
+    reconstructed = reconstructed[0]
+    
+    # Create comparison plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    
+    # Plot original
+    im1 = ax1.imshow(test_image[..., 0], cmap='gray')
+    ax1.set_title("Original Image")
+    plt.colorbar(im1, ax=ax1)
+    
+    # Plot reconstruction
+    im2 = ax2.imshow(reconstructed[..., 0], cmap='gray')
+    ax2.set_title("Reconstructed Image")
+    plt.colorbar(im2, ax=ax2)
+    
+    # Add reconstruction error as text
+    mse = np.mean((test_image - reconstructed) ** 2)
+    plt.figtext(0.5, 0.01, f'MSE: {mse:.4f}', ha='center')
+    
+    plt.tight_layout()
+    
+    # Save if path provided
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+        print(f"Saved comparison plot to {save_path}")
+    
+    return reconstructed, mse
 
 def main():
     # Collecting sample images from the environment
@@ -311,12 +402,45 @@ def main():
 
     # --------- Where i got up to before the meeting ------------
     # Now we look to train the autoencoder as the agent moves through the environment
-    env = SimpleEnv(size=10)
-    agent = SuccessorAgent(env)
-    rewards = train_successor_agent(agent, env)
+    # Initialize environment and agents
+    
+    # Initialize environment and agents
+    # env = SimpleEnv(size=10)  # Environment size 10x10
+    # successor_agent = SuccessorAgent(env)
+    # autoencoder = build_autoencoder((env.size, env.size, 1))  # Matching environment size
+    # autoencoder.compile(optimizer='adam', loss=focal_mse_loss)
 
+    # # Run training
+    # rewards, trained_autoencoder = train_agent_with_vision(
+    #     successor_agent, 
+    #     env, 
+    #     autoencoder,
+    #     n_episodes=1000,
+    #     max_steps = 10000
+    # )
 
-   
+    # # Save trained model
+    # trained_autoencoder.save('trained_autoencoder.h5')
+
+    # Create a test image (example: random rewards)
+    size = 10  # Match your environment size
+    test_image = np.zeros((size, size, 1))
+    # Place some random rewards (1s) in the image
+    n_rewards = 2
+    random_positions = np.random.choice(size*size, n_rewards, replace=False)
+    for pos in random_positions:
+        x, y = pos // size, pos % size
+        test_image[x, y, 0] = 1
+
+    # Test the autoencoder
+    reconstructed, mse = test_autoencoder(
+        model_path='trained_autoencoder.h5',
+        test_image=test_image,
+        save_path='reconstruction_test.png'
+    )
+    print(f"Reconstruction MSE: {mse:.4f}")
+
+    
 
 if __name__ == "__main__":
     main()
