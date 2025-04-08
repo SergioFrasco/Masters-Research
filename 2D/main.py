@@ -218,7 +218,7 @@ def train_successor_agent(
         
         for step in range(max_steps):
             # Take action and observe result
-            obs, reward, done, _ = env.step(current_action)
+            obs, reward, done, _, _ = env.step(current_action)
             next_state_idx = agent.get_state_index(obs)
             
             # Complete current experience tuple
