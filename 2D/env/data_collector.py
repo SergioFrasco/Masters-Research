@@ -16,6 +16,7 @@ def collect_data(input_samples=1000, grid_size=(10, 10), save_path='datasets/gri
         normalized_grid[grid == 1] = 0.0   # Open space
         normalized_grid[grid == 8] = 1.0   # Rewards
         
+        
         dataset[i, ..., 0] = normalized_grid[..., 0]
     
     np.save(save_path, dataset)

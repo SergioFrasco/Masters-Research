@@ -7,9 +7,8 @@ import tensorflow as tf
 from minigrid.core.world_object import Goal, Wall
 
 from tqdm import tqdm
-from env import SimpleEnv, collect_data
-from models import load_trained_autoencoder
-from models import focal_mse_loss
+from env import SimpleEnv, data_collector
+from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder
 from utils.plotting import overlay_values_on_grid, visualize_sr
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
@@ -182,15 +181,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(
-    agent,
-    env,
-    episodes=500,
-    max_steps=100,
-    epsilon_start=1.0,
-    epsilon_end=0.01,
-    epsilon_decay=0.995
-):
+def train_successor_agent(agent, env, episodes=1, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995):
     """
     Training loop for SuccessorAgent in MiniGrid environment
     
@@ -210,11 +201,21 @@ def train_successor_agent(
         obs = env.reset()
         total_reward = 0
         step_count = 0
+
+        # For every new episode, the agent should have no understanding of what the reward space looks like
+        # agent.true_reward_map = np.zeros((env.grid_size, env.grid_size))
+
+        # For every new episode, the agent should understand as much of the reward space as it's vision can predict
+        # I dont think changing this actually makes a difference as it's only updated once per episode and not used elsewhere
+        agent.true_reward_map = np.zeros((env.size, env.size))
         
         # Store first experience
         current_state_idx = agent.get_state_index(obs)
         current_action = agent.sample_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
+
+        # Variable to track where the agent finds the reward, to assist updating agent.true_reward_map
+        reward_position = None
         
         for step in range(max_steps):
             # Take action and observe result
@@ -242,9 +243,59 @@ def train_successor_agent(
             current_exp = next_exp
             current_action = next_action
             
-            if done:
+
+            # Train the vision model for every step if the threshold is not met
+
+
+            
+            if done: 
+                reward_position = tuple(env.agent_pos)  
                 break
         
+        # --An Episode has completed--
+        # We have got the reward for this episode.
+        # Here we update the agents true_reward_map with the actual value of the reward in that spot
+        # If it got a reward in the number of steps, then update
+        if reward_position:
+            # print(f"Reward found at: {reward_position}")
+            agent.true_reward_map[reward_position[1], reward_position[0]] = 1
+            
+            # Convert the environment grid to the same format used during training
+            grid = env.grid.encode()
+            normalized_grid = np.zeros_like(grid, dtype=np.float32)
+            normalized_grid[grid == 2] = 0.0   # Walls
+            normalized_grid[grid == 1] = 0.0   # Open space
+            normalized_grid[grid == 8] = 1.0   # Rewards
+            
+            # Extract the first channel and reshape for the autoencoder
+            input_grid = normalized_grid[..., 0]
+            input_grid = np.expand_dims(input_grid, axis=0)  # Add batch dimension (1, height, width)
+            input_grid = np.expand_dims(input_grid, axis=-1)  # Add channel dimension (1, height, width, 1)
+            
+            # # Debugging step: Check shape and dtype
+            # print(f"Shape of input before prediction: {input_grid.shape}")
+            # print(f"Dtype of input before prediction: {input_grid.dtype}")
+            
+            # Get the predicted reward map from the AE
+            predicted_reward_map = ae_model.predict(input_grid)
+            
+            # Update the rest of the true_reward_map with AE predictions
+            for y in range(agent.true_reward_map.shape[0]):
+                for x in range(agent.true_reward_map.shape[1]):
+                    if (x, y) != reward_position:  # Skip the reward position
+                        # Get the predicted value for this position from the AE
+                        predicted_value = predicted_reward_map[0, y, x, 0]
+                        agent.true_reward_map[y, x] = predicted_value
+            
+            # Visualize the agents true reward map for this episode
+            # print("True Reward Map:")
+            # for row in agent.true_reward_map:
+            #     print(" ".join(f"{val:.2f}" for val in row))
+
+            # we then look to train the AE on this single episode, where the input is the image from the environment and the loss propagation
+            # is between this input image and the agents true_reward_map.
+
+
         # Decay epsilon
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
         
@@ -252,13 +303,13 @@ def train_successor_agent(
         episode_rewards.append(total_reward)
         
         # Print progress
-        if (episode + 1) % 100 == 0:
-            avg_reward = np.mean(episode_rewards[-100:])
-            print(f"Episode {episode + 1}/{episodes}")
-            print(f"Average Reward: {avg_reward:.2f}")
-            print(f"Epsilon: {epsilon:.3f}")
-            print(f"Steps: {step_count}")
-            print("------------------------")
+        # if (episode + 1) % 100 == 0:
+        #     avg_reward = np.mean(episode_rewards[-100:])
+        #     print(f"Episode {episode + 1}/{episodes}")
+        #     print(f"Average Reward: {avg_reward:.2f}")
+        #     print(f"Epsilon: {epsilon:.3f}")
+        #     print(f"Steps: {step_count}")
+        #     print("------------------------")
     
     return episode_rewards
 
@@ -311,12 +362,21 @@ def main():
 
     # --------- Where i got up to before the meeting ------------
     # Now we look to train the autoencoder as the agent moves through the environment
-    env = SimpleEnv(size=10)
+
+    # Setup the environment
+    env = SimpleEnv(size=10, render_mode = "human")
+    # env = SimpleEnv(size=10)
+
+    # Setup the agent
     agent = SuccessorAgent(env)
-    rewards = train_successor_agent(agent, env)
 
+    # Setup the agents Vision System
+    input_shape = (env.size, env.size, 1)  
+    ae_model = build_autoencoder(input_shape)
+    ae_model.compile(optimizer='adam', loss=focal_mse_loss)
 
-   
+    # Train the agent
+    rewards = train_successor_agent(agent, env, ae_model = ae_model) 
 
 if __name__ == "__main__":
     main()
