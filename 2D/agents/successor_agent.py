@@ -18,6 +18,10 @@ class SuccessorAgent:
         # Initialize successor features matrix
         self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
         self.w = np.zeros([self.state_size])
+
+        # Initialize the true map to track discovered reward locations and predictions
+        # Initially filled with zeros, shape: (grid_size, grid_size)
+        self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
         
     def get_state_index(self, obs):
         """Convert MiniGrid observation to state index"""
