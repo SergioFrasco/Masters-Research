@@ -244,7 +244,7 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
             current_action = next_action
             
 
-            # ------------------Train the vision model for every step if the threshold is not met----------------
+            # ------------------Train the vision model for every step where the threshold is not met----------------
             # Update The agents true_reward_map
 
             agent_position = tuple(env.agent_pos) 
