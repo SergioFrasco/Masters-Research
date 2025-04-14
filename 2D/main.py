@@ -4,8 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import absl.logging
 import tensorflow as tf
-from minigrid.core.world_object import Goal, Wall
 
+from minigrid.core.world_object import Goal, Wall
 from tqdm import tqdm
 from env import SimpleEnv, data_collector
 from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder

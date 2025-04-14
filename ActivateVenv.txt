@@ -1,0 +1,3 @@
+alias activate-masters='source ~/Desktop/Sergio\ Frasco/Masters-Research/.venv/bin/activate'
+source ~/.bashrc
+activate-masters
