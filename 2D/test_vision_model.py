@@ -12,8 +12,6 @@ print("Loading dataset...")
 data = np.load(dataset_path)
 print("Dataset shape:", data.shape)
 
-# Normalize (if not already normalized)
-# In your case it's already 0 and 1 for input.
 
 # Load model
 print("Loading model...")
@@ -43,4 +41,4 @@ def plot_comparisons(originals, reconstructions, n=10):
     plt.tight_layout()
     plt.savefig("results/current/reconstruction")
 
-plot_comparisons(data, reconstructions, n=20)
+plot_comparisons(data, reconstructions, n=10)

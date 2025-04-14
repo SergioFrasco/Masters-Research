@@ -58,7 +58,7 @@ class SimpleEnv(MiniGridEnv):
         # self.grid.set(5, 6, Door(COLOR_NAMES[0], is_locked=True))
         # self.grid.set(3, 6, Key(COLOR_NAMES[0]))
 
-        numGoals = random.randint(1,6)
+        numGoals = random.randint(1,4)
         goalPositions = set() # To avoid duplicate positions
 
         for _ in range (numGoals):
