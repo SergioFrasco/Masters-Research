@@ -181,7 +181,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold = 0.15):
+def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold = 0.125):
     """
     Training loop for SuccessorAgent in MiniGrid environment
     
@@ -316,7 +316,7 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
                 history = ae_model.fit(
                     input_grid,       # Input: current environment grid 
                     target,           # Target: agent's true_reward_map
-                    epochs=1,         # Just one training step
+                    epochs=10,         # Just one training step
                     batch_size=1,     # Single sample
                     verbose=0         # Suppress output for cleaner logs
                 )
