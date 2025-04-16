@@ -316,7 +316,7 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
                 history = ae_model.fit(
                     input_grid,       # Input: current environment grid 
                     target,           # Target: agent's true_reward_map
-                    epochs=10,         # Just one training step
+                    epochs=1,         # Just one training step
                     batch_size=1,     # Single sample
                     verbose=0         # Suppress output for cleaner logs
                 )
