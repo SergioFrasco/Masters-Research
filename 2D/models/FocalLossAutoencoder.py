@@ -18,25 +18,32 @@ def load_trained_autoencoder(model_path="models/autoencoder_model.h5"):
 
 # Main autoencoder creation
 def build_autoencoder(input_shape):
+    # Create a custom initializer with small standard deviation
+    initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=1e-3)
+    
     # Encoder
     inputs = layers.Input(shape=input_shape)
-    
     # Calculate padding to ensure output size matches input size
-    x = layers.ZeroPadding2D(padding=((1, 1), (1, 1)))(inputs)  # Add padding
-    x = layers.Conv2D(32, (3, 3), activation='relu', padding='same')(x)
+    x = layers.ZeroPadding2D(padding=((1, 1), (1, 1)))(inputs) # Add padding
+    x = layers.Conv2D(32, (3, 3), activation='relu', padding='same', 
+                     kernel_initializer=initializer)(x)
     x = layers.MaxPooling2D((2, 2), padding='same')(x)
-    x = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+    x = layers.Conv2D(64, (3, 3), activation='relu', padding='same', 
+                     kernel_initializer=initializer)(x)
     x = layers.MaxPooling2D((2, 2), padding='same')(x)
     
     # Decoder
-    x = layers.Conv2DTranspose(64, (3, 3), activation='relu', padding='same')(x)
+    x = layers.Conv2DTranspose(64, (3, 3), activation='relu', padding='same', 
+                              kernel_initializer=initializer)(x)
     x = layers.UpSampling2D((2, 2))(x)
-    x = layers.Conv2DTranspose(32, (3, 3), activation='relu', padding='same')(x)
+    x = layers.Conv2DTranspose(32, (3, 3), activation='relu', padding='same', 
+                              kernel_initializer=initializer)(x)
     x = layers.UpSampling2D((2, 2))(x)
     
     # Add a cropping layer to get back to the original dimensions
     x = layers.Cropping2D(cropping=((1, 1), (1, 1)))(x)
-    outputs = layers.Conv2D(1, (3, 3), activation='sigmoid', padding='same')(x)
+    outputs = layers.Conv2D(1, (3, 3), activation='sigmoid', padding='same', 
+                           kernel_initializer=initializer)(x)
     
     autoencoder = models.Model(inputs, outputs)
     
