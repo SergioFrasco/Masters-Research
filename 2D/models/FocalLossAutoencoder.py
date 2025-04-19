@@ -18,45 +18,71 @@ def load_trained_autoencoder(model_path="models/autoencoder_model.h5"):
 
 # Main autoencoder creation
 def build_autoencoder(input_shape):
-    # Create a custom initializer with small standard deviation
-    initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=1e-3)
+
+    '''
+    Encoder:
+
+        Conv2D: 32 filters, (3,3), stride 1
+
+        Conv2D: 64 filters, (3,3), stride 1
+
+        Conv2D: 64 filters, (2,2), stride 1 ← New extra layer
+
+    Decoder:
+
+        Conv2DTranspose: 64 filters, (2,2), stride 1 ← Mirror of new layer
+
+        Conv2DTranspose: 64 filters, (3,3), stride 1
+
+        Conv2DTranspose: 32 filters, (3,3), stride 1
+
+        Final Conv2DTranspose to reconstruct output shape
+    '''
     
-    # Look to get rid of padding, maxpooling and upsampling, zeropadding
-    # add conv 64(2,2) layer, and opposite on decode
 
     # Encoder
     inputs = layers.Input(shape=input_shape)
-    # Calculate padding to ensure output size matches input size
-    x = layers.ZeroPadding2D(padding=((1, 1), (1, 1)))(inputs) # Add padding
-    x = layers.Conv2D(32, (3, 3), activation='relu', padding='same', 
-                     kernel_initializer=initializer)(x)
-    x = layers.MaxPooling2D((2, 2), padding='same')(x)
-    x = layers.Conv2D(64, (3, 3), activation='relu', padding='same', 
-                     kernel_initializer=initializer)(x)
-    x = layers.MaxPooling2D((2, 2), padding='same')(x)
-    
-    # Decoder
-    x = layers.Conv2DTranspose(64, (3, 3), activation='relu', padding='same', 
-                              kernel_initializer=initializer)(x)
-    x = layers.UpSampling2D((2, 2))(x)
-    x = layers.Conv2DTranspose(32, (3, 3), activation='relu', padding='same', 
-                              kernel_initializer=initializer)(x)
-    x = layers.UpSampling2D((2, 2))(x)
-    
-    # Add a cropping layer to get back to the original dimensions
-    x = layers.Cropping2D(cropping=((1, 1), (1, 1)))(x)
+    x = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same')(inputs)
+    x = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same')(x)
+    x = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same')(x)  # <-- Added new layer
 
-    # Look at why this is conv2d, remove
-    # Try dropping the sigmoid
-    outputs = layers.Conv2D(1, (3, 3), activation='sigmoid', padding='same', 
-                           kernel_initializer=initializer)(x)
+    # Decoder (mirror of encoder)
+    x = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same')(x)  # <-- Match new layer
+    x = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same')(x)
+    x = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same')(x)
+
+    # Output layer — match input channels (no sigmoid)
+    outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same')(x)
     
+    # initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=1e-3)
+    
+
+    # # Encoder
+    # inputs = layers.Input(shape=input_shape)
+    # x = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same',
+    #                   kernel_initializer=initializer)(inputs)
+    # x = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same',
+    #                   kernel_initializer=initializer)(x)
+    # x = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same',
+    #                   kernel_initializer=initializer)(x)  # <-- Added new layer
+
+    # # Decoder (mirror of encoder)
+    # x = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same',
+    #                            kernel_initializer=initializer)(x)  # <-- Match new layer
+    # x = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same',
+    #                            kernel_initializer=initializer)(x)
+    # x = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same',
+    #                            kernel_initializer=initializer)(x)
+
+    # # Output layer — match input channels (no sigmoid)
+    # outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same',
+    #                                  kernel_initializer=initializer)(x)
+
     autoencoder = models.Model(inputs, outputs)
-    
-    # Print the input and output shapes to verify they match
+
     print(f"Input shape: {inputs.shape}")
     print(f"Output shape: {outputs.shape}")
-    
+
     return autoencoder
 
 def focal_mse_loss(y_true, y_pred, gamma=2.0):

@@ -181,7 +181,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=3000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold = 0.1):
+def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold = 0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment
     
@@ -201,9 +201,6 @@ def train_successor_agent(agent, env, episodes=3000, ae_model=None, max_steps=20
         obs = env.reset()
         total_reward = 0
         step_count = 0
-
-        # For every new episode, the agent should have no understanding of what the reward space looks like
-        # agent.true_reward_map = np.zeros((env.grid_size, env.grid_size))
 
         # For every new episode, the agent should understand as much of the reward space as it's vision can predict
         # I dont think changing this actually makes a difference as it's only updated once per episode and not used elsewhere
@@ -248,6 +245,7 @@ def train_successor_agent(agent, env, episodes=3000, ae_model=None, max_steps=20
             # Update The agents true_reward_map
 
             agent_position = tuple(env.agent_pos) 
+            # print("Agent Position: ", agent_position)
             
             # If the agent achieved a reward, drop a 1 on the current point of it's true reward map. Otherwise drop a 0.
             if done:
@@ -259,34 +257,58 @@ def train_successor_agent(agent, env, episodes=3000, ae_model=None, max_steps=20
             # Convert the environment grid to the same format used during training
             # Check the shapes of all of these matrices
             grid = env.grid.encode()
-            normalized_grid = np.zeros_like(grid, dtype=np.float32)
-            normalized_grid[grid == 2] = 0.0   # Walls
-            normalized_grid[grid == 1] = 0.0   # Open space
-            normalized_grid[grid == 8] = 1.0   # Rewards
+            normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
-            # Extract the first channel and reshape for the autoencoder
-            input_grid = normalized_grid[..., 0]
-            input_grid = np.expand_dims(input_grid, axis=0)  # Add batch dimension (1, height, width)
-            input_grid = np.expand_dims(input_grid, axis=-1)  # Add channel dimension (1, height, width, 1)
+            # Object types are in grid[..., 0]
+            object_layer = grid[..., 0]
+
+            normalized_grid[object_layer == 2] = 0.0   # Wall
+            normalized_grid[object_layer == 1] = 0.0   # Open space
+            normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
+
+            # Rotate the grid so it matches render_mode = human 
+            normalized_grid = np.flipud(normalized_grid)
+            normalized_grid = np.rot90(normalized_grid, k=-1) 
+
+            # print("Normalised Grid  \n", normalized_grid)
+
+            #reshape for the autoencoder
+            input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
 
             # Get the predicted reward map from the AE
             predicted_reward_map = ae_model.predict(input_grid)
+            # Remove the extra dimensions to get a 2D array like normalized_grid
+            predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
+
+            # print("Predicted Reward Map \n", predicted_reward_map_2d)
             
-            trigger_ae_training = False
+            
             # Update the rest of the true_reward_map with AE predictions
             for y in range(agent.true_reward_map.shape[0]):
                 for x in range(agent.true_reward_map.shape[1]):
                     if (x, y) != agent_position:  # Skip the reward position
                         # Get the predicted value for this position from the AE
-                        predicted_value = predicted_reward_map[0, y, x, 0]
+                        predicted_value = predicted_reward_map_2d[y, x]
                         agent.true_reward_map[y, x] = predicted_value
-                    else:
-                        # -------For the AE training threshold calculation------
-                        # If the predicted value is threshold different from the true_reward_map: trigger vision model training
-                        if abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
-                            vision_prediction_error = abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]])
-                            trigger_ae_training = True
 
+                    # else:
+                    #     print
+                    #     # -------For the AE training threshold calculation------
+                    #     # If the predicted value is threshold different from the true_reward_map: trigger vision model training
+                    #     if abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
+                    #         vision_prediction_error = abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]])
+                    #         print("Threshold met: ", vision_prediction_error)
+                    #         trigger_ae_training = True
+
+            trigger_ae_training = False
+            print("predicted_reward_map:" ,predicted_reward_map_2d[agent_position[1], agent_position[0]])
+            print("true reward map: ", agent.true_reward_map[agent_position[1], agent_position[0]])
+            print("difference: ", abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]))
+            if abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
+                print("AE Training")
+                trigger_ae_training = True
+                
+            # print("True Reward Map \n", agent.true_reward_map)
             # Checking true_reward_map formulation
 
             # Visualize the agents true reward map for this episode
@@ -297,6 +319,7 @@ def train_successor_agent(agent, env, episodes=3000, ae_model=None, max_steps=20
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
             if trigger_ae_training:
+                
                 # print("Vision Model Training Triggered with difference:", vision_prediction_error)
     
                 # Prepare input for training (same format as prediction input)
