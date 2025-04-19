@@ -22,6 +22,7 @@ class SuccessorAgent:
         # Initialize the true map to track discovered reward locations and predictions
         # Initially filled with zeros, shape: (grid_size, grid_size)
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
+        self.true_reward_map_explored = np.zeros((self.grid_size, self.grid_size), dtype=bool)
         
     def get_state_index(self, obs):
         """Convert MiniGrid observation to state index"""

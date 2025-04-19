@@ -85,6 +85,24 @@ def build_autoencoder(input_shape):
 
     return autoencoder
 
+def weighted_focal_mse_loss(y_true, y_pred, gamma=2.0, reward_weight=10.0):
+    """
+    Weighted focal MSE loss that emphasizes reward pixels (1s).
+    """
+    # Compute standard MSE
+    mse_loss = tf.square(y_true - y_pred)
+    
+    # Add higher weight to reward pixels (1s)
+    pixel_weights = 1.0 + (reward_weight - 1.0) * y_true
+    
+    # Compute the focal weighting term
+    focal_weight = tf.pow(1.0 - tf.exp(-mse_loss), gamma)
+    
+    # Apply both weightings to the MSE loss
+    weighted_focal_loss = pixel_weights * focal_weight * mse_loss
+    
+    return tf.reduce_mean(weighted_focal_loss)
+
 def focal_mse_loss(y_true, y_pred, gamma=2.0):
     """
     Focal MSE loss function for autoencoders.
