@@ -255,7 +255,9 @@ def train_successor_agent(agent, env, episodes=3000, ae_model=None, max_steps=20
             else:
                 agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
+            # Look to use .newaxis
             # Convert the environment grid to the same format used during training
+            # Check the shapes of all of these matrices
             grid = env.grid.encode()
             normalized_grid = np.zeros_like(grid, dtype=np.float32)
             normalized_grid[grid == 2] = 0.0   # Walls

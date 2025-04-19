@@ -21,6 +21,9 @@ def build_autoencoder(input_shape):
     # Create a custom initializer with small standard deviation
     initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=1e-3)
     
+    # Look to get rid of padding, maxpooling and upsampling, zeropadding
+    # add conv 64(2,2) layer, and opposite on decode
+
     # Encoder
     inputs = layers.Input(shape=input_shape)
     # Calculate padding to ensure output size matches input size
@@ -42,6 +45,9 @@ def build_autoencoder(input_shape):
     
     # Add a cropping layer to get back to the original dimensions
     x = layers.Cropping2D(cropping=((1, 1), (1, 1)))(x)
+
+    # Look at why this is conv2d, remove
+    # Try dropping the sigmoid
     outputs = layers.Conv2D(1, (3, 3), activation='sigmoid', padding='same', 
                            kernel_initializer=initializer)(x)
     
