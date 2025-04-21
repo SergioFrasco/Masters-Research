@@ -198,8 +198,9 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
         step_count = 0
 
         # For every new episode, reset the reward map
-        if episode == 0:  # Only initialize once at the beginning
-            agent.true_reward_map = np.zeros((env.size, env.size))
+        # if episode == 0:  # Only initialize once at the beginning
+        agent.true_reward_map = np.zeros((env.size, env.size))
+        agent.true_reward_map_explored = np.zeros((env.size, env.size))
         
         # Store first experience
         current_state_idx = agent.get_state_index(obs)
@@ -235,15 +236,11 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
             # ------------------Train the vision model----------------
             # Update the agent's true_reward_map based on current observation
             agent_position = tuple(env.agent_pos)
-            
-            # Mark this position as explored
-            agent.true_reward_map_explored[agent_position[1], agent_position[0]] = True
-            
-            # Update the true reward at the agent's current position
-            if done:
-                agent.true_reward_map[agent_position[1], agent_position[0]] = 1.0
-            else:
-                agent.true_reward_map[agent_position[1], agent_position[0]] = 0.0
+
+            # Transform coordinates to match the normalized grid transformation
+            # If normalized_grid uses a flipped and rotated coordinate system:
+            transformed_y = env.size - 1 - agent_position[1]  # Flip Y
+            transformed_x = agent_position[0]  # Keep X as is (adjust as needed)
             
             # Get the current environment grid
             grid = env.grid.encode()
@@ -256,8 +253,8 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
             normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
             
             # Rotate the grid to match render_mode = human 
-            normalized_grid = np.flipud(normalized_grid)
-            normalized_grid = np.rot90(normalized_grid, k=-1)
+            # normalized_grid = np.flipud(normalized_grid)
+            # normalized_grid = np.rot90(normalized_grid, k=-1)
             
             # Reshape for the autoencoder (add batch and channel dims)
             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
@@ -310,7 +307,11 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
                 break
                 
         # Generate visualizations occasionally
-        if episode % 50 == 0:
+        if episode % 1 == 0:
+
+            print("Actual: \n", normalized_grid)
+            print("Agents Guess: \n", agent.true_reward_map)
+            # print("Input Grid: \n", input_grid)
             # Create visualization of current state
             fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
             
