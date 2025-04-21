@@ -52,7 +52,10 @@ def build_autoencoder(input_shape):
     x = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same')(x)
 
     # Output layer — match input channels (no sigmoid)
-    outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same')(x)
+    # outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same')(x)
+
+    # AE Training wasnt being triggered enough without sigmoid
+    outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation='sigmoid', padding='same')(x)
     
     # initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=1e-3)
     

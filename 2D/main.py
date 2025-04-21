@@ -244,8 +244,9 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
             
             # Get the current environment grid
             grid = env.grid.encode()
-            normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)
-            
+            normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
+
+            # Setting up input for the AE to obtain it's prediction of the space
             # Object types are in grid[..., 0]
             object_layer = grid[..., 0]
             normalized_grid[object_layer == 2] = 0.0   # Wall
@@ -263,45 +264,74 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=100
             predicted_reward_map = ae_model.predict(input_grid, verbose=0)
             predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
             
-            # Calculate the prediction error for positions the agent has visited
-            if np.any(agent.true_reward_map_explored):
-                prediction_errors = []
-                for y, x in zip(*np.where(agent.true_reward_map_explored)):
-                    pred = predicted_reward_map_2d[y, x]
-                    true = agent.true_reward_map[y, x]
-                    prediction_errors.append(abs(pred - true))
+            # Update the rest of the true_reward_map with AE predictions
+            for y in range(agent.true_reward_map.shape[0]):
+                for x in range(agent.true_reward_map.shape[1]):
+                    if (x, y) != agent_position:  # Skip the reward position
+                        # Get the predicted value for this position from the AE
+                        predicted_value = predicted_reward_map_2d[y, x]
+                        agent.true_reward_map[y, x] = predicted_value
+
+                    # else:
+                    #     print
+                    #     # -------For the AE training threshold calculation------
+                    #     # If the predicted value is threshold different from the true_reward_map: trigger vision model training
+                    #     if abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
+                    #         vision_prediction_error = abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]])
+                    #         print("Threshold met: ", vision_prediction_error)
+                    #         trigger_ae_training = True
+
+            trigger_ae_training = False
+            print("predicted_reward_map:" ,predicted_reward_map_2d[agent_position[1], agent_position[0]])
+            print("true reward map: ", agent.true_reward_map[agent_position[1], agent_position[0]])
+            print("difference: ", abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]))
+            if abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
+                print("AE Training Triggered")
+                trigger_ae_training = True
                 
-                mean_error = np.mean(prediction_errors)
-                max_error = np.max(prediction_errors)
-                
-                # Decide whether to train based on error statistics
-                trigger_ae_training = max_error > train_vision_threshold
-                
-                if trigger_ae_training:
-                    if episode % 50 == 0:  # Reduce verbosity
-                        print(f"AE Training triggered - Mean error: {mean_error:.4f}, Max error: {max_error:.4f}")
-                    
-                    # Prepare target for training (agent's true reward map)
-                    target = np.expand_dims(agent.true_reward_map, axis=0)  # Add batch dimension
-                    target = np.expand_dims(target, axis=-1)  # Add channel dimension
-                    
-                    # Create a training mask based on explored positions
-                    mask = np.expand_dims(agent.true_reward_map_explored, axis=0)
-                    mask = np.expand_dims(mask, axis=-1)
-                    
-                    # Custom training step with weighted loss based on exploration mask
-                    with tf.GradientTape() as tape:
-                        predictions = ae_model(input_grid, training=True)
-                        # Apply exploration mask to focus training on visited positions
-                        masked_y_true = target * mask
-                        masked_y_pred = predictions * mask
-                        # Use weighted loss function to emphasize reward pixels
-                        loss_value = weighted_focal_mse_loss(masked_y_true, masked_y_pred)
-                    
-                    # Get gradients and apply them
-                    grads = tape.gradient(loss_value, ae_model.trainable_weights)
-                    ae_model.optimizer.apply_gradients(zip(grads, ae_model.trainable_weights))
+            # print("True Reward Map \n", agent.true_reward_map)
+            # Checking true_reward_map formulation
+
+            # Visualize the agents true reward map for this episode
+            # print("True Reward Map:")
+            # for row in agent.true_reward_map:
+            #     print(" ".join(f"{val:.2f}" for val in row))
             
+            # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
+            # is between this input image and the agents true_reward_map.
+            if trigger_ae_training:
+                
+                # print("Vision Model Training Triggered with difference:", vision_prediction_error)
+    
+                # Prepare input for training (same format as prediction input)
+                # input_grid is already prepared above
+
+                # Silence AE training in terminal, so we can see RL agent training progress instead
+                os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logging
+                # Alternatively, for older TF versions:
+                tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+                # Make sure prediction is silent too
+                old_stdout = sys.stdout  # Save current stdout
+                sys.stdout = open(os.devnull, 'w')  # Redirect stdout to null
+
+                # Prepare target output (agent's true reward map)
+                target = np.expand_dims(agent.true_reward_map, axis=0)  # Add batch dimension
+                target = np.expand_dims(target, axis=-1)  # Add channel dimension
+                
+                # Train the model for a single step
+                history = ae_model.fit(
+                    input_grid,       # Input: current environment grid 
+                    target,           # Target: agent's true_reward_map
+                    epochs=1,         # Just one training step
+                    batch_size=1,     # Single sample
+                    verbose=0         # Suppress output for cleaner logs
+                )
+                
+                # Track training loss
+                step_loss = history.history['loss'][0]
+                # print(f"Vision model training loss: {step_loss:.4f}")
+            
+
             # Reward found, next episode
             if done:
                 break
