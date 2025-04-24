@@ -39,47 +39,47 @@ def build_autoencoder(input_shape):
         Final Conv2DTranspose to reconstruct output shape
     '''
     
-
+    # New Model
     # Encoder
-    inputs = layers.Input(shape=input_shape)
-    x = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same')(inputs)
-    x = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same')(x)
-    x = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same')(x)  # <-- Added new layer
-
-    # Decoder (mirror of encoder)
-    x = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same')(x)  # <-- Match new layer
-    x = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same')(x)
-    x = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same')(x)
-
-    # Output layer — match input channels (no sigmoid)
-    # outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same')(x)
-
-    # AE Training wasnt being triggered enough without sigmoid
-    outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation='sigmoid', padding='same')(x)
-    
-    # initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=1e-3)
-    
-
-    # # Encoder
     # inputs = layers.Input(shape=input_shape)
-    # x = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same',
-    #                   kernel_initializer=initializer)(inputs)
-    # x = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same',
-    #                   kernel_initializer=initializer)(x)
-    # x = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same',
-    #                   kernel_initializer=initializer)(x)  # <-- Added new layer
+    # x = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same')(inputs)
+    # x = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same')(x)
+    # x = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same')(x)  # <-- Added new layer
 
     # # Decoder (mirror of encoder)
-    # x = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same',
-    #                            kernel_initializer=initializer)(x)  # <-- Match new layer
-    # x = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same',
-    #                            kernel_initializer=initializer)(x)
-    # x = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same',
-    #                            kernel_initializer=initializer)(x)
+    # x = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same')(x)  # <-- Match new layer
+    # x = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same')(x)
+    # x = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same')(x)
 
     # # Output layer — match input channels (no sigmoid)
-    # outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same',
-    #                                  kernel_initializer=initializer)(x)
+    # # outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same')(x)
+
+    # # AE Training wasnt being triggered enough without sigmoid
+    # outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation='sigmoid', padding='same')(x)
+    
+
+    # Old Model
+    initializer = tf.keras.initializers.RandomNormal(mean=0.0, stddev=1e-3)
+    # Encoder
+    inputs = layers.Input(shape=input_shape)
+    x = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same',
+                      kernel_initializer=initializer)(inputs)
+    x = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same',
+                      kernel_initializer=initializer)(x)
+    x = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same',
+                      kernel_initializer=initializer)(x)  # <-- Added new layer
+
+    # Decoder (mirror of encoder)
+    x = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same',
+                               kernel_initializer=initializer)(x)  # <-- Match new layer
+    x = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same',
+                               kernel_initializer=initializer)(x)
+    x = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same',
+                               kernel_initializer=initializer)(x)
+
+    # Output layer — match input channels (no sigmoid)
+    outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same',
+                                     kernel_initializer=initializer)(x)
 
     autoencoder = models.Model(inputs, outputs)
 
