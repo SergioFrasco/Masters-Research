@@ -1,45 +1,63 @@
 import cv2
 import os
+import numpy as np
+from glob import glob
 
-image_folder = '../results/current/24_04_2025_2'
-output_video = '../results/current/old_vision_model.mp4'  # Save as MP4 now
+def create_video_from_images(image_folder, output_video_path, fps=30, sort_numerically=True):
+    """
+    Create a video from a folder of images.
+    
+    Parameters:
+    - image_folder: Path to the folder containing PNG images
+    - output_video_path: Path where the output video will be saved
+    - fps: Frames per second for the output video
+    - sort_numerically: If True, sorts filenames numerically (e.g., img1.png, img2.png, img10.png)
+                        If False, sorts alphabetically (e.g., img1.png, img10.png, img2.png)
+    """
+    # Get all PNG images in the folder
+    image_files = glob(os.path.join(image_folder, "*.png"))
+    
+    if not image_files:
+        print(f"No PNG images found in {image_folder}")
+        return
+        
+    # Sort the images
+    if sort_numerically:
+        # Extract numbers from filenames and sort based on those numbers
+        image_files.sort(key=lambda x: int(''.join(filter(str.isdigit, os.path.basename(x))) or '0'))
+    else:
+        # Regular alphabetical sort
+        image_files.sort()
+    
+    # Read the first image to get dimensions
+    first_image = cv2.imread(image_files[0])
+    height, width, layers = first_image.shape
+    
+    # Define the codec and create VideoWriter object
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # You can also use 'XVID' for .avi
+    video = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+    
+    # Counter for progress tracking
+    total_images = len(image_files)
+    print(f"Creating video from {total_images} images...")
+    
+    # Add each image to the video
+    for i, image_file in enumerate(image_files):
+        img = cv2.imread(image_file)
+        video.write(img)
+        
+        # Print progress
+        if (i + 1) % 10 == 0 or i + 1 == total_images:
+            print(f"Processed {i + 1}/{total_images} images")
+    
+    # Release the video writer
+    video.release()
+    print(f"Video saved to {output_video_path}")
 
-# Get image files
-images = [img for img in os.listdir(image_folder) if img.endswith(('.png', '.jpg', '.jpeg'))]
-images.sort()
-
-if not images:
-    raise ValueError("No images found.")
-
-# Read first image for dimensions
-first_image_path = os.path.join(image_folder, images[0])
-frame = cv2.imread(first_image_path)
-if frame is None:
-    raise ValueError(f"Couldn't read first image: {first_image_path}")
-
-height, width, layers = frame.shape
-
-# MP4 with 'mp4v' codec
-fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-fps = 24
-video = cv2.VideoWriter(output_video, fourcc, fps, (width, height))
-
-# Write frames
-written_frames = 0
-for image in images:
-    image_path = os.path.join(image_folder, image)
-    frame = cv2.imread(image_path)
-    if frame is None:
-        print(f"Warning: Couldn't read {image_path}, skipping.")
-        continue
-    if frame.shape[:2] != (height, width):
-        frame = cv2.resize(frame, (width, height))
-    video.write(frame)
-    written_frames += 1
-
-video.release()
-
-if written_frames == 0:
-    print("❌ No valid frames were written. Check image paths and formats.")
-else:
-    print(f"✅ Video saved successfully with {written_frames} frames: {output_video}")
+# Example usage
+if __name__ == "__main__":
+    # Replace these with your own paths
+    image_folder = "../results/current/24_04_2025_1"
+    output_video = "../results/new_model_video.mp4"
+    
+    create_video_from_images(image_folder, output_video, fps=30)
