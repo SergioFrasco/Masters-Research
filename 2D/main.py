@@ -181,9 +181,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250, epsilon_start=1.0, 
-       
-              epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=200):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration
     """
@@ -301,6 +299,7 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
                 step_loss = history.history['loss'][0]
                 # print(f"Vision model training loss: {step_loss:.4f}")
 
+                # TODO:
                 # Update the agents WVF with the SR and predicted true reward map
                 # Decompose the reward map into individual rewards
                 # dot product the SR with these reward Maps
@@ -317,7 +316,7 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
         episode_rewards.append(total_reward)
 
          # Generate visualizations occasionally
-        if episode % 1 == 0:
+        if episode % 250 == 0:
 
             # print("Actual: \n", normalized_grid)
             # print("Agents Guess: \n", agent.true_reward_map)
@@ -367,6 +366,10 @@ def main():
 
     # Train the agent
     rewards = train_successor_agent(agent, env, ae_model = ae_model) 
+    averaged_M = np.mean(agent.M, axis=0)
+    plt.imsave('results/averaged_M.png', averaged_M, cmap='hot')
+    # np.save('models/successor_representation.npy', averaged_M)
+
 
 if __name__ == "__main__":
     main()
