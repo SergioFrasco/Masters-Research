@@ -234,16 +234,11 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
             current_exp = next_exp
             current_action = next_action
             
-            # ------------------Train the vision model----------------
+            # ------------------Vision model----------------
             # Update the agent's true_reward_map based on current observation
             agent_position = tuple(env.agent_pos)
             # print(agent_position)
 
-            # Transform coordinates to match the normalized grid transformation
-            # If normalized_grid uses a flipped and rotated coordinate system:
-            # transformed_y = env.size - 1 - agent_position[1]  # Flip Y
-            # transformed_x = agent_position[0]  # Keep X as is (adjust as needed)
-            
             # Get the current environment grid
             grid = env.grid.encode()
             normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
@@ -265,8 +260,6 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
             # Get the predicted reward map from the AE
             predicted_reward_map = ae_model.predict(input_grid, verbose=0)
             predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
-
-            # print (predicted_reward_map_2d)
             
             # Update the rest of the true_reward_map with AE predictions
             for y in range(agent.true_reward_map.shape[0]):
@@ -283,62 +276,17 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
                 agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
 
-            # print(agent.true_reward_map)
-                    # else:
-                    #     print
-                    #     # -------For the AE training threshold calculation------
-                    #     # If the predicted value is threshold different from the true_reward_map: trigger vision model training
-                    #     if abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
-                    #         vision_prediction_error = abs(predicted_reward_map[0, y, x, 0] - agent.true_reward_map[agent_position[1], agent_position[0]])
-                    #         print("Threshold met: ", vision_prediction_error)
-                    #         trigger_ae_training = True
-
             trigger_ae_training = False
-            # print("predicted_reward_map:" ,predicted_reward_map_2d[agent_position[1], agent_position[0]])
-            # print("true reward map: ", agent.true_reward_map[agent_position[1], agent_position[0]])
-            # print("difference: ", abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]))
-            # print(agent_position)
-            # print(predicted_reward_map_2d)
-            # print(predicted_reward_map_2d[agent_position[1], agent_position[0]])
-            # print(agent.true_reward_map)
-            # print(agent.true_reward_map[agent_position[1], agent_position[0]])
-            # print("Predicted map: \n", predicted_reward_map_2d)
-            # print("Agent map: \n", agent.true_reward_map)
-            # print( abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]))
+
             if abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
                 trigger_ae_training = True
                 
-            # print("True Reward Map \n", agent.true_reward_map)
-            # Checking true_reward_map formulation
-
-            # Visualize the agents true reward map for this episode
-            # print("True Reward Map:")
-            # for row in agent.true_reward_map:
-            #     print(" ".join(f"{val:.2f}" for val in row))
             
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
             if trigger_ae_training:
-                # print("AE Training Triggered")
-                
-                # print("Vision Model Training Triggered with difference:", vision_prediction_error)
-    
-                # Prepare input for training (same format as prediction input)
-                # # input_grid is already prepared above
-
-                # # Silence AE training in terminal, so we can see RL agent training progress instead
-                # os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TF logging
-                # # Alternatively, for older TF versions:
-                # tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-                # # Make sure prediction is silent too
-                # old_stdout = sys.stdout  # Save current stdout
-                # sys.stdout = open(os.devnull, 'w')  # Redirect stdout to null
-
-                # Prepare target output (agent's true reward map)
-                # target = np.expand_dims(agent.true_reward_map, axis=0)  # Add batch dimension
-                # target = np.expand_dims(target, axis=-1)  # Add channel dimension
                 target = agent.true_reward_map[np.newaxis, ..., np.newaxis]
-                # print(target)
+            
                 
                 # Train the model for a single step
                 history = ae_model.fit(
@@ -352,54 +300,21 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
                 # Track training loss
                 step_loss = history.history['loss'][0]
                 # print(f"Vision model training loss: {step_loss:.4f}")
-            
 
+                # Update the agents WVF with the SR and predicted true reward map
+                # Decompose the reward map into individual rewards
+                # dot product the SR with these reward Maps
+                # Store the reultant WVF in an agent attribute
+                 
             # Reward found, next episode
             if done:
                 break
                 
-        # # Generate visualizations occasionally
-        # if episode % 50 == 0:
-
-        #     # print("Actual: \n", normalized_grid)
-        #     # print("Agents Guess: \n", agent.true_reward_map)
-        #     # print("Input Grid: \n", input_grid)
-        #     # Create visualization of current state
-        #     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-            
-        #     # Original grid (environment)
-        #     ax1.imshow(normalized_grid, cmap='gray')
-        #     ax1.set_title("Environment Grid")
-            
-        #     # Agent's true reward map
-        #     ax2.imshow(agent.true_reward_map, cmap='viridis')
-        #     # Overlay dots on positions the agent has actually visited
-        #     visited_y, visited_x = np.where(agent.true_reward_map_explored)
-        #     ax2.scatter(visited_x, visited_y, color='red', s=5)
-        #     ax2.set_title("Agent's Reward Map (red=visited)")
-            
-        #     # AE prediction
-        #     ax3.imshow(predicted_reward_map_2d, cmap='viridis')
-        #     ax3.set_title("AE Prediction")
-            
-        #     plt.tight_layout()
-        #     plt.savefig(f'results/episode_{episode}.png')
-        #     plt.close()
-
         # Decay epsilon
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
         
         # Store episode statistics
         episode_rewards.append(total_reward)
-        
-        # # Print progress occasionally
-        # if (episode + 1) % 50 == 0:
-        #     avg_reward = np.mean(episode_rewards[-50:])
-        #     print(f"Episode {episode + 1}/{episodes}")
-        #     print(f"Average Reward: {avg_reward:.2f}")
-        #     print(f"Epsilon: {epsilon:.3f}")
-        #     print(f"Steps: {step_count}")
-        #     print("------------------------")
 
          # Generate visualizations occasionally
         if episode % 1 == 0:
@@ -438,54 +353,6 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
 
 
 def main():
-    # Collecting sample images from the environment
-    # collect_data()
-    # print("Finished Collecting Sample Environments")
-    
-    # --------------------- Vision Based Reward Model ------------------------
-  
-    # dataset = np.load("datasets/grid_dataset.npy")
-    # print("Loading Data Set")
-
-    # autoencoder = load_trained_autoencoder()
-    # print("Loading Vision Model")
-
-    # autoencoder.compile(optimizer="adam", loss=focal_mse_loss)
-    # reconstructed = autoencoder.predict(dataset)
-    # print("Completed Running Vision Model On Dataset")
-
-    # # Visualize the original and reconstructed grids (first sample)
-    # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-
-    # # Original grid
-    # ax1.imshow(dataset[0, ..., 0], cmap='gray')
-    # ax1.set_title("Original Grid")
-    # overlay_values_on_grid(dataset[0, ..., 0], ax1)
-
-    # # Reconstructed grid
-    # ax2.imshow(reconstructed[0, ..., 0], cmap='gray')
-    # ax2.set_title("Reconstructed Grid")
-    # overlay_values_on_grid(reconstructed[0, ..., 0], ax2)
-    # plt.tight_layout()
-    # plt.savefig('results/comparison.png')
-
-    # Retrieve the specific SR for the Given environment
-
-    # Build the SR map for the given Environment 
-    # construct_sr()
-
-    # Now we have both the vision model and the transition dynamics. lets use them together to build WVF's
-
-    # Test and visualize World Value Function
-    # world_value_function, wvf_grid = test_world_value_function()
-    
-    # # Create environment for trajectory visualization
-    # env = SimpleEnv(size=10)
-    # visualize_agent_trajectory(env, wvf_grid)
-
-    # --------- Where i got up to before the meeting ------------
-    # Now we look to train the autoencoder as the agent moves through the environment
-
     # Setup the environment
     # env = SimpleEnv(size=10, render_mode = "human")
     env = SimpleEnv(size=10)
