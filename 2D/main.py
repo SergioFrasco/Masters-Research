@@ -4,12 +4,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import absl.logging
 import tensorflow as tf
+import math
 
 from minigrid.core.world_object import Goal, Wall
 from tqdm import tqdm
 from env import SimpleEnv, data_collector
 from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder, weighted_focal_mse_loss
-from utils.plotting import overlay_values_on_grid, visualize_sr
+from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
@@ -181,7 +182,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=200):
+def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration
     """
@@ -283,6 +284,7 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
             if trigger_ae_training:
+                # print("AE Training Triggered")
                 target = agent.true_reward_map[np.newaxis, ..., np.newaxis]
             
                 
@@ -298,12 +300,25 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
                 # Track training loss
                 step_loss = history.history['loss'][0]
                 # print(f"Vision model training loss: {step_loss:.4f}")
+            
+            # Update per-state reward maps from true_reward_map
+            agent.reward_maps.fill(0)  # Reset all maps to zero
 
-                # TODO:
-                # Update the agents WVF with the SR and predicted true reward map
-                # Decompose the reward map into individual rewards
-                # dot product the SR with these reward Maps
-                # Store the reultant WVF in an agent attribute
+            for y in range(agent.grid_size):
+                for x in range(agent.grid_size):
+                    reward = agent.true_reward_map[y, x]
+                    # print(reward)
+                    idx = y * agent.grid_size + x
+                    agent.reward_maps[idx, y, x] = reward
+
+
+            
+
+            # TODO:
+            # Update the agents WVF with the SR and predicted true reward map
+            # Decompose the reward map into individual rewards
+            # dot product the SR with these reward Maps
+            # Store the reultant WVF in an agent attribute
                  
             # Reward found, next episode
             if done:
@@ -316,7 +331,8 @@ def train_successor_agent(agent, env, episodes=250, ae_model=None, max_steps=250
         episode_rewards.append(total_reward)
 
          # Generate visualizations occasionally
-        if episode % 250 == 0:
+        if episode % 50 == 0:
+            save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
 
             # print("Actual: \n", normalized_grid)
             # print("Agents Guess: \n", agent.true_reward_map)
@@ -373,3 +389,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

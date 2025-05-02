@@ -23,6 +23,12 @@ class SuccessorAgent:
         # Initially filled with zeros, shape: (grid_size, grid_size)
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
         self.true_reward_map_explored = np.zeros((self.grid_size, self.grid_size), dtype=bool)
+
+        # Individual Reward maps that are composed with the SR
+        # Initialize individual reward maps: one per state
+        self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
+
+
         
     def get_state_index(self, obs):
         """Convert MiniGrid observation to state index"""
