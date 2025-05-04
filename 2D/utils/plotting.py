@@ -89,3 +89,26 @@ def save_all_reward_maps(agent, maps_per_row=10, save_path="results/reward_maps.
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
+
+# def save_all_wvf(agent, maps_per_row=10, save_path="results/reward_maps.png", world_value_functions):
+#     num_maps = agent.state_size
+#     grid_size = agent.grid_size
+#     num_rows = math.ceil(num_maps / maps_per_row)
+    
+#     fig, axes = plt.subplots(num_rows, maps_per_row, figsize=(maps_per_row * 2, num_rows * 2))
+#     axes = axes.flatten()
+    
+#     for idx in range(num_maps):
+#         ax = axes[idx]
+#         ax.imshow(world_value_functions[idx], cmap='viridis', vmin=0, vmax=1)
+#         # ax.imshow(agent.reward_maps[idx], cmap='viridis')
+#         ax.set_title(f"State {idx}", fontsize=8)
+#         ax.axis('off')
+    
+#     # Hide any unused subplots
+#     for idx in range(num_maps, len(axes)):
+#         axes[idx].axis('off')
+
+#     plt.tight_layout()
+#     plt.savefig(save_path)
+#     plt.close()

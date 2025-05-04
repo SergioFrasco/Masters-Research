@@ -1,4 +1,6 @@
 import numpy as np
+
+from utils.matrices import onehot
 from minigrid.core.world_object import Goal
 from gym import spaces
 
@@ -28,6 +30,8 @@ class SuccessorAgent:
         # Initialize individual reward maps: one per state
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
 
+        # World Value Function - Mappings of values to each state goal pair
+        self.world_value_functions = np.tensordot(self.M, self.reward_maps, axes=([1], [0]))
 
         
     def get_state_index(self, obs):
@@ -99,3 +103,12 @@ class SuccessorAgent:
         agent_pos = self.env.agent_pos
         cell = self.env.grid.get(*agent_pos)
         return isinstance(cell, Goal)
+
+    # def compute_wvf(self):
+    #     wvf = np.zeros((self.state_size, self.state_size)) 
+    #     for goal in range(self.state_size):
+    #         goal_reward = onehot(goal, self.state_size)
+
+    #         # This is the combination between the RS (M) and the rewards if they were in every state to create the WVF
+    #         wvf[:, goal] = np.max(np.matmul(self.M, goal_reward), axis=0)
+    #     return wvf

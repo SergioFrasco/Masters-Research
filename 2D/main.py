@@ -301,6 +301,10 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
                 step_loss = history.history['loss'][0]
                 # print(f"Vision model training loss: {step_loss:.4f}")
             
+            # TODO:
+            # Update the agents WVF with the SR and predicted true reward map
+
+            # Decompose the reward map into individual reward maps for each goal
             # Update per-state reward maps from true_reward_map
             agent.reward_maps.fill(0)  # Reset all maps to zero
 
@@ -310,15 +314,10 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
                     # print(reward)
                     idx = y * agent.grid_size + x
                     agent.reward_maps[idx, y, x] = reward
-
-
             
-
-            # TODO:
-            # Update the agents WVF with the SR and predicted true reward map
-            # Decompose the reward map into individual rewards
             # dot product the SR with these reward Maps
-            # Store the reultant WVF in an agent attribute
+            # Store the resultant WVF in an agent attribute
+            # Done within the successor agent class
                  
             # Reward found, next episode
             if done:
