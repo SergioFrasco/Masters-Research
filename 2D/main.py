@@ -1,10 +1,12 @@
 import os
 import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import matplotlib.pyplot as plt
 import absl.logging
 import tensorflow as tf
 import math
+
 
 from minigrid.core.world_object import Goal, Wall
 from tqdm import tqdm
@@ -182,7 +184,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=151, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=501, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration
     """
