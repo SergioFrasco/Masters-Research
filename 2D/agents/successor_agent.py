@@ -32,6 +32,7 @@ class SuccessorAgent:
 
         # World Value Function - Mappings of values to each state goal pair
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
+        # self.wvf = np.zeros((self.state_size, self.state_size)) 
 
         
     def get_state_index(self, obs):

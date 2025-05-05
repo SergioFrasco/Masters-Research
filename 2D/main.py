@@ -182,7 +182,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=151, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration
     """
@@ -197,10 +197,10 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
         total_reward = 0
         step_count = 0
 
-        # For every new episode, reset the reward map
-        # if episode == 0:  # Only initialize once at the beginning
+        # For every new episode, reset the reward map, and WVF, the SR stays consistent with the environment i.e doesn't reset
         agent.true_reward_map = np.zeros((env.size, env.size))
         agent.true_reward_map_explored = np.zeros((env.size, env.size))
+        agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
         
         # Store first experience
         current_state_idx = agent.get_state_index(obs)
@@ -311,17 +311,18 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
             for y in range(agent.grid_size):
                 for x in range(agent.grid_size):
                     reward = agent.true_reward_map[y, x]
-                    # print(reward)
-                    idx = y * agent.grid_size + x
-                    agent.reward_maps[idx, y, x] = reward
+                    # Only track if we are sure its a reward
+                    if reward > 0.75:
+                        idx = y * agent.grid_size + x
+                        agent.reward_maps[idx, y, x] = reward
+                    else:
+                        idx = y * agent.grid_size + x
+                        agent.reward_maps[idx, y, x] = 0
+
             
             # dot product the SR with these reward Maps
-            
-            averaged_M = np.mean(agent.M, axis=0)
-            
-
             # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
-            M_flat = np.mean(averaged_M, axis=0)  # shape: (100, 100)
+            M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100)
 
             # 2. Reward maps: reward at every position from perspective of each state
             # reward_maps[idx] = 10x10 reward layout for state idx
@@ -332,6 +333,7 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
 
             # 4. Reshape to match environment layout
             agent.wvf = value_flat.reshape(100, 10, 10)
+
 
             # Reward found, next episode
             if done:
@@ -347,7 +349,8 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
         if episode % 50 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
-            plt.imsave(f'results/averaged_M_{episode}', averaged_M, cmap='hot')
+            averaged_M = np.mean(agent.M, axis=0)
+            plt.imsave(f'results/averaged_M_{episode}.png', averaged_M, cmap='hot')
 
             # print("Actual: \n", normalized_grid)
             # print("Agents Guess: \n", agent.true_reward_map)

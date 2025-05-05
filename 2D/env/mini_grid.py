@@ -16,12 +16,19 @@ class SimpleEnv(MiniGridEnv):
     def __init__(
         self,
         size=10,
-        agent_start_pos=(1, 8),
+        agent_start_pos=None,
         agent_start_dir=0,
         max_steps: int | None = None,
         **kwargs,
     ):
         self.size = size
+
+        # Randomize agent position if not provided
+        if agent_start_pos is None:
+            x = random.randint(1, size - 2)
+            y = random.randint(1, size - 2)
+            agent_start_pos = (x, y)
+
         self.agent_start_pos = agent_start_pos
         self.agent_start_dir = agent_start_dir
 
