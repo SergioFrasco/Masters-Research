@@ -322,17 +322,40 @@ def train_successor_agent(agent, env, episodes=151, ae_model=None, max_steps=100
             
             # dot product the SR with these reward Maps
             # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
-            M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100)
+            M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100), average accross actions
 
-            # 2. Reward maps: reward at every position from perspective of each state
-            # reward_maps[idx] = 10x10 reward layout for state idx
-            reward_maps_flat = agent.reward_maps.reshape(100, 100)  # flatten spatial maps
+            # Attempt 1
+            # # 2. Reward maps: reward at every position from perspective of each state
+            # # reward_maps[idx] = 10x10 reward layout for state idx
+            # reward_maps_flat = agent.reward_maps.reshape(100, 100)  # flatten spatial maps
 
-            # 3. Dot product: expected value at each state, from each other state
-            value_flat = np.matmul(M_flat, reward_maps_flat)  # shape: (100, 100)
+            # # 3. Dot product: expected value at each state, from each other state
+            # value_flat = np.matmul(M_flat, reward_maps_flat)  # shape: (100, 100)
 
-            # 4. Reshape to match environment layout
-            agent.wvf = value_flat.reshape(100, 10, 10)
+            # # 4. Reshape to match environment layout
+            # agent.wvf = value_flat.reshape(100, 10, 10)
+            
+            # Attempt 2
+            # Result: wvf: (state_size, grid_size, grid_size)
+            # Output shape: (action_size, state_size, grid_size, grid_size)
+            # agent.wvf = agent.wvf.mean(axis=0) 
+            # # agent.wvf = np.einsum('ij,jkl->ikl', agent.M, agent.reward_maps)
+            # agent.wvf = np.einsum('aij,jkl->aikl', agent.M, agent.reward_maps)
+
+            # Attempt 3
+            # Compute the value function for each reward map
+            # Compute the value function for each reward map
+            for i in range(agent.state_size):  # Loop through reward maps
+                R = agent.reward_maps[i, :, :]  # (10, 10) reward map
+                R_flat = R.flatten()  # (100,) vector
+
+                # Dot product with SR to get value function over all states
+                V = np.dot(M_flat, R_flat)  # V is shape (100,)
+                
+                # Reshape to (10, 10) and store
+                agent.wvf[i] = V.reshape(agent.grid_size, agent.grid_size)
+
+
 
 
             # Reward found, next episode
