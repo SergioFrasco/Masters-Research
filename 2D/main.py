@@ -10,7 +10,7 @@ from minigrid.core.world_object import Goal, Wall
 from tqdm import tqdm
 from env import SimpleEnv, data_collector
 from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder, weighted_focal_mse_loss
-from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps
+from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
@@ -316,9 +316,23 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
                     agent.reward_maps[idx, y, x] = reward
             
             # dot product the SR with these reward Maps
-            # Store the resultant WVF in an agent attribute
-            # Done within the successor agent class
-                 
+            
+            averaged_M = np.mean(agent.M, axis=0)
+            
+
+            # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
+            M_flat = np.mean(averaged_M, axis=0)  # shape: (100, 100)
+
+            # 2. Reward maps: reward at every position from perspective of each state
+            # reward_maps[idx] = 10x10 reward layout for state idx
+            reward_maps_flat = agent.reward_maps.reshape(100, 100)  # flatten spatial maps
+
+            # 3. Dot product: expected value at each state, from each other state
+            value_flat = np.matmul(M_flat, reward_maps_flat)  # shape: (100, 100)
+
+            # 4. Reshape to match environment layout
+            agent.wvf = value_flat.reshape(100, 10, 10)
+
             # Reward found, next episode
             if done:
                 break
@@ -332,6 +346,8 @@ def train_successor_agent(agent, env, episodes=150, ae_model=None, max_steps=100
          # Generate visualizations occasionally
         if episode % 50 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
+            save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
+            plt.imsave(f'results/averaged_M_{episode}', averaged_M, cmap='hot')
 
             # print("Actual: \n", normalized_grid)
             # print("Agents Guess: \n", agent.true_reward_map)

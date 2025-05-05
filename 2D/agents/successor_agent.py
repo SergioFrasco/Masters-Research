@@ -31,7 +31,7 @@ class SuccessorAgent:
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
 
         # World Value Function - Mappings of values to each state goal pair
-        self.world_value_functions = np.tensordot(self.M, self.reward_maps, axes=([1], [0]))
+        self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
 
         
     def get_state_index(self, obs):
