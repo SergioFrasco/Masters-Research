@@ -184,7 +184,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=501, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration
     """
@@ -219,8 +219,51 @@ def train_successor_agent(agent, env, episodes=501, ae_model=None, max_steps=150
             current_exp[3] = reward          # reward
             current_exp[4] = done            # done flag
             
-            # Get next action
+
+            # Here we need to sample from WVF.
+            # 1. Build the WVF for this moment in time
+            # 2. Maximize over the WVF to grab all Maps that contain goals
+            # 3. Choose a Random one of these Maps
+            # 4. Sample and Action from this map with decaying epsilon probability
+
+            reward_threshold = 0.75
+            # Check if each 10x10 map contains any value > threshold
+            mask = (agent.wvf > reward_threshold).any(axis=(1, 2))  # shape: (100,)
+            # Use mask to select maps
+            max_wvfs = agent.wvf[mask]  # shape: (N, 10, 10) where N <= 100
+            
+            # Get next action, for the first step just use a random action as the WVF is only setup after the first step, thereafter use WVF
+            # if step == 0 or len(max_wvfs) == 0:
+                # print("First Normal Action Taken")
             next_action = agent.sample_action(obs, epsilon=epsilon)
+                
+            # else:
+            #     print("WVF Action Taken")
+            #     random_map_index = np.random.randint(0, len(max_wvfs))
+            #     chosen_map = max_wvfs[random_map_index]
+            #     next_action = agent.sample_wvf_action(obs, epsilon = epsilon, chosen_map = chosen_map)
+
+
+                # # Compute a suitable grid size (square-ish)
+                # cols = int(np.ceil(np.sqrt(len(max_wvfs))))
+                        
+                # rows = int(np.ceil(len(max_wvfs) / cols))
+
+                # fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
+
+                # # Flatten in case axs is a 2D array when rows, cols > 1
+                # axs = axs.flat if isinstance(axs, np.ndarray) else [axs]
+
+                # for i in range(len(axs)):
+                #     ax = axs[i]
+                #     if i < len(max_wvfs):
+                #         im = ax.imshow(max_wvfs[i], cmap='viridis', vmin=0, vmax=1)
+                #         ax.set_title(f'Map {i}')
+                #     ax.axis('off')
+
+                # plt.tight_layout()
+                # plt.savefig(f"results/max_wvfs_{episode}")
+
             
             # Create next experience tuple
             next_exp = [next_state_idx, next_action, None, None, None]
@@ -303,7 +346,6 @@ def train_successor_agent(agent, env, episodes=501, ae_model=None, max_steps=150
                 step_loss = history.history['loss'][0]
                 # print(f"Vision model training loss: {step_loss:.4f}")
             
-            # TODO:
             # Update the agents WVF with the SR and predicted true reward map
 
             # Decompose the reward map into individual reward maps for each goal
@@ -325,24 +367,6 @@ def train_successor_agent(agent, env, episodes=501, ae_model=None, max_steps=150
             # dot product the SR with these reward Maps
             # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
             M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100), average accross actions
-
-            # Attempt 1
-            # # 2. Reward maps: reward at every position from perspective of each state
-            # # reward_maps[idx] = 10x10 reward layout for state idx
-            # reward_maps_flat = agent.reward_maps.reshape(100, 100)  # flatten spatial maps
-
-            # # 3. Dot product: expected value at each state, from each other state
-            # value_flat = np.matmul(M_flat, reward_maps_flat)  # shape: (100, 100)
-
-            # # 4. Reshape to match environment layout
-            # agent.wvf = value_flat.reshape(100, 10, 10)
-            
-            # Attempt 2
-            # Result: wvf: (state_size, grid_size, grid_size)
-            # Output shape: (action_size, state_size, grid_size, grid_size)
-            # agent.wvf = agent.wvf.mean(axis=0) 
-            # # agent.wvf = np.einsum('ij,jkl->ikl', agent.M, agent.reward_maps)
-            # agent.wvf = np.einsum('aij,jkl->aikl', agent.M, agent.reward_maps)
 
             # Attempt 3
             # Compute the value function for each reward map
@@ -371,7 +395,7 @@ def train_successor_agent(agent, env, episodes=501, ae_model=None, max_steps=150
         episode_rewards.append(total_reward)
 
          # Generate visualizations occasionally
-        if episode % 50 == 0:
+        if episode % 10 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)

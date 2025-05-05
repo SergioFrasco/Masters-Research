@@ -59,6 +59,51 @@ class SuccessorAgent:
             action = np.argmax(Qs)
         return action
     
+    def sample_wvf_action(self, obs, goal=None, epsilon=0.0, chosen_map = None):
+        """Sample action that leads to the highest-value next state from chosen WVF map"""
+        # state_idx = self.get_state_index(obs)
+        state = self.get_state_index(obs)  # e.g., (x, y)
+
+        if np.random.uniform(0, 1) < epsilon:
+            return np.random.randint(self.action_size)
+
+        best_value = -np.inf
+        best_action = 0
+
+        for action in range(self.action_size):
+            next_state = self.predict_next_state(state, action)
+            
+            # Bounds check to avoid invalid indices
+            if (0 <= next_state[0] < chosen_map.shape[0]) and (0 <= next_state[1] < chosen_map.shape[1]):
+                value = chosen_map[next_state[0], next_state[1]]
+                if value > best_value:
+                    best_value = value
+                    best_action = action
+
+        print("Action Seleced: ", best_action)
+        return best_action
+
+    def predict_next_state(self, state, action):
+        """Given a state (x, y) and action, return predicted next state"""
+        x, y = state
+        next_state = (x, y)
+
+        if action == 0:      # UP
+            next_state = (x, y - 1)
+        elif action == 1:    # DOWN
+            next_state = (x, y + 1)
+        elif action == 2:    # LEFT
+            next_state = (x - 1, y)
+        elif action == 3:    # RIGHT
+            next_state = (x + 1, y)
+
+        # Clamp to map bounds (optional)
+        next_x = max(0, min(next_state[0], 9))
+        next_y = max(0, min(next_state[1], 9))
+
+        return (next_x, next_y)
+
+    
     def update(self, current_exp, next_exp=None):
         """Update both reward weights and successor features"""
         error_w = self.update_w(current_exp)

@@ -112,3 +112,4 @@ def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
+
