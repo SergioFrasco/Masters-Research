@@ -184,7 +184,7 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
-def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration
     """
@@ -225,7 +225,7 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=200
             # 1. Build the WVF for this moment in time
             # 2. Maximize over the WVF to grab all Maps that contain goals
             # 3. Choose a Random one of these Maps
-            # 4. Sample and Action from this map with decaying epsilon probability
+            # 4. Sample an Action from this map with decaying epsilon probability
 
             # Reset max_wvfs maps to zero
             max_wvfs = np.empty((0, agent.grid_size, agent.grid_size), dtype=np.float32)
@@ -248,28 +248,30 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=200
 
                 random_map_index = np.random.randint(0, len(max_wvfs))
                 chosen_map = max_wvfs[random_map_index]
-                next_action = agent.sample_wvf_action(obs, epsilon = epsilon, chosen_reward_map = chosen_map)
+                next_action = agent.sample_action_with_wvf(obs, epsilon = epsilon, chosen_reward_map = chosen_map)
 
-
+                # Printing the array of maps
                 # Compute a suitable grid size (square-ish)
-                cols = int(np.ceil(np.sqrt(len(max_wvfs))))
+                # cols = int(np.ceil(np.sqrt(len(max_wvfs))))
                         
-                rows = int(np.ceil(len(max_wvfs) / cols))
+                # rows = int(np.ceil(len(max_wvfs) / cols))
 
-                fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
+                # fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
 
-                # Flatten in case axs is a 2D array when rows, cols > 1
-                axs = axs.flat if isinstance(axs, np.ndarray) else [axs]
+                # # Flatten in case axs is a 2D array when rows, cols > 1
+                # axs = axs.flat if isinstance(axs, np.ndarray) else [axs]
 
-                for i in range(len(axs)):
-                    ax = axs[i]
-                    if i < len(max_wvfs):
-                        im = ax.imshow(max_wvfs[i], cmap='viridis', vmin=0, vmax=1)
-                        ax.set_title(f'Map {i}')
-                    ax.axis('off')
+                # for i in range(len(axs)):
+                #     ax = axs[i]
+                #     if i < len(max_wvfs):
+                #         im = ax.imshow(max_wvfs[i], cmap='viridis', vmin=0, vmax=1)
+                #         ax.set_title(f'Map {i}')
+                #     ax.axis('off')
 
-                plt.tight_layout()
-                plt.savefig(f"results/max_wvfs_{episode}")
+                # plt.tight_layout()
+                # plt.savefig(f"results/max_wvfs_{episode}")
+                plt.close('all')  # to close all open figures
+
 
             
             # Create next experience tuple
@@ -402,7 +404,7 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=200
         episode_rewards.append(total_reward)
 
          # Generate visualizations occasionally
-        if episode % 10 == 0:
+        if episode % 250 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)
