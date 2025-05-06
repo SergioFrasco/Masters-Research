@@ -58,50 +58,91 @@ class SuccessorAgent:
             Qs = self.Q_estimates(state_idx, goal)
             action = np.argmax(Qs)
         return action
-    
-    def sample_wvf_action(self, obs, goal=None, epsilon=0.0, chosen_map = None):
-        """Sample action that leads to the highest-value next state from chosen WVF map"""
-        # state_idx = self.get_state_index(obs)
-        state = self.get_state_index(obs)  # e.g., (x, y)
 
+    def value_estimates_with_wvf(self, state_idx, reward_map):
+        """
+        Generate values for all actions given a reward map.
+        
+        Parameters:
+        state_idx: index (or indices) corresponding to the current state.
+        reward_map: a 2D reward map, e.g. shape (grid_size, grid_size)
+                    which must be flattened to match the state representation.
+        
+        Returns:
+        Q-values for each action: shape (action_size,)
+        """
+        # Flatten the reward map to create a reward vector compatible with SR
+        goal_vector = reward_map.flatten()  # shape: (state_size,)
+        
+        # Compute Q-values as the dot product of the SR for each action and the goal vector.
+        # self.M has shape (action_size, state_size, state_size),
+        # and indexing with state_idx gives a slice of shape (action_size, state_size).
+        Qs = np.matmul(self.M[:, state_idx, :], goal_vector)
+        return Qs
+
+    def sample_action_with_wvf(self, obs, chosen_reward_map, epsilon=0.0):
+        """
+        Sample an action using epsilon-greedy selection where the values are computed
+        using the successor representation and a given reward map.
+        
+        Parameters:
+        obs: observation from which to determine the current state.
+        chosen_reward_map: a 2D reward map (grid_size x grid_size) to be used as the goal.
+        epsilon: probability of choosing a random action.
+        
+        Returns:
+        The selected action (an integer).
+        """
+        # Convert observation into a state index (or coordinate) used by SR.
+        state_idx = self.get_state_index(obs)
+        
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
+        else:
+            # Compute Q-values using the chosen reward map.
+            values = self.value_estimates_with_wvf(state_idx, chosen_reward_map)
+            action = np.argmax(values)
+            return action
 
-        best_value = -np.inf
-        best_action = 0
+    
+    # def sample_wvf_action(self, obs, chosen_map, epsilon=0.0):
+    #     """Sample action leading to the highest-value neighboring state in chosen WVF"""
+    #     state = self.get_state_index(obs)  # (x, y)
 
-        for action in range(self.action_size):
-            next_state = self.predict_next_state(state, action)
-            
-            # Bounds check to avoid invalid indices
-            if (0 <= next_state[0] < chosen_map.shape[0]) and (0 <= next_state[1] < chosen_map.shape[1]):
-                value = chosen_map[next_state[0], next_state[1]]
-                if value > best_value:
-                    best_value = value
-                    best_action = action
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         return np.random.randint(self.action_size)
 
-        print("Action Seleced: ", best_action)
-        return best_action
+    #     best_value = -np.inf
+    #     best_action = None
 
-    def predict_next_state(self, state, action):
-        """Given a state (x, y) and action, return predicted next state"""
-        x, y = state
-        next_state = (x, y)
+    #     for action in range(self.action_size):
+    #         next_state = self.predict_next_state(state, action)
 
-        if action == 0:      # UP
-            next_state = (x, y - 1)
-        elif action == 1:    # DOWN
-            next_state = (x, y + 1)
-        elif action == 2:    # LEFT
-            next_state = (x - 1, y)
-        elif action == 3:    # RIGHT
-            next_state = (x + 1, y)
+    #         if (0 <= next_state[0] < chosen_map.shape[0]) and (0 <= next_state[1] < chosen_map.shape[1]):
+    #             value = chosen_map[next_state[0], next_state[1]]
+    #             if value > best_value:
+    #                 best_value = value
+    #                 best_action = action
 
-        # Clamp to map bounds (optional)
-        next_x = max(0, min(next_state[0], 9))
-        next_y = max(0, min(next_state[1], 9))
+    #     if best_action is None:
+    #         return np.random.randint(self.action_size)
 
-        return (next_x, next_y)
+    #     return best_action
+
+    # def predict_next_state(self, state, action):
+    #     """Given a state (x, y) and action, return predicted next state"""
+    #     x, y = state
+    #     if action == 0:      # UP
+    #         return (x, y - 1)
+    #     elif action == 1:    # DOWN
+    #         return (x, y + 1)
+    #     elif action == 2:    # LEFT
+    #         return (x - 1, y)
+    #     elif action == 3:    # RIGHT
+    #         return (x + 1, y)
+    #     else:
+    #         return (x, y)  # No-op or invalid action
+
 
     
     def update(self, current_exp, next_exp=None):

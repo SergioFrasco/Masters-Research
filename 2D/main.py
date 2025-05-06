@@ -191,6 +191,7 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=200
     episode_rewards = []
     epsilon = epsilon_start
     
+    print_flag = True
     # Initialize explored positions mask
     agent.true_reward_map_explored = np.zeros((env.size, env.size), dtype=bool)
     
@@ -226,43 +227,49 @@ def train_successor_agent(agent, env, episodes=500, ae_model=None, max_steps=200
             # 3. Choose a Random one of these Maps
             # 4. Sample and Action from this map with decaying epsilon probability
 
-            reward_threshold = 0.75
+            # Reset max_wvfs maps to zero
+            max_wvfs = np.empty((0, agent.grid_size, agent.grid_size), dtype=np.float32)
+            reward_threshold = 0.5
             # Check if each 10x10 map contains any value > threshold
             mask = (agent.wvf > reward_threshold).any(axis=(1, 2))  # shape: (100,)
             # Use mask to select maps
             max_wvfs = agent.wvf[mask]  # shape: (N, 10, 10) where N <= 100
             
             # Get next action, for the first step just use a random action as the WVF is only setup after the first step, thereafter use WVF
-            # if step == 0 or len(max_wvfs) == 0:
-                # print("First Normal Action Taken")
-            next_action = agent.sample_action(obs, epsilon=epsilon)
+            if step == 0 or len(max_wvfs) == 0:
+                # print("Normal Action Taken")
+                next_action = agent.sample_action(obs, epsilon=epsilon)
                 
-            # else:
-            #     print("WVF Action Taken")
-            #     random_map_index = np.random.randint(0, len(max_wvfs))
-            #     chosen_map = max_wvfs[random_map_index]
-            #     next_action = agent.sample_wvf_action(obs, epsilon = epsilon, chosen_map = chosen_map)
+            else:
+                
+                if print_flag:
+                    print("First WVF Action Taken")
+                    print_flag = False
+
+                random_map_index = np.random.randint(0, len(max_wvfs))
+                chosen_map = max_wvfs[random_map_index]
+                next_action = agent.sample_wvf_action(obs, epsilon = epsilon, chosen_reward_map = chosen_map)
 
 
-                # # Compute a suitable grid size (square-ish)
-                # cols = int(np.ceil(np.sqrt(len(max_wvfs))))
+                # Compute a suitable grid size (square-ish)
+                cols = int(np.ceil(np.sqrt(len(max_wvfs))))
                         
-                # rows = int(np.ceil(len(max_wvfs) / cols))
+                rows = int(np.ceil(len(max_wvfs) / cols))
 
-                # fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
+                fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
 
-                # # Flatten in case axs is a 2D array when rows, cols > 1
-                # axs = axs.flat if isinstance(axs, np.ndarray) else [axs]
+                # Flatten in case axs is a 2D array when rows, cols > 1
+                axs = axs.flat if isinstance(axs, np.ndarray) else [axs]
 
-                # for i in range(len(axs)):
-                #     ax = axs[i]
-                #     if i < len(max_wvfs):
-                #         im = ax.imshow(max_wvfs[i], cmap='viridis', vmin=0, vmax=1)
-                #         ax.set_title(f'Map {i}')
-                #     ax.axis('off')
+                for i in range(len(axs)):
+                    ax = axs[i]
+                    if i < len(max_wvfs):
+                        im = ax.imshow(max_wvfs[i], cmap='viridis', vmin=0, vmax=1)
+                        ax.set_title(f'Map {i}')
+                    ax.axis('off')
 
-                # plt.tight_layout()
-                # plt.savefig(f"results/max_wvfs_{episode}")
+                plt.tight_layout()
+                plt.savefig(f"results/max_wvfs_{episode}")
 
             
             # Create next experience tuple
