@@ -113,6 +113,47 @@ def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
     plt.savefig(save_path)
     plt.close()
 
+def save_max_wvf_maps(max_wvfs, episode):
+     # Compute a suitable grid size (square-ish)
+    cols = int(np.ceil(np.sqrt(len(max_wvfs))))
+            
+    rows = int(np.ceil(len(max_wvfs) / cols))
+
+    fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
+
+    # Flatten in case axs is a 2D array when rows, cols > 1
+    axs = axs.flat if isinstance(axs, np.ndarray) else [axs]
+
+    for i in range(len(axs)):
+        ax = axs[i]
+        if i < len(max_wvfs):
+            im = ax.imshow(max_wvfs[i], cmap='viridis', vmin=0, vmax=1)
+            ax.set_title(f'Map {i}')
+        ax.axis('off')
+
+    plt.tight_layout()
+    plt.savefig(f"results/max_wvfs_{episode}")
+
+def save_env_map_pred(agent, normalized_grid, predicted_reward_map_2d, episode):
+    # Create visualization of current state
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+    
+    # Original grid (environment)
+    ax1.imshow(normalized_grid, cmap='gray')
+    ax1.set_title("Environment Grid")
+    
+    # Agent's true reward map
+    ax2.imshow(agent.true_reward_map, cmap='viridis')
+    ax2.set_title("Agent's Reward Map (red=visited)")
+    
+    # AE prediction
+    ax3.imshow(predicted_reward_map_2d, cmap='viridis')
+    ax3.set_title("AE Prediction")
+    
+    plt.tight_layout()
+    plt.savefig(f'results/episode_{episode}.png')
+    plt.close()
+
 
 # This broke when moved, had to comment out the line containing the word Goal
 def visualize_agent_trajectory(env, wvf_grid, n_steps=100):

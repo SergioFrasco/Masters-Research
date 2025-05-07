@@ -12,7 +12,7 @@ from minigrid.core.world_object import Goal, Wall
 from tqdm import tqdm
 from env import SimpleEnv, data_collector
 from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder, weighted_focal_mse_loss
-from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf
+from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
@@ -32,14 +32,12 @@ sys.path.append(".")
 
 def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
-    Training loop for SuccessorAgent in MiniGrid environment with vision model integration
+    Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
     episode_rewards = []
     epsilon = epsilon_start
-    
+
     print_flag = True
-    # Initialize explored positions mask
-    agent.true_reward_map_explored = np.zeros((env.size, env.size), dtype=bool)
     
     for episode in tqdm(range(episodes), "Training Successor Agent"):
         obs = env.reset()
@@ -48,7 +46,6 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
 
         # For every new episode, reset the reward map, and WVF, the SR stays consistent with the environment i.e doesn't reset
         agent.true_reward_map = np.zeros((env.size, env.size))
-        agent.true_reward_map_explored = np.zeros((env.size, env.size))
         agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
         
         # Store first experience
@@ -80,44 +77,29 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
             # Use mask to select maps
             max_wvfs = agent.wvf[mask]  # shape: (N, 10, 10) where N <= 100
             
-            # Get next action, for the first step just use a random action as the WVF is only setup after the first step, thereafter use WVF
+            # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
+            # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
             if step == 0 or len(max_wvfs) == 0:
                 # print("Normal Action Taken")
                 next_action = agent.sample_action(obs, epsilon=epsilon)
-                
+            
+            # Sample an action from the WVF
             else:
                 if print_flag:
+                    # Typically this triggers around episode 20
                     print("First WVF Action Taken")
                     print_flag = False
-
+                
+                # Choose the map at random, should this be random? or just go toward the max one all the time?
+                # We'll have to check average return to see it's performance
                 random_map_index = np.random.randint(0, len(max_wvfs))
                 chosen_map = max_wvfs[random_map_index]
                 next_action = agent.sample_action_with_wvf(obs, epsilon = epsilon, chosen_reward_map = chosen_map)
-
+                
+                # save_max_wvf_maps(max_wvfs, episode = episode)
                 # Printing the array of maps
-                # Compute a suitable grid size (square-ish)
-                # cols = int(np.ceil(np.sqrt(len(max_wvfs))))
-                        
-                # rows = int(np.ceil(len(max_wvfs) / cols))
+                plt.close('all')  # to close all open figures and save memory
 
-                # fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
-
-                # # Flatten in case axs is a 2D array when rows, cols > 1
-                # axs = axs.flat if isinstance(axs, np.ndarray) else [axs]
-
-                # for i in range(len(axs)):
-                #     ax = axs[i]
-                #     if i < len(max_wvfs):
-                #         im = ax.imshow(max_wvfs[i], cmap='viridis', vmin=0, vmax=1)
-                #         ax.set_title(f'Map {i}')
-                #     ax.axis('off')
-
-                # plt.tight_layout()
-                # plt.savefig(f"results/max_wvfs_{episode}")
-                plt.close('all')  # to close all open figures
-
-
-            
             # Create next experience tuple
             next_exp = [next_state_idx, next_action, None, None, None]
             
@@ -143,7 +125,7 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
             # Setting up input for the AE to obtain it's prediction of the space
             # Object types are in grid[..., 0]
             object_layer = grid[..., 0]
-            normalized_grid[object_layer == 2] = 0.0   # Wall - should this be a 0?? or a number, this is for input
+            normalized_grid[object_layer == 2] = 0.0   # Wall 
             normalized_grid[object_layer == 1] = 0.0   # Open space
             normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
             
@@ -168,13 +150,11 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
 
             if done:
                 agent.true_reward_map[agent_position[1], agent_position[0]] = 1
-                # print(agent.true_reward_map)
             else:
                 agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
 
             trigger_ae_training = False
-
             if abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
                 trigger_ae_training = True
                 
@@ -184,8 +164,7 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
             if trigger_ae_training:
                 # print("AE Training Triggered")
                 target = agent.true_reward_map[np.newaxis, ..., np.newaxis]
-            
-                
+
                 # Train the model for a single step
                 history = ae_model.fit(
                     input_grid,       # Input: current environment grid 
@@ -209,7 +188,7 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
                 for x in range(agent.grid_size):
                     reward = agent.true_reward_map[y, x]
                     # Only track if we are sure its a reward
-                    if reward > 0.75:
+                    if reward > reward_threshold:
                         idx = y * agent.grid_size + x
                         agent.reward_maps[idx, y, x] = reward
                     else:
@@ -221,8 +200,6 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
             # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
             M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100), average accross actions
 
-            # Attempt 3
-            # Compute the value function for each reward map
             # Compute the value function for each reward map
             for i in range(agent.state_size):  # Loop through reward maps
                 R = agent.reward_maps[i, :, :]  # (10, 10) reward map
@@ -233,9 +210,6 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
                 
                 # Reshape to (10, 10) and store
                 agent.wvf[i] = V.reshape(agent.grid_size, agent.grid_size)
-
-
-
 
             # Reward found, next episode
             if done:
@@ -253,38 +227,11 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)
             plt.imsave(f'results/averaged_M_{episode}.png', averaged_M, cmap='hot')
-
-            # print("Actual: \n", normalized_grid)
-            # print("Agents Guess: \n", agent.true_reward_map)
-            # print("Input Grid: \n", input_grid)
-            # Create visualization of current state
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-            
-            # Original grid (environment)
-            ax1.imshow(normalized_grid, cmap='gray')
-            ax1.set_title("Environment Grid")
-            
-            # Agent's true reward map
-            ax2.imshow(agent.true_reward_map, cmap='viridis')
-            # Overlay dots on positions the agent has actually visited
-            # visited_y, visited_x = np.where(agent.true_reward_map_explored)
-            # ax2.scatter(visited_x, visited_y, color='red', s=5)
-            ax2.set_title("Agent's Reward Map (red=visited)")
-            
-            # AE prediction
-            ax3.imshow(predicted_reward_map_2d, cmap='viridis')
-            ax3.set_title("AE Prediction")
-            
-            plt.tight_layout()
-            plt.savefig(f'results/episode_{episode}.png')
-            plt.close()
-
-
-    
+            save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode)
+        
     ae_model.save('results/current/vision_model.h5')
     print("Training Complete, Vision Model Saved!")
     return episode_rewards
-
 
 
 def main():
