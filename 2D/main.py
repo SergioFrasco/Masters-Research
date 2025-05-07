@@ -30,7 +30,7 @@ absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
     
 
-def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -222,7 +222,7 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
         episode_rewards.append(total_reward)
 
          # Generate visualizations occasionally
-        if episode % 250 == 0:
+        if episode % 100 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)
@@ -249,9 +249,22 @@ def main():
 
     # Train the agent
     rewards = train_successor_agent(agent, env, ae_model = ae_model) 
-    averaged_M = np.mean(agent.M, axis=0)
-    plt.imsave('results/averaged_M.png', averaged_M, cmap='hot')
+    # averaged_M = np.mean(agent.M, axis=0)
+    # plt.imsave('results/averaged_M.png', averaged_M, cmap='hot')
     # np.save('models/successor_representation.npy', averaged_M)
+
+        # Plot rewards over episodes
+    plt.figure(figsize=(10, 4))
+    plt.plot(rewards, label='Episode Reward')
+    plt.xlabel('Episode')
+    plt.ylabel('Total Reward')
+    plt.title('Reward per Episode')
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("results/rewards_over_episodes.png")
+    plt.show()
+
 
 
 if __name__ == "__main__":
