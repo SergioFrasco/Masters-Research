@@ -113,3 +113,58 @@ def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
     plt.savefig(save_path)
     plt.close()
 
+
+# This broke when moved, had to comment out the line containing the word Goal
+def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
+    """Visualize an agent following the World Value Function"""
+    obs, _ = env.reset()
+    trajectory = [env.agent_pos]
+    
+    for _ in range(n_steps):
+        # Get current position
+        x, y = env.agent_pos
+        
+        # Get neighboring positions
+        neighbors = [
+            (x-1, y), (x+1, y),  # Left, Right
+            (x, y-1), (x, y+1)   # Up, Down
+        ]
+        
+        # Filter valid positions and get their values
+        valid_neighbors = []
+        neighbor_values = []
+        
+        for nx, ny in neighbors:
+            if 0 <= nx < env.size and 0 <= ny < env.size:
+                valid_neighbors.append((nx, ny))
+                neighbor_values.append(wvf_grid[ny, nx])
+        
+        # Choose direction with highest value
+        if valid_neighbors:
+            best_idx = np.argmax(neighbor_values)
+            next_pos = valid_neighbors[best_idx]
+            
+            # Move agent (simplified)
+            env.agent_pos = next_pos
+            trajectory.append(next_pos)
+        
+        # Check if goal reached
+        # if isinstance(env.grid.get(*env.agent_pos), Goal):
+            break
+    
+    # Visualize trajectory
+    plt.figure(figsize=(8, 8))
+    plt.imshow(wvf_grid, cmap='hot')
+    
+    # Plot trajectory
+    trajectory = np.array(trajectory)
+    plt.plot(trajectory[:, 0], trajectory[:, 1], 'w-', linewidth=2, label='Agent Path')
+    plt.plot(trajectory[0, 0], trajectory[0, 1], 'go', label='Start')
+    plt.plot(trajectory[-1, 0], trajectory[-1, 1], 'ro', label='End')
+    
+    plt.colorbar(label='Value')
+    plt.legend()
+    plt.title('Agent Trajectory on World Value Function')
+    plt.savefig('results/agent_trajectory.png')
+    plt.close()
+

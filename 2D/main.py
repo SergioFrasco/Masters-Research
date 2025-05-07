@@ -16,6 +16,7 @@ from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
+reward_threshold = 0.75
 
 # Suppress TensorFlow logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -28,161 +29,6 @@ tf.config.set_visible_devices([], "GPU")
 absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
     
-def construct_sr():
-     # Create environment and agent
-    env = SimpleEnv(size=10)
-    agent = SuccessorAgent(env, learning_rate=0.1, gamma=0.99)
-
-    # Training loop
-    n_episodes = 2000
-    for episode in tqdm(range(n_episodes)):
-        obs, _ = env.reset()
-        done = False
-        current_exp = None
-        
-        while not done:
-            state_idx = agent.get_state_index(obs)
-            action = agent.sample_action(obs, epsilon=0.1)
-            
-            next_obs, reward, done, truncated, info = env.step(action)
-            next_state_idx = agent.get_state_index(next_obs)
-            
-            # Store experience
-            next_exp = (state_idx, action, next_state_idx, reward, done)
-            
-            # Update agent
-            if current_exp is not None:
-                agent.update(current_exp, next_exp)
-            
-            current_exp = next_exp
-            obs = next_obs
-            
-            if done:
-                # Final update
-                agent.update(current_exp)
-
-    
-    averaged_M = np.mean(agent.M, axis=0)
-    plt.imsave('results/averaged_M.png', averaged_M, cmap='hot')
-    np.save('models/successor_representation.npy', averaged_M)
-
-def test_world_value_function():
-    """Test and visualize the World Value Function using saved models"""
-    # Initialize environment
-    env = SimpleEnv(size=10)
-    obs, _ = env.reset()
-    
-    # Load saved models
-    autoencoder = load_trained_autoencoder()
-    successor_matrix = np.load('models/successor_representation.npy')
-    
-    # Create a binary grid representation where 1s represent goals
-    grid_state = np.zeros((env.size, env.size))
-    for i in range(env.size):
-        for j in range(env.size):
-            cell = env.grid.get(i, j)
-            if isinstance(cell, Goal):
-                grid_state[i, j] = 1
-            elif isinstance(cell, Wall):
-                grid_state[i, j] = 0.5
-    
-    # Reshape for the autoencoder (adding batch and channel dimensions)
-    grid_state = grid_state.reshape(1, env.size, env.size, 1)
-    
-    # Get vision model prediction
-    reconstructed = autoencoder.predict(grid_state)
-    
-    # Create reward location array
-    reward_locations = np.zeros(env.size * env.size)
-    reward_threshold = 0.75
-    
-    # Convert reconstructed image to flattened reward array
-    for i in range(env.size):
-        for j in range(env.size):
-            if reconstructed[0, i, j, 0] > reward_threshold:
-                state_idx = i * env.size + j
-                reward_locations[state_idx] = 1
-    
-    # Compute World Value Function
-    world_value_function = np.dot(successor_matrix, reward_locations)
-    
-    # Reshape WVF for visualization
-    wvf_grid = world_value_function.reshape(env.size, env.size)
-    
-    # Create visualization
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-    
-    # Plot original environment
-    ax1.imshow(grid_state[0, :, :, 0], cmap='gray')
-    ax1.set_title("Original Environment")
-    
-    # Plot vision model output
-    ax2.imshow(reconstructed[0, :, :, 0], cmap='gray')
-    ax2.set_title("Vision Model Detection")
-    
-    # Plot World Value Function
-    wvf_plot = ax3.imshow(wvf_grid, cmap='hot')
-    ax3.set_title("World Value Function")
-    plt.colorbar(wvf_plot, ax=ax3)
-    
-    plt.tight_layout()
-    plt.savefig('results/world_value_function.png')
-    plt.close()
-    
-    return world_value_function, wvf_grid
-
-def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
-    """Visualize an agent following the World Value Function"""
-    obs, _ = env.reset()
-    trajectory = [env.agent_pos]
-    
-    for _ in range(n_steps):
-        # Get current position
-        x, y = env.agent_pos
-        
-        # Get neighboring positions
-        neighbors = [
-            (x-1, y), (x+1, y),  # Left, Right
-            (x, y-1), (x, y+1)   # Up, Down
-        ]
-        
-        # Filter valid positions and get their values
-        valid_neighbors = []
-        neighbor_values = []
-        
-        for nx, ny in neighbors:
-            if 0 <= nx < env.size and 0 <= ny < env.size:
-                valid_neighbors.append((nx, ny))
-                neighbor_values.append(wvf_grid[ny, nx])
-        
-        # Choose direction with highest value
-        if valid_neighbors:
-            best_idx = np.argmax(neighbor_values)
-            next_pos = valid_neighbors[best_idx]
-            
-            # Move agent (simplified)
-            env.agent_pos = next_pos
-            trajectory.append(next_pos)
-        
-        # Check if goal reached
-        if isinstance(env.grid.get(*env.agent_pos), Goal):
-            break
-    
-    # Visualize trajectory
-    plt.figure(figsize=(8, 8))
-    plt.imshow(wvf_grid, cmap='hot')
-    
-    # Plot trajectory
-    trajectory = np.array(trajectory)
-    plt.plot(trajectory[:, 0], trajectory[:, 1], 'w-', linewidth=2, label='Agent Path')
-    plt.plot(trajectory[0, 0], trajectory[0, 1], 'go', label='Start')
-    plt.plot(trajectory[-1, 0], trajectory[-1, 1], 'ro', label='End')
-    
-    plt.colorbar(label='Value')
-    plt.legend()
-    plt.title('Agent Trajectory on World Value Function')
-    plt.savefig('results/agent_trajectory.png')
-    plt.close()
 
 def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
@@ -229,7 +75,6 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
 
             # Reset max_wvfs maps to zero
             max_wvfs = np.empty((0, agent.grid_size, agent.grid_size), dtype=np.float32)
-            reward_threshold = 0.5
             # Check if each 10x10 map contains any value > threshold
             mask = (agent.wvf > reward_threshold).any(axis=(1, 2))  # shape: (100,)
             # Use mask to select maps
@@ -241,7 +86,6 @@ def train_successor_agent(agent, env, episodes=1001, ae_model=None, max_steps=15
                 next_action = agent.sample_action(obs, epsilon=epsilon)
                 
             else:
-                
                 if print_flag:
                     print("First WVF Action Taken")
                     print_flag = False
