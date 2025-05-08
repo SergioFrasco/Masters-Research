@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import absl.logging
 import tensorflow as tf
 import math
-
+import pandas as pd
 
 from minigrid.core.world_object import Goal, Wall
 from tqdm import tqdm
@@ -29,17 +29,19 @@ tf.config.set_visible_devices([], "GPU")
 absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
     
-
-def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+# epsilon decay = 0.995 before
+def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=1, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
     episode_rewards = []
+    ae_triggers_per_episode = []
     epsilon = epsilon_start
 
     print_flag = True
     
     for episode in tqdm(range(episodes), "Training Successor Agent"):
+        plt.close('all')  # to close all open figures and save memory
         obs = env.reset()
         total_reward = 0
         step_count = 0
@@ -47,10 +49,11 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
         # For every new episode, reset the reward map, and WVF, the SR stays consistent with the environment i.e doesn't reset
         agent.true_reward_map = np.zeros((env.size, env.size))
         agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
+        ae_trigger_count_this_episode = 0
         
         # Store first experience
         current_state_idx = agent.get_state_index(obs)
-        current_action = agent.sample_action(obs, epsilon=epsilon)
+        current_action = agent.sample_random_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
         
         for step in range(max_steps):
@@ -63,25 +66,22 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
             current_exp[3] = reward          # reward
             current_exp[4] = done            # done flag
             
-
             # Here we need to sample from WVF.
             # 1. Build the WVF for this moment in time
             # 2. Maximize over the WVF to grab all Maps that contain goals
-            # 3. Choose a Random one of these Maps
+            # 3. Choose a the Max one of these Maps
             # 4. Sample an Action from this map with decaying epsilon probability
 
-            # Reset max_wvfs maps to zero
-            max_wvfs = np.empty((0, agent.grid_size, agent.grid_size), dtype=np.float32)
-            # Check if each 10x10 map contains any value > threshold
-            mask = (agent.wvf > reward_threshold).any(axis=(1, 2))  # shape: (100,)
-            # Use mask to select maps
-            max_wvfs = agent.wvf[mask]  # shape: (N, 10, 10) where N <= 100
+            # Get the map with the single highest max value
+            max_vals = agent.wvf.max(axis=(1, 2))  # shape: (100,)
+            best_map_index = np.argmax(max_vals)   # index of the map with the highest max value
+            chosen_map = agent.wvf[best_map_index]  # shape: (10, 10)
             
             # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
             # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
-            if step == 0 or len(max_wvfs) == 0:
+            if step == 0:
                 # print("Normal Action Taken")
-                next_action = agent.sample_action(obs, epsilon=epsilon)
+                next_action = agent.sample_random_action(obs, epsilon=epsilon)
             
             # Sample an action from the WVF
             else:
@@ -90,15 +90,9 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
                     print("First WVF Action Taken")
                     print_flag = False
                 
-                # Choose the map at random, should this be random? or just go toward the max one all the time?
-                # We'll have to check average return to see it's performance
-                random_map_index = np.random.randint(0, len(max_wvfs))
-                chosen_map = max_wvfs[random_map_index]
-                next_action = agent.sample_action_with_wvf(obs, epsilon = epsilon, chosen_reward_map = chosen_map)
+                # Sample an action from the max WVF
+                next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon, chosen_reward_map=chosen_map)
                 
-                # save_max_wvf_maps(max_wvfs, episode = episode)
-                # Printing the array of maps
-                plt.close('all')  # to close all open figures and save memory
 
             # Create next experience tuple
             next_exp = [next_state_idx, next_action, None, None, None]
@@ -156,6 +150,7 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
 
             trigger_ae_training = False
             if abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
+                ae_trigger_count_this_episode += 1
                 trigger_ae_training = True
                 
             
@@ -196,6 +191,8 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
                         agent.reward_maps[idx, y, x] = 0
 
             
+            # Do without dot product, just flatten R (100,10,10) to R (100,100), then dot product with SR (100,100)
+
             # dot product the SR with these reward Maps
             # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
             M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100), average accross actions
@@ -220,6 +217,8 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
         
         # Store episode statistics
         episode_rewards.append(total_reward)
+        ae_triggers_per_episode.append(ae_trigger_count_this_episode)
+
 
          # Generate visualizations occasionally
         if episode % 100 == 0:
@@ -230,7 +229,20 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
             save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode)
         
     ae_model.save('results/current/vision_model.h5')
-    print("Training Complete, Vision Model Saved!")
+    
+
+    window = 10
+    rolling = pd.Series(ae_triggers_per_episode).rolling(window).mean()
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(rolling, label=f'Rolling Avg (window={window})', color='orange')
+    plt.xlabel('Episode')
+    plt.ylabel('Number of AE Training Triggers')
+    plt.title('Autoencoder Training Triggers per Episode')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
     return episode_rewards
 
 
@@ -253,7 +265,7 @@ def main():
     # plt.imsave('results/averaged_M.png', averaged_M, cmap='hot')
     # np.save('models/successor_representation.npy', averaged_M)
 
-        # Plot rewards over episodes
+    # Plot rewards over episodes
     plt.figure(figsize=(10, 4))
     plt.plot(rewards, label='Episode Reward')
     plt.xlabel('Episode')

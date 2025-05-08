@@ -40,45 +40,28 @@ class SuccessorAgent:
         agent_pos = self.env.agent_pos
         return agent_pos[0] + agent_pos[1] * self.grid_size
     
-    def Q_estimates(self, state_idx, goal=None):
-        """Generate Q values for all actions"""
-        if goal is None:
-            goal = self.w
-        else:
-            goal = self._onehot(goal, self.state_size)
-        return np.matmul(self.M[:, state_idx, :], goal)
+    # def Q_estimates(self, state_idx, goal=None):
+    #     """Generate Q values for all actions"""
+    #     if goal is None:
+    #         goal = self.w
+    #     else:
+    #         goal = self._onehot(goal, self.state_size)
+    #     return np.matmul(self.M[:, state_idx, :], goal)
     
-    def sample_action(self, obs, goal=None, epsilon=0.0):
-        """Sample action using epsilon-greedy approach"""
-        state_idx = self.get_state_index(obs)
+    # def sample_action(self, obs, goal=None, epsilon=0.0):
+    #     """Sample action using epsilon-greedy approach"""
+    #     state_idx = self.get_state_index(obs)
         
-        if np.random.uniform(0, 1) < epsilon:
-            action = np.random.randint(self.action_size)
-        else:
-            Qs = self.Q_estimates(state_idx, goal)
-            action = np.argmax(Qs)
-        return action
-
-    def value_estimates_with_wvf(self, state_idx, reward_map):
-        """
-        Generate values for all actions given a reward map.
-        
-        Parameters:
-        state_idx: index (or indices) corresponding to the current state.
-        reward_map: a 2D reward map, e.g. shape (grid_size, grid_size)
-                    which must be flattened to match the state representation.
-        
-        Returns:
-        Q-values for each action: shape (action_size,)
-        """
-        # Flatten the reward map to create a reward vector compatible with SR
-        goal_vector = reward_map.flatten()  # shape: (state_size,)
-        
-        # Compute Q-values as the dot product of the SR for each action and the goal vector.
-        # self.M has shape (action_size, state_size, state_size),
-        # and indexing with state_idx gives a slice of shape (action_size, state_size).
-        Qs = np.matmul(self.M[:, state_idx, :], goal_vector)
-        return Qs
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         action = np.random.randint(self.action_size)
+    #     else:
+    #         Qs = self.Q_estimates(state_idx, goal)
+    #         action = np.argmax(Qs)
+    #     return action
+    
+    def sample_random_action(self, obs, goal=None, epsilon=0.0):
+        """Sample an action uniformly at random"""
+        return np.random.randint(self.action_size)
 
     def sample_action_with_wvf(self, obs, chosen_reward_map, epsilon=0.0):
         """
@@ -102,48 +85,30 @@ class SuccessorAgent:
             # Compute Q-values using the chosen reward map.
             values = self.value_estimates_with_wvf(state_idx, chosen_reward_map)
             action = np.argmax(values)
+            # Break Ties
             return action
 
-    
-    # def sample_wvf_action(self, obs, chosen_map, epsilon=0.0):
-    #     """Sample action leading to the highest-value neighboring state in chosen WVF"""
-    #     state = self.get_state_index(obs)  # (x, y)
 
-    #     if np.random.uniform(0, 1) < epsilon:
-    #         return np.random.randint(self.action_size)
-
-    #     best_value = -np.inf
-    #     best_action = None
-
-    #     for action in range(self.action_size):
-    #         next_state = self.predict_next_state(state, action)
-
-    #         if (0 <= next_state[0] < chosen_map.shape[0]) and (0 <= next_state[1] < chosen_map.shape[1]):
-    #             value = chosen_map[next_state[0], next_state[1]]
-    #             if value > best_value:
-    #                 best_value = value
-    #                 best_action = action
-
-    #     if best_action is None:
-    #         return np.random.randint(self.action_size)
-
-    #     return best_action
-
-    # def predict_next_state(self, state, action):
-    #     """Given a state (x, y) and action, return predicted next state"""
-    #     x, y = state
-    #     if action == 0:      # UP
-    #         return (x, y - 1)
-    #     elif action == 1:    # DOWN
-    #         return (x, y + 1)
-    #     elif action == 2:    # LEFT
-    #         return (x - 1, y)
-    #     elif action == 3:    # RIGHT
-    #         return (x + 1, y)
-    #     else:
-    #         return (x, y)  # No-op or invalid action
-
-
+    def value_estimates_with_wvf(self, state_idx, reward_map):
+        """
+        Generate values for all actions given a reward map.
+        
+        Parameters:
+        state_idx: index (or indices) corresponding to the current state.
+        reward_map: a 2D reward map, e.g. shape (grid_size, grid_size)
+                    which must be flattened to match the state representation.
+        
+        Returns:
+        Q-values for each action: shape (action_size,)
+        """
+        # Flatten the reward map to create a reward vector compatible with SR
+        goal_vector = reward_map.flatten()  # shape: (state_size,)
+        
+        # Compute Q-values as the dot product of the SR for each action and the goal vector.
+        # self.M has shape (action_size, state_size, state_size),
+        # and indexing with state_idx gives a slice of shape (action_size, state_size).
+        Qs = np.matmul(self.M[:, state_idx, :], goal_vector)
+        return Qs
     
     def update(self, current_exp, next_exp=None):
         """Update both reward weights and successor features"""
@@ -190,12 +155,3 @@ class SuccessorAgent:
         agent_pos = self.env.agent_pos
         cell = self.env.grid.get(*agent_pos)
         return isinstance(cell, Goal)
-
-    # def compute_wvf(self):
-    #     wvf = np.zeros((self.state_size, self.state_size)) 
-    #     for goal in range(self.state_size):
-    #         goal_reward = onehot(goal, self.state_size)
-
-    #         # This is the combination between the RS (M) and the rewards if they were in every state to create the WVF
-    #         wvf[:, goal] = np.max(np.matmul(self.M, goal_reward), axis=0)
-    #     return wvf
