@@ -221,7 +221,7 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
 
 
          # Generate visualizations occasionally
-        if episode % 100 == 0:
+        if episode % 250 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)
@@ -241,7 +241,7 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
     plt.title('Autoencoder Training Triggers per Episode')
     plt.legend()
     plt.grid(True)
-    plt.show()
+    plt.imsave("results/ae_training_triggers.png")
 
     return episode_rewards
 
@@ -265,9 +265,15 @@ def main():
     # plt.imsave('results/averaged_M.png', averaged_M, cmap='hot')
     # np.save('models/successor_representation.npy', averaged_M)
 
-    # Plot rewards over episodes
+    # Convert to pandas Series for rolling average
+    rewards_series = pd.Series(rewards)
+    rolling_window = 10  # You can adjust this value
+    smoothed_rewards = rewards_series.rolling(rolling_window).mean()
+
+    # Plot rewards over episodes with rolling average
     plt.figure(figsize=(10, 4))
-    plt.plot(rewards, label='Episode Reward')
+    plt.plot(rewards, label='Episode Reward', alpha=0.5)
+    plt.plot(smoothed_rewards, label=f'Rolling Avg (window={rolling_window})', linewidth=2)
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
     plt.title('Reward per Episode')
@@ -275,8 +281,6 @@ def main():
     plt.legend()
     plt.tight_layout()
     plt.savefig("results/rewards_over_episodes.png")
-    plt.show()
-
 
 
 if __name__ == "__main__":
