@@ -16,8 +16,6 @@ from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
-reward_threshold = 0.75
-
 # Suppress TensorFlow logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
@@ -30,7 +28,7 @@ absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
     
 # epsilon decay = 0.995 before
-def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=1, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=301, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -182,31 +180,45 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
             for y in range(agent.grid_size):
                 for x in range(agent.grid_size):
                     reward = agent.true_reward_map[y, x]
-                    # Only track if we are sure its a reward
+                    idx = y * agent.grid_size + x
+                    reward_threshold = 0.75
                     if reward > reward_threshold:
-                        idx = y * agent.grid_size + x
                         agent.reward_maps[idx, y, x] = reward
                     else:
-                        idx = y * agent.grid_size + x
                         agent.reward_maps[idx, y, x] = 0
 
-            
-            # Do without dot product, just flatten R (100,10,10) to R (100,100), then dot product with SR (100,100)
 
-            # dot product the SR with these reward Maps
-            # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
-            M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100), average accross actions
 
-            # Compute the value function for each reward map
-            for i in range(agent.state_size):  # Loop through reward maps
-                R = agent.reward_maps[i, :, :]  # (10, 10) reward map
-                R_flat = R.flatten()  # (100,) vector
+            # # TODO 
+            # # Do without dot product, just flatten R (100,10,10) to R (100,100), then dot product with SR (100,100)
 
-                # Dot product with SR to get value function over all states
-                V = np.dot(M_flat, R_flat)  # V is shape (100,)
+            # # dot product the SR with these reward Maps
+            # # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
+            # M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100), average accross actions
+
+            # # Compute the value function for each reward map
+            # for i in range(agent.state_size):  # Loop through reward maps
+            #     R = agent.reward_maps[i, :, :]  # (10, 10) reward map
+            #     R_flat = R.flatten()  # (100,) vector
+
+            #     # Dot product with SR to get value function over all states
+            #     V = np.dot(M_flat, R_flat)  # V is shape (100,)
                 
-                # Reshape to (10, 10) and store
-                agent.wvf[i] = V.reshape(agent.grid_size, agent.grid_size)
+            #     # Reshape to (10, 10) and store
+            #     agent.wvf[i] = V.reshape(agent.grid_size, agent.grid_size)
+
+            # Average the successor representation across actions
+            M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100)
+
+            # Flatten reward maps: (100, 10, 10) -> (100, 100)
+            R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)  # shape: (100, 100)
+
+            # Compute value functions: (100, 100) @ (100, 100).T --> (100, 100)
+            V_all = M_flat @ R_flat_all.T  # shape: (100, 100), each column is V for a reward map
+
+            # Reshape to (100, 10, 10) to match original spatial layout
+            agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+
 
             # Reward found, next episode
             if done:
@@ -221,7 +233,7 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
 
 
          # Generate visualizations occasionally
-        if episode % 250 == 0:
+        if episode % 100 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)
@@ -231,7 +243,7 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
     ae_model.save('results/current/vision_model.h5')
     
 
-    window = 10
+    window = 20
     rolling = pd.Series(ae_triggers_per_episode).rolling(window).mean()
 
     plt.figure(figsize=(10, 5))
@@ -241,7 +253,7 @@ def train_successor_agent(agent, env, episodes=401, ae_model=None, max_steps=150
     plt.title('Autoencoder Training Triggers per Episode')
     plt.legend()
     plt.grid(True)
-    plt.imsave("results/ae_training_triggers.png")
+    plt.savefig("results/ae_training_triggers.png")
 
     return episode_rewards
 
@@ -267,7 +279,7 @@ def main():
 
     # Convert to pandas Series for rolling average
     rewards_series = pd.Series(rewards)
-    rolling_window = 10  # You can adjust this value
+    rolling_window = 20  # You can adjust this value
     smoothed_rewards = rewards_series.rolling(rolling_window).mean()
 
     # Plot rewards over episodes with rolling average
