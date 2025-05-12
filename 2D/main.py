@@ -28,7 +28,7 @@ absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
     
 # epsilon decay = 0.995 before
-def train_successor_agent(agent, env, episodes=301, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -84,8 +84,7 @@ def train_successor_agent(agent, env, episodes=301, ae_model=None, max_steps=200
             # Sample an action from the WVF
             else:
                 if print_flag:
-                    # Typically this triggers around episode 20
-                    print("First WVF Action Taken")
+                    # print("First WVF Action Taken")
                     print_flag = False
                 
                 # Sample an action from the max WVF
@@ -188,8 +187,6 @@ def train_successor_agent(agent, env, episodes=301, ae_model=None, max_steps=200
                         agent.reward_maps[idx, y, x] = 0
 
 
-
-            # # TODO 
             # # Do without dot product, just flatten R (100,10,10) to R (100,100), then dot product with SR (100,100)
 
             # # dot product the SR with these reward Maps
@@ -233,7 +230,7 @@ def train_successor_agent(agent, env, episodes=301, ae_model=None, max_steps=200
 
 
          # Generate visualizations occasionally
-        if episode % 100 == 0:
+        if episode % 250 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)
