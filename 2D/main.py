@@ -16,6 +16,10 @@ from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
+# TODO
+# did the sanity check, still doesnt look right. am I doing SR the same as juliani?
+# Need to implement different reward object being split into separate reward maps
+
 # Suppress TensorFlow logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
