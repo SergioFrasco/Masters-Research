@@ -32,7 +32,7 @@ absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
     
 # epsilon decay = 0.995 before
-def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.999, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes=2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -184,11 +184,18 @@ def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=20
                 for x in range(agent.grid_size):
                     reward = agent.true_reward_map[y, x]
                     idx = y * agent.grid_size + x
-                    reward_threshold = 0.75
+                    reward_threshold = 0.5
                     if reward > reward_threshold:
                         agent.reward_maps[idx, y, x] = reward
                     else:
                         agent.reward_maps[idx, y, x] = 0
+
+            # for y in range(agent.grid_size):
+            #     for x in range(agent.grid_size):
+            #         reward = agent.true_reward_map[y, x]
+            #         idx = y * agent.grid_size + x
+            #         agent.reward_maps[idx, y, x] = reward
+ 
 
 
             # # Do without dot product, just flatten R (100,10,10) to R (100,100), then dot product with SR (100,100)
@@ -274,9 +281,8 @@ def main():
 
     # Train the agent
     rewards = train_successor_agent(agent, env, ae_model = ae_model) 
-    # averaged_M = np.mean(agent.M, axis=0)
-    # plt.imsave('results/averaged_M.png', averaged_M, cmap='hot')
-    # np.save('models/successor_representation.npy', averaged_M)
+
+
 
     # Convert to pandas Series for rolling average
     rewards_series = pd.Series(rewards)
