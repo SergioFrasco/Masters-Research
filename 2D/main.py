@@ -33,13 +33,16 @@ sys.path.append(".")
     
 # epsilon decay = 0.995 before
 # 0.999 better
-def train_successor_agent(agent, env, episodes=801, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=1, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 500, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
     episode_rewards = []
     ae_triggers_per_episode = []
     epsilon = epsilon_start
+
+    # Tracking where rewards are occuring
+    reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
 
     print_flag = True
     
@@ -124,6 +127,14 @@ def train_successor_agent(agent, env, episodes=801, ae_model=None, max_steps=200
             normalized_grid[object_layer == 2] = 0.0   # Wall 
             normalized_grid[object_layer == 1] = 0.0   # Open space
             normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
+
+            # Check reward Occurence
+            # Iterate over the grid and increment reward occurrence where object type == 8 (goal)
+            for y in range(env.height):
+                for x in range(env.width):
+                    if object_layer[y, x] == 8:
+                        reward_occurence_map[y, x] += 1
+
             
             # Rotate the grid to match render_mode = human 
             normalized_grid = np.flipud(normalized_grid)
@@ -241,8 +252,8 @@ def train_successor_agent(agent, env, episodes=801, ae_model=None, max_steps=200
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
 
-         # Generate visualizations occasionally
-        if episode % 100 == 0:
+        # Generate visualizations occasionally
+        if episode % 1000 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
             averaged_M = np.mean(agent.M, axis=0)
@@ -251,10 +262,10 @@ def train_successor_agent(agent, env, episodes=801, ae_model=None, max_steps=200
         
     ae_model.save('results/current/vision_model.h5')
     
-
     window = 20
     rolling = pd.Series(ae_triggers_per_episode).rolling(window).mean()
 
+    # Plotting number of AE Training Triggers
     plt.figure(figsize=(10, 5))
     plt.plot(rolling, label=f'Rolling Avg (window={window})', color='orange')
     plt.xlabel('Episode')
@@ -263,6 +274,17 @@ def train_successor_agent(agent, env, episodes=801, ae_model=None, max_steps=200
     plt.legend()
     plt.grid(True)
     plt.savefig("results/ae_training_triggers.png")
+
+    # Plotting the number of reward occurences in each stae
+    plt.figure(figsize=(6, 6))
+    plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
+    plt.title('Reward Occurrence Map (Heatmap)')
+    plt.colorbar(label='Times Reward Observed')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.savefig("results/reward_occurrence_heatmap.png")
+    plt.close()
+
 
     return episode_rewards
 

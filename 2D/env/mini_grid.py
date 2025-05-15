@@ -6,6 +6,7 @@ from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Door, Goal, Key, Wall
 from minigrid.manual_control import ManualControl
 from minigrid.minigrid_env import MiniGridEnv
+from random import sample
 
 import random
 import numpy as np
@@ -64,20 +65,34 @@ class SimpleEnv(MiniGridEnv):
         # # Place the door and key
         # self.grid.set(5, 6, Door(COLOR_NAMES[0], is_locked=True))
         # self.grid.set(3, 6, Key(COLOR_NAMES[0]))
+        
+       
 
-        numGoals = random.randint(1,5)
-        goalPositions = set() # To avoid duplicate positions
+        numGoals = random.randint(1, 5)
 
-        for _ in range (numGoals):
-            x = random.randint(1, width-2)
-            y = random.randint(1, height-2)
+        # Generate all valid interior positions (excluding borders)
+        valid_positions = [(x, y) for x in range(1, width - 1) for y in range(1, height - 1)]
 
-            # Ensure the spot is not already occupied
-            if (x, y) not in goalPositions:
-                self.put_obj(Goal(), x, y)
-                goalPositions.add((x, y))
+        # Sample unique positions uniformly
+        goalPositions = sample(valid_positions, numGoals)
+
+        for (x, y) in goalPositions:
+            self.put_obj(Goal(), x, y)
+        
+
+        # numGoals = random.randint(1,5)
+        # goalPositions = set() # To avoid duplicate positions
+
+        # for _ in range (numGoals):
+        #     x = random.randint(1, width-2)
+        #     y = random.randint(1, height-2)
+
+        #     # Ensure the spot is not already occupied
+        #     if (x, y) not in goalPositions:
+        #         self.put_obj(Goal(), x, y)
+        #         goalPositions.add((x, y))
                 
-                continue  # Move to the next goal
+        #         continue  # Move to the next goal
         # goalPositions.add((1,8))
 
 
