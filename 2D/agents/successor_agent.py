@@ -5,7 +5,8 @@ from minigrid.core.world_object import Goal
 from gym import spaces
 
 class SuccessorAgent:
-    def __init__(self, env, learning_rate=0.1, gamma=0.99):
+    # learning rate = 0.1
+    def __init__(self, env, learning_rate=0.01, gamma=0.99):
         self.env = env
         self.learning_rate = learning_rate
         self.gamma = gamma
