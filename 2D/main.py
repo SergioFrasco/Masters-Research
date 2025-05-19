@@ -33,13 +33,15 @@ sys.path.append(".")
     
 # epsilon decay = 0.995 before
 # 0.999 better
-def train_successor_agent(agent, env, episodes = 500, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
+
+def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
     episode_rewards = []
     ae_triggers_per_episode = []
     epsilon = epsilon_start
+    step_counts = []
 
     # Tracking where rewards are occuring
     reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
@@ -242,6 +244,7 @@ def train_successor_agent(agent, env, episodes = 500, ae_model=None, max_steps=2
 
             # Reward found, next episode
             if done:
+                step_counts.append(step)
                 break
                 
         # Decay epsilon
@@ -284,6 +287,17 @@ def train_successor_agent(agent, env, episodes = 500, ae_model=None, max_steps=2
     plt.ylabel('Y')
     plt.savefig("results/reward_occurrence_heatmap.png")
     plt.close()
+
+    # Plotting the number of steps taken in each episode - See if its learning
+    rolling = pd.Series(step_counts).rolling(window).mean()
+    plt.figure(figsize=(10, 5))
+    plt.plot(rolling, label=f'Rolling Avg Step Count (window={window})', color='orange')
+    plt.xlabel('Episode')
+    plt.ylabel('Number of Steps Taken')
+    plt.title('Steos taken per Episode')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("results/step_count.png")
 
 
     return episode_rewards
