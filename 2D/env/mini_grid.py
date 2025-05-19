@@ -78,6 +78,14 @@ class SimpleEnv(MiniGridEnv):
 
         for (x, y) in goalPositions:
             self.put_obj(Goal(), x, y)
+
+        # # Place a goal square in the top-left corner
+        # self.put_obj(Goal(), width - 9, height - 9)
+        # # Place a goal square in the bottom-right corner
+        # self.put_obj(Goal(), width - 2, height - 2)
+        # # and the other 2 corners
+        # self.put_obj(Goal(), width - 9, height - 2)
+        # self.put_obj(Goal(), width - 2, height - 9)
         
 
         # numGoals = random.randint(1,5)
@@ -96,10 +104,7 @@ class SimpleEnv(MiniGridEnv):
         # goalPositions.add((1,8))
 
 
-        # Place a goal square in the top-left corner
-        # self.put_obj(Goal(), width - 9, height - 9)
-        # # Place a goal square in the bottom-right corner
-        # self.put_obj(Goal(), width - 2, height - 2)
+
 
         # Place the agent
         if self.agent_start_pos is not None:

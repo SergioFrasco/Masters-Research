@@ -3,6 +3,62 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import math
 
+import os
+from datetime import datetime
+
+import os
+from datetime import datetime
+
+import os
+from datetime import datetime
+
+import os
+from datetime import datetime
+
+def get_run_directory():
+    """
+    Returns the current run directory, initializing it the first time it's called.
+    Format: results/current/{day_month_year}/{run_number}
+    """
+    if not hasattr(get_run_directory, "_run_path"):
+        today = datetime.today().strftime("%d_%m_%Y")
+        base_dir = os.path.join("results", "current", today)
+        os.makedirs(base_dir, exist_ok=True)
+
+        # Get the next available run number
+        existing_runs = [
+            d for d in os.listdir(base_dir)
+            if os.path.isdir(os.path.join(base_dir, d)) and d.isdigit()
+        ]
+        next_run_number = str(max(map(int, existing_runs), default=0) + 1)
+
+        # Set and create the run directory
+        run_path = os.path.join(base_dir, next_run_number)
+        os.makedirs(run_path, exist_ok=True)
+
+        # Cache it
+        get_run_directory._run_path = run_path
+
+    return get_run_directory._run_path
+
+def generate_save_path(name: str) -> str:
+    """
+    Returns a full path for a file to be saved under the current run directory.
+    
+    Parameters:
+        name (str): Filename or relative path under the run folder
+    
+    Returns:
+        str: Full path
+    """
+    run_dir = get_run_directory()
+    full_path = os.path.join(run_dir, name)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    return full_path
+
+
+
+
 # Function to overlay values on the grid
 def overlay_values_on_grid(grid, ax):
     rows, cols = grid.shape
@@ -134,10 +190,11 @@ def save_max_wvf_maps(max_wvfs, episode):
     plt.tight_layout()
     plt.savefig(f"results/max_wvfs_{episode}")
 
-def save_env_map_pred(agent, normalized_grid, predicted_reward_map_2d, episode):
+def save_env_map_pred(agent, normalized_grid, predicted_reward_map_2d, episode, save_path):
     # Create visualization of current state
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
     
+    save_path = save_path
     # Original grid (environment)
     ax1.imshow(normalized_grid, cmap='gray')
     ax1.set_title("Environment Grid")
@@ -151,7 +208,7 @@ def save_env_map_pred(agent, normalized_grid, predicted_reward_map_2d, episode):
     ax3.set_title("AE Prediction")
     
     plt.tight_layout()
-    plt.savefig(f'results/episode_{episode}.png')
+    plt.savefig(save_path)
     plt.close()
 
 

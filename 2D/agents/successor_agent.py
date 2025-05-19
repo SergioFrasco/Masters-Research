@@ -6,7 +6,8 @@ from gym import spaces
 
 class SuccessorAgent:
     # learning rate = 0.1
-    def __init__(self, env, learning_rate=0.01, gamma=0.99):
+    # Tried 0.01
+    def __init__(self, env, learning_rate=0.1, gamma=0.99):
         self.env = env
         self.learning_rate = learning_rate
         self.gamma = gamma
@@ -36,29 +37,30 @@ class SuccessorAgent:
         # self.wvf = np.zeros((self.state_size, self.state_size)) 
 
     # older non-trandsformed version
-    # def get_state_index(self, obs):
-    #     """Convert MiniGrid observation to state index"""
-    #     agent_pos = self.env.agent_pos
-    #     return agent_pos[0] + agent_pos[1] * self.grid_size
-    
     def get_state_index(self, obs):
-        # raw MiniGrid agent_pos is (x,y) with (0,0) bottom-left
-        x, y = self.env.agent_pos
+        """Convert MiniGrid observation to state index"""
+        agent_pos = self.env.agent_pos
+        return agent_pos[0] + agent_pos[1] * self.grid_size
+    
+    # Trying to transform it to fit human render
+    # def get_state_index(self, obs):
+    #     # raw MiniGrid agent_pos is (x,y) with (0,0) bottom-left
+    #     x, y = self.env.agent_pos
 
-        # AE saw:
-        #   normalized_grid = flipud  →  row’ = H-1 - row
-        #   then rot90(k=-1) → 90° CW: (r’,c’) → (c',  H-1-r')
-        H = self.grid_size
+    #     # AE saw:
+    #     #   normalized_grid = flipud  →  row’ = H-1 - row
+    #     #   then rot90(k=-1) → 90° CW: (r’,c’) → (c',  H-1-r')
+    #     H = self.grid_size
 
-        # apply same sequence to (x,y):
-        # 1) flipud on y: y1 = H-1 - y
-        # 2) rot90 CW: new_x =  y1,  new_y = H-1 - x
-        y1 = H - 1 - y
-        x2 =  y1
-        y2 =  H - 1 - x
+    #     # apply same sequence to (x,y):
+    #     # 1) flipud on y: y1 = H-1 - y
+    #     # 2) rot90 CW: new_x =  y1,  new_y = H-1 - x
+    #     y1 = H - 1 - y
+    #     x2 =  y1
+    #     y2 =  H - 1 - x
 
-        # now flatten in row-major order (row = y2, col = x2)
-        return int(x2 + y2 * H)
+    #     # now flatten in row-major order (row = y2, col = x2)
+    #     return int(x2 + y2 * H)
 
     
     # def Q_estimates(self, state_idx, goal=None):
@@ -147,43 +149,43 @@ class SuccessorAgent:
         self.w[s_1] += self.learning_rate * error
         return error
     
-    # def update_sr(self, current_exp, next_exp):
-    #     """Update successor features using SARSA TD learning"""
-    #     s = current_exp[0]    # current state index
-    #     s_a = current_exp[1]  # current action
-    #     s_1 = current_exp[2]  # next state index
-    #     s_a_1 = next_exp[1]   # next action
-    #     d = current_exp[4]    # done flag
-        
-    #     I = self._onehot(s, self.state_size)
-        
-    #     if d:
-    #         td_error = (I + self.gamma * self._onehot(s_1, self.state_size) - self.M[s_a, s, :])
-    #     else:
-    #         td_error = (I + self.gamma * self.M[s_a_1, s_1, :] - self.M[s_a, s, :])
-            
-    #     self.M[s_a, s, :] += self.learning_rate * td_error
-    #     return np.mean(np.abs(td_error))
-    
     def update_sr(self, current_exp, next_exp):
         """Update successor features using SARSA TD learning"""
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action
         s_1 = current_exp[2]  # next state index
         s_a_1 = next_exp[1]   # next action
-        done = current_exp[4] # terminal flag
-
-        I = self._onehot(s, self.state_size)
-
-        if done:
-            td_target = I
-        else:
-            td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+        d = current_exp[4]    # done flag
         
-        td_error = td_target - self.M[s_a, s, :]
+        I = self._onehot(s, self.state_size)
+        
+        if d:
+            td_error = (I + self.gamma * self._onehot(s_1, self.state_size) - self.M[s_a, s, :])
+        else:
+            td_error = (I + self.gamma * self.M[s_a_1, s_1, :] - self.M[s_a, s, :])
+            
         self.M[s_a, s, :] += self.learning_rate * td_error
-
         return np.mean(np.abs(td_error))
+    
+    # def update_sr(self, current_exp, next_exp):
+    #     """Update successor features using SARSA TD learning"""
+    #     s = current_exp[0]    # current state index
+    #     s_a = current_exp[1]  # current action
+    #     s_1 = current_exp[2]  # next state index
+    #     s_a_1 = next_exp[1]   # next action
+    #     done = current_exp[4] # terminal flag
+
+    #     I = self._onehot(s, self.state_size)
+
+    #     if done:
+    #         td_target = I
+    #     else:
+    #         td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+        
+    #     td_error = td_target - self.M[s_a, s, :]
+    #     self.M[s_a, s, :] += self.learning_rate * td_error
+
+    #     return np.mean(np.abs(td_error))
 
     
     def _onehot(self, index, size):
