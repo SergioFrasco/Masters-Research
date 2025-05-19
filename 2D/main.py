@@ -34,7 +34,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 700, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -44,7 +44,7 @@ def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=
     step_counts = []
 
     # Tracking where rewards are occuring
-    reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
+    # reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
 
     print_flag = True
     
@@ -85,20 +85,32 @@ def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=
             best_map_index = np.argmax(max_vals)   # index of the map with the highest max value
             chosen_map = agent.wvf[best_map_index]  # shape: (10, 10)
             
-            # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
-            # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
-            if step == 0:
-                # print("Normal Action Taken")
+            # Random actions for the firt N episodes to check if SR improves
+            warmup_episodes = 500
+            if episode < warmup_episodes:
                 next_action = agent.sample_random_action(obs, epsilon=epsilon)
-            
-            # Sample an action from the WVF
             else:
+                # Get reward map from 
                 if print_flag:
-                    # print("First WVF Action Taken")
+                    print("First WVF Action Taken")
                     print_flag = False
                 
-                # Sample an action from the max WVF
-                next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon, chosen_reward_map=chosen_map)
+                next_action = agent.sample_action_with_wvf(obs, chosen_reward_map=chosen_map, epsilon=epsilon)
+
+            # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
+            # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
+            # if step == 0:
+            #     # print("Normal Action Taken")
+            #     next_action = agent.sample_random_action(obs, epsilon=epsilon)
+            
+            # # Sample an action from the WVF
+            # else:
+            #     if print_flag:
+            #         # print("First WVF Action Taken")
+            #         print_flag = False
+                
+            #     # Sample an action from the max WVF
+            #     next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon, chosen_reward_map=chosen_map)
                 
 
             # Create next experience tuple
@@ -132,10 +144,10 @@ def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=
 
             # Check reward Occurence
             # Iterate over the grid and increment reward occurrence where object type == 8 (goal)
-            for y in range(env.height):
-                for x in range(env.width):
-                    if object_layer[y, x] == 8:
-                        reward_occurence_map[y, x] += 1
+            # for y in range(env.height):
+            #     for x in range(env.width):
+            #         if object_layer[y, x] == 8:
+            #             reward_occurence_map[y, x] += 1
 
             
             # Rotate the grid to match render_mode = human 
@@ -202,32 +214,7 @@ def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=
                     if reward > reward_threshold:
                         agent.reward_maps[idx, y, x] = reward
                     else:
-                        agent.reward_maps[idx, y, x] = 0
-
-            # for y in range(agent.grid_size):
-            #     for x in range(agent.grid_size):
-            #         reward = agent.true_reward_map[y, x]
-            #         idx = y * agent.grid_size + x
-            #         agent.reward_maps[idx, y, x] = reward
- 
-
-
-            # # Do without dot product, just flatten R (100,10,10) to R (100,100), then dot product with SR (100,100)
-
-            # # dot product the SR with these reward Maps
-            # # 1. SR: M_flat[s, s'] = expected future occupancy of s' from s
-            # M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100), average accross actions
-
-            # # Compute the value function for each reward map
-            # for i in range(agent.state_size):  # Loop through reward maps
-            #     R = agent.reward_maps[i, :, :]  # (10, 10) reward map
-            #     R_flat = R.flatten()  # (100,) vector
-
-            #     # Dot product with SR to get value function over all states
-            #     V = np.dot(M_flat, R_flat)  # V is shape (100,)
-                
-            #     # Reshape to (10, 10) and store
-            #     agent.wvf[i] = V.reshape(agent.grid_size, agent.grid_size)
+                        agent.reward_maps[idx, y, x] = 0 
 
             # Average the successor representation across actions
             M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100)
@@ -256,11 +243,23 @@ def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=
 
 
         # Generate visualizations occasionally
-        if episode % 1000 == 0:
+        if episode % 100 == 0:
             save_all_reward_maps(agent, save_path=f"results/reward_maps_episode_{episode}")
             save_all_wvf(agent, save_path=f"results/wvf_episode_{episode}")
+
+            # Saving the SR
+            # Averaged SR matrix: shape (state_size, state_size)
             averaged_M = np.mean(agent.M, axis=0)
-            plt.imsave(f'results/averaged_M_{episode}.png', averaged_M, cmap='hot')
+
+            # Create a figure
+            plt.figure(figsize=(6, 5))
+            im = plt.imshow(averaged_M, cmap='hot')
+            plt.title(f"Averaged SR Matrix (Episode {episode})")
+            plt.colorbar(im, label="SR Value")  # Add colorbar
+            plt.tight_layout()
+            plt.savefig(f'results/averaged_M_{episode}.png')
+            plt.close()  # Close the figure to free memory
+
             save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode)
         
     ae_model.save('results/current/vision_model.h5')
@@ -278,15 +277,15 @@ def train_successor_agent(agent, env, episodes = 2500, ae_model=None, max_steps=
     plt.grid(True)
     plt.savefig("results/ae_training_triggers.png")
 
-    # Plotting the number of reward occurences in each stae
-    plt.figure(figsize=(6, 6))
-    plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
-    plt.title('Reward Occurrence Map (Heatmap)')
-    plt.colorbar(label='Times Reward Observed')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.savefig("results/reward_occurrence_heatmap.png")
-    plt.close()
+    # Plotting the number of reward occurences in each state
+    # plt.figure(figsize=(6, 6))
+    # plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
+    # plt.title('Reward Occurrence Map (Heatmap)')
+    # plt.colorbar(label='Times Reward Observed')
+    # plt.xlabel('X')
+    # plt.ylabel('Y')
+    # plt.savefig("results/reward_occurrence_heatmap.png")
+    # plt.close()
 
     # Plotting the number of steps taken in each episode - See if its learning
     rolling = pd.Series(step_counts).rolling(window).mean()

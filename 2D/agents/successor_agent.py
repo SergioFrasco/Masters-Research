@@ -35,11 +35,31 @@ class SuccessorAgent:
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
         # self.wvf = np.zeros((self.state_size, self.state_size)) 
 
-        
+    # older non-trandsformed version
+    # def get_state_index(self, obs):
+    #     """Convert MiniGrid observation to state index"""
+    #     agent_pos = self.env.agent_pos
+    #     return agent_pos[0] + agent_pos[1] * self.grid_size
+    
     def get_state_index(self, obs):
-        """Convert MiniGrid observation to state index"""
-        agent_pos = self.env.agent_pos
-        return agent_pos[0] + agent_pos[1] * self.grid_size
+        # raw MiniGrid agent_pos is (x,y) with (0,0) bottom-left
+        x, y = self.env.agent_pos
+
+        # AE saw:
+        #   normalized_grid = flipud  →  row’ = H-1 - row
+        #   then rot90(k=-1) → 90° CW: (r’,c’) → (c',  H-1-r')
+        H = self.grid_size
+
+        # apply same sequence to (x,y):
+        # 1) flipud on y: y1 = H-1 - y
+        # 2) rot90 CW: new_x =  y1,  new_y = H-1 - x
+        y1 = H - 1 - y
+        x2 =  y1
+        y2 =  H - 1 - x
+
+        # now flatten in row-major order (row = y2, col = x2)
+        return int(x2 + y2 * H)
+
     
     # def Q_estimates(self, state_idx, goal=None):
     #     """Generate Q values for all actions"""
