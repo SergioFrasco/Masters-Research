@@ -1,0 +1,9 @@
+#!/bin/bash
+#SBATCH --job-name=compneuro_job1
+#SBATCH --output=/home-mscluster/sfrasco/result_job1.txt
+#SBATCH --error=/home-mscluster/sfrasco/error_job1.txt
+#SBATCH --ntasks=1
+#SBATCH --time=72:00:00
+#SBATCH --partition=bigbatch
+
+python main.py
