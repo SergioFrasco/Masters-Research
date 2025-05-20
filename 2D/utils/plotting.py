@@ -3,14 +3,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import math
 
-import os
-from datetime import datetime
-
-import os
-from datetime import datetime
-
-import os
-from datetime import datetime
 
 import os
 from datetime import datetime
@@ -21,7 +13,7 @@ def get_run_directory():
     Format: results/current/{day_month_year}/{run_number}
     """
     if not hasattr(get_run_directory, "_run_path"):
-        today = datetime.today().strftime("%d_%m_%Y")
+        today = datetime.today().strftime("%m_%d_%Y")
         base_dir = os.path.join("results", "current", today)
         os.makedirs(base_dir, exist_ok=True)
 

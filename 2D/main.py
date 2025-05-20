@@ -34,7 +34,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=1, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 501, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -175,14 +175,13 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             trigger_ae_training = False
             if abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
                 ae_trigger_count_this_episode += 1
-                # TODO change this back to true after sanity check
-                trigger_ae_training = False
+                trigger_ae_training = True
                 
             
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
             if trigger_ae_training:
-                print("AE Training Triggered")
+                # print("AE Training Triggered")
                 target = agent.true_reward_map[np.newaxis, ..., np.newaxis]
 
                 # Train the model for a single step

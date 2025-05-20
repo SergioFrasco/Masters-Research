@@ -105,7 +105,7 @@ class SuccessorAgent:
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
         else:
-            print("non random action taken")
+            # print("non random action taken")
             # Compute Q-values using the chosen reward map.
             values = self.value_estimates_with_wvf(state_idx, chosen_reward_map)
             action = np.argmax(values)
