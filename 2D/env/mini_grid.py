@@ -55,6 +55,7 @@ class SimpleEnv(MiniGridEnv):
         # Create an empty grid
         self.grid = Grid(width, height)
 
+        # CHANGED - remoed boundaary walls
         # Generate the surrounding walls
         self.grid.wall_rect(0, 0, width, height)
 

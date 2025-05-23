@@ -16,9 +16,6 @@ from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
-# TODO
-# did the sanity check, still doesnt look right. am I doing SR the same as juliani?
-# Need to implement different reward object being split into separate reward maps
 
 # Suppress TensorFlow logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -34,7 +31,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps=100, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -238,7 +235,7 @@ def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
         # Generate visualizations occasionally
-        if episode % 1000 == 0:
+        if episode % 50 == 0:
             save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
             save_all_wvf(agent, save_path=generate_save_path(f"wvf_episode_{episode}"))
 
@@ -306,7 +303,10 @@ def main():
     # Setup the agents Vision System
     input_shape = (env.size, env.size, 1)  
     ae_model = build_autoencoder(input_shape)
-    ae_model.compile(optimizer='adam', loss=focal_mse_loss)
+
+    # CHANGED to quadratic loss
+    # ae_model.compile(optimizer='adam', loss=focal_mse_loss)
+    ae_model.compile(optimizer='adam', loss='mse')
 
     # Train the agent
     rewards = train_successor_agent(agent, env, ae_model = ae_model) 

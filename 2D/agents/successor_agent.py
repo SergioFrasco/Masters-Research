@@ -20,7 +20,10 @@ class SuccessorAgent:
         self.action_size = 3
         
         # Initialize successor features matrix
-        self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
+        # CHANGED initialize to zeros
+        self.M = np.zeros((self.action_size, self.state_size, self.state_size))
+
+        # self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
         self.w = np.zeros([self.state_size])
 
         # Initialize the true map to track discovered reward locations and predictions
