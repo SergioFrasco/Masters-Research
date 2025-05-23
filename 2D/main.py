@@ -234,6 +234,7 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
         episode_rewards.append(total_reward)
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
+
         # Generate visualizations occasionally
         if episode % 100 == 0:
             save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
