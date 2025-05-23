@@ -12,6 +12,25 @@ import random
 import numpy as np
 from tqdm import tqdm
 
+import hashlib
+import math
+from abc import abstractmethod
+from typing import Any, Iterable, SupportsFloat, TypeVar
+
+import gymnasium as gym
+import numpy as np
+import pygame
+import pygame.freetype
+from gymnasium import spaces
+from gymnasium.core import ActType, ObsType
+
+from minigrid.core.actions import Actions
+from minigrid.core.constants import COLOR_NAMES, DIR_TO_VEC, TILE_PIXELS
+from minigrid.core.grid import Grid
+from minigrid.core.mission import MissionSpace
+from minigrid.core.world_object import Point, WorldObj
+
+
 
 class SimpleEnv(MiniGridEnv):
     def __init__(
@@ -116,3 +135,76 @@ class SimpleEnv(MiniGridEnv):
 
         self.mission = "grand mission"
 
+    # Overriding the bas eimplementation of step
+    def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
+        self.step_count += 1
+
+        reward = 0
+        terminated = False
+        truncated = False
+
+        # --- Get the position in front of the agent ---
+        fwd_pos = self.front_pos
+
+        # FIX: Safe bounds check before accessing the grid
+        if 0 <= fwd_pos[0] < self.width and 0 <= fwd_pos[1] < self.height:
+            fwd_cell = self.grid.get(*fwd_pos)
+        else:
+            fwd_cell = None
+
+        # --- Action handling starts here ---
+
+        if action == self.actions.left:
+            self.agent_dir = (self.agent_dir - 1) % 4
+
+        elif action == self.actions.right:
+            self.agent_dir = (self.agent_dir + 1) % 4
+
+        elif action == self.actions.forward:
+            # FIX: Prevent moving out of bounds
+            if (
+                0 <= fwd_pos[0] < self.width
+                and 0 <= fwd_pos[1] < self.height
+                and (fwd_cell is None or fwd_cell.can_overlap())
+            ):
+                self.agent_pos = tuple(fwd_pos)
+
+            if fwd_cell is not None and fwd_cell.type == "goal":
+                terminated = True
+                reward = self._reward()
+
+            if fwd_cell is not None and fwd_cell.type == "lava":
+                terminated = True
+
+        elif action == self.actions.pickup:
+            if fwd_cell and fwd_cell.can_pickup():
+                if self.carrying is None:
+                    self.carrying = fwd_cell
+                    self.carrying.cur_pos = np.array([-1, -1])
+                    self.grid.set(fwd_pos[0], fwd_pos[1], None)
+
+        elif action == self.actions.drop:
+            if not fwd_cell and self.carrying:
+                self.grid.set(fwd_pos[0], fwd_pos[1], self.carrying)
+                self.carrying.cur_pos = fwd_pos
+                self.carrying = None
+
+        elif action == self.actions.toggle:
+            if fwd_cell:
+                fwd_cell.toggle(self, fwd_pos)
+
+        elif action == self.actions.done:
+            pass
+
+        else:
+            raise ValueError(f"Unknown action: {action}")
+
+        if self.step_count >= self.max_steps:
+            truncated = True
+
+        if self.render_mode == "human":
+            self.render()
+
+        obs = self.gen_obs()
+
+        return obs, reward, terminated, truncated, {}
