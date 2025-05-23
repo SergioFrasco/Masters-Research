@@ -57,7 +57,7 @@ class SimpleEnv(MiniGridEnv):
 
         # CHANGED - remoed boundaary walls
         # Generate the surrounding walls
-        self.grid.wall_rect(0, 0, width, height)
+        # self.grid.wall_rect(0, 0, width, height)
 
         # Generate vertical separation wall
         # for i in range(0, height):
