@@ -1,0 +1,3 @@
+Completed with a warmup period of 300 eps (random exploration)
+then WVF actions thereafter
+Still bypassing vision model
