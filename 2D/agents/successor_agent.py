@@ -154,22 +154,52 @@ class SuccessorAgent:
         return error
     
     def update_sr(self, current_exp, next_exp):
-        """Update successor features using SARSA TD learning"""
+        """
+        Update successor features using off-policy max (Q-learning style) update.
+        Also applies a small L2 shrinkage to stabilize learning.
+        """
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action
         s_1 = current_exp[2]  # next state index
-        s_a_1 = next_exp[1]   # next action
-        d = current_exp[4]    # done flag
-        
+        done = current_exp[4] # terminal flag
+
         I = self._onehot(s, self.state_size)
-        
-        if d:
-            td_error = (I + self.gamma * self._onehot(s_1, self.state_size) - self.M[s_a, s, :])
+
+        if done:
+            td_target = I
         else:
-            td_error = (I + self.gamma * self.M[s_a_1, s_1, :] - self.M[s_a, s, :])
-            
+            # Use greedy (off-policy) next action for SR update
+            best_a_prime = np.argmax([
+                np.dot(self.M[a, s_1, :], self.w) for a in range(self.action_size)
+            ])
+            td_target = I + self.gamma * self.M[best_a_prime, s_1, :]
+
+        td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
+
+        # Apply small L2 shrinkage
+        lambda_reg = 1e-4
+        self.M[s_a, s, :] *= (1.0 - lambda_reg)
+
         return np.mean(np.abs(td_error))
+
+    # def update_sr(self, current_exp, next_exp):
+    #     """Update successor features using SARSA TD learning"""
+    #     s = current_exp[0]    # current state index
+    #     s_a = current_exp[1]  # current action
+    #     s_1 = current_exp[2]  # next state index
+    #     s_a_1 = next_exp[1]   # next action
+    #     d = current_exp[4]    # done flag
+        
+    #     I = self._onehot(s, self.state_size)
+        
+    #     if d:
+    #         td_error = (I + self.gamma * self._onehot(s_1, self.state_size) - self.M[s_a, s, :])
+    #     else:
+    #         td_error = (I + self.gamma * self.M[s_a_1, s_1, :] - self.M[s_a, s, :])
+            
+    #     self.M[s_a, s, :] += self.learning_rate * td_error
+    #     return np.mean(np.abs(td_error))
     
     # def update_sr(self, current_exp, next_exp):
     #     """Update successor features using SARSA TD learning"""

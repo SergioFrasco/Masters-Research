@@ -31,7 +31,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -96,7 +96,7 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
             # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
             # CHANGED - introducing a warmup period for the SR
-            if step == 0 or episode < 300:
+            if step == 0 or episode < 3000:
                 # print("Normal Action Taken")
                 next_action = agent.sample_random_action(obs, epsilon=epsilon)
             
@@ -145,8 +145,8 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             #             reward_occurence_map[y, x] += 1
             
             # Rotate the grid to match render_mode = human 
-            normalized_grid = np.flipud(normalized_grid)
-            normalized_grid = np.rot90(normalized_grid, k=-1)
+            # normalized_grid = np.flipud(normalized_grid)
+            # normalized_grid = np.rot90(normalized_grid, k=-1)
             
             # Reshape for the autoencoder (add batch and channel dims)
             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
@@ -160,8 +160,8 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
             predicted_reward_map_2d[object_layer == 8] = 1.0 
 
-            predicted_reward_map_2d = np.flipud(predicted_reward_map_2d)
-            predicted_reward_map_2d = np.rot90(predicted_reward_map_2d, k=-1)
+            # predicted_reward_map_2d = np.flipud(predicted_reward_map_2d)
+            # predicted_reward_map_2d = np.rot90(predicted_reward_map_2d, k=-1)
             # predicted_reward_map_2d = np.rot90(normalized_grid, k=-1)
 
             
