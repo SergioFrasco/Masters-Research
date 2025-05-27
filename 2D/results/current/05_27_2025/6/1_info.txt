@@ -1,0 +1,2 @@
+Implementing the video SR and rerunning the adjusted SR
+The one with the identity and regularization

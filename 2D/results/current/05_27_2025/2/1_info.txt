@@ -1,0 +1,2 @@
+Run to check state occupancy
+With old method of choosing a goal

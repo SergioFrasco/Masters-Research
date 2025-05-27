@@ -21,7 +21,8 @@ class SuccessorAgent:
         
         # Initialize successor features matrix
         # CHANGED initialize to zeros
-        self.M = np.zeros((self.action_size, self.state_size, self.state_size))
+        # self.M = np.zeros((self.action_size, self.state_size, self.state_size))
+        self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
 
         # self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
         self.w = np.zeros([self.state_size])
@@ -194,9 +195,13 @@ class SuccessorAgent:
         td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
 
-        # Optional: Apply small L2 shrinkage for stability
+        # Apply small L2 shrinkage for stability
         lambda_reg = 1e-4
         self.M[s_a, s, :] *= (1.0 - lambda_reg)
+
+        # # Regularization
+        # entropy_reg = 0.01
+        # self.M[s_a, s, :] += entropy_reg * (1.0/self.state_size - self.M[s_a, s, :])
 
         return np.mean(np.abs(td_error))
     

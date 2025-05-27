@@ -7,12 +7,14 @@ import absl.logging
 import tensorflow as tf
 import math
 import pandas as pd
+import glob
 
 from minigrid.core.world_object import Goal, Wall
 from tqdm import tqdm
 from env import SimpleEnv, data_collector
 from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder, weighted_focal_mse_loss
 from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path
+from utils import create_video_from_images, get_latest_run_dir
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
@@ -31,7 +33,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 3000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -73,7 +75,6 @@ def train_successor_agent(agent, env, episodes = 3000, ae_model=None, max_steps=
             # Tracking where the agent is going
             agent_pos = tuple(env.agent_pos)  # (x, y)
             state_occupancy[agent_pos[1], agent_pos[0]] += 1  # (row, col) = (y, x)
-
             
             # Complete current experience tuple
             current_exp[2] = next_state_idx  # next state
@@ -84,11 +85,41 @@ def train_successor_agent(agent, env, episodes = 3000, ae_model=None, max_steps=
             # 1. Build the WVF for this moment in time
             # 2. Choose the Max one of these Maps
             # 3. Sample an Action from this map with decaying epsilon probability
+            
+            # CHANGED - I think this may be causing the agent to learn to move to only 1 position
+            # # Get the map with the single highest max value
+            # max_vals = agent.wvf.max(axis=(1, 2))  # shape: (100,)
+            # best_map_index = np.argmax(max_vals)   # index of the map with the highest max value
+            # chosen_map = agent.wvf[best_map_index]  # shape: (10, 10)
 
-            # Get the map with the single highest max value
-            max_vals = agent.wvf.max(axis=(1, 2))  # shape: (100,)
-            best_map_index = np.argmax(max_vals)   # index of the map with the highest max value
-            chosen_map = agent.wvf[best_map_index]  # shape: (10, 10)
+            reward_threshold = 0.5
+            agent_y, agent_x = env.agent_pos  # assuming (y, x) format
+
+            # Step 1: Create a mask of where values exceed the threshold
+            exceeds_threshold = agent.wvf > reward_threshold  # shape: (num_maps, H, W)
+
+            # Step 2: Compute distance of each exceeding point to the agent
+            H, W = agent.wvf.shape[1:]
+            y_coords, x_coords = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+            distances = np.sqrt((y_coords - agent_y)**2 + (x_coords - agent_x)**2)  # shape: (H, W)
+
+            # Broadcast distances to all maps
+            distances_broadcasted = np.broadcast_to(distances, agent.wvf.shape)  # (num_maps, H, W)
+
+            # Step 3: Mask distances where threshold not exceeded
+            masked_distances = np.where(exceeds_threshold, distances_broadcasted, np.inf)
+
+            # Step 4: Get minimum distance for each map
+            min_dist_per_map = masked_distances.min(axis=(1, 2))  # shape: (num_maps,)
+
+            # Step 5: Only consider maps where at least one value exceeded the threshold
+            valid_maps = np.any(exceeds_threshold, axis=(1, 2))  # shape: (num_maps,)
+            valid_dists = np.where(valid_maps, min_dist_per_map, np.inf)
+
+            # Step 6: Choose the map with the smallest such distance
+            best_map_index = np.argmin(valid_dists)
+            chosen_map = agent.wvf[best_map_index]
+
             
             # Random actions for the firt N episodes to check if SR improves
             # warmup_episodes = 100
@@ -256,22 +287,22 @@ def train_successor_agent(agent, env, episodes = 3000, ae_model=None, max_steps=
 
 
         # Generate visualizations occasionally
-        # if episode % 100 == 0:
-        #     save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
-        #     save_all_wvf(agent, save_path=generate_save_path(f"wvf_episode_{episode}"))
+        if episode % 100 == 0:
+            # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
+            # save_all_wvf(agent, save_path=generate_save_path(f"wvf_episode_{episode}"))
 
-        #     # Saving the SR
-        #     # Averaged SR matrix: shape (state_size, state_size)
-        #     averaged_M = np.mean(agent.M, axis=0)
+            # Saving the SR
+            # Averaged SR matrix: shape (state_size, state_size)
+            averaged_M = np.mean(agent.M, axis=0)
 
-        #     # Create a figure
-        #     plt.figure(figsize=(6, 5))
-        #     im = plt.imshow(averaged_M, cmap='hot')
-        #     plt.title(f"Averaged SR Matrix (Episode {episode})")
-        #     plt.colorbar(im, label="SR Value")  # Add colorbar
-        #     plt.tight_layout()
-        #     plt.savefig(generate_save_path(f'averaged_M_{episode}.png'))
-        #     plt.close()  # Close the figure to free memory
+            # Create a figure
+            plt.figure(figsize=(6, 5))
+            im = plt.imshow(averaged_M, cmap='hot')
+            plt.title(f"Averaged SR Matrix (Episode {episode})")
+            plt.colorbar(im, label="SR Value")  # Add colorbar
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'SR/averaged_M_{episode}.png'))
+            plt.close()  # Close the figure to free memory
 
         #     save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"episode_{episode}"))
         
@@ -279,6 +310,13 @@ def train_successor_agent(agent, env, episodes = 3000, ae_model=None, max_steps=
     
     window = 20
     rolling = pd.Series(ae_triggers_per_episode).rolling(window).mean()
+
+    # Make a video of how the SR changes over time
+    latest_run = get_latest_run_dir()  # e.g., results/current/2025-05-27/run_3
+    sr_folder = os.path.join(latest_run, "SR")
+    video_path = os.path.join(latest_run, "sr_video.avi")
+    create_video_from_images(sr_folder, video_path, fps=5, sort_numerically=True)
+
 
     # Plotting number of AE Training Triggers
     plt.figure(figsize=(10, 5))

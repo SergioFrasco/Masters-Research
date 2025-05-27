@@ -1,9 +1,11 @@
 import cv2
 import os
+from datetime import datetime
 import numpy as np
 from glob import glob
+import re
 
-def create_video_from_images(image_folder, output_video_path, fps=30, sort_numerically=True):
+def create_video_from_images(image_folder, output_video_path, fps=5, sort_numerically=True):
     """
     Create a video from a folder of images.
     
@@ -34,7 +36,7 @@ def create_video_from_images(image_folder, output_video_path, fps=30, sort_numer
     height, width, layers = first_image.shape
     
     # Define the codec and create VideoWriter object
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # You can also use 'XVID' for .avi
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')  # AVI format
     video = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
     
     # Counter for progress tracking
@@ -61,3 +63,27 @@ if __name__ == "__main__":
     output_video = "../results/new_model_video.mp4"
     
     create_video_from_images(image_folder, output_video, fps=30)
+
+def get_latest_run_dir(parent_dir="results/current"):
+    """
+    Returns the run directory with the highest number under today's date,
+    e.g., results/current/2025-05-27/3
+    """
+    today = datetime.today().strftime("%m_%d_%Y")
+    date_dir = os.path.join(parent_dir, today)
+
+    if not os.path.isdir(date_dir):
+        raise FileNotFoundError(f"No directory found for today's date: {date_dir}")
+
+    run_dirs = []
+    for d in os.listdir(date_dir):
+        d_path = os.path.join(date_dir, d)
+        if os.path.isdir(d_path) and d.isdigit():
+            run_dirs.append((int(d), d_path))
+
+    if not run_dirs:
+        raise FileNotFoundError(f"No numeric run directories found in '{date_dir}'")
+
+    # ✅ FIX: Use numeric comparison, then return the path
+    _, latest_run_path = max(run_dirs, key=lambda x: x[0])
+    return latest_run_path
