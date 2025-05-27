@@ -31,7 +31,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 3000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -40,8 +40,12 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
     epsilon = epsilon_start
     step_counts = []
 
+    # Tracking where the agent is going
+    state_occupancy = np.zeros((env.size, env.size), dtype=np.int32)
+
+
     # Tracking where rewards are occuring
-    # reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
+    reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
 
     print_flag = True
     
@@ -65,6 +69,11 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
             next_state_idx = agent.get_state_index(obs)
+
+            # Tracking where the agent is going
+            agent_pos = tuple(env.agent_pos)  # (x, y)
+            state_occupancy[agent_pos[1], agent_pos[0]] += 1  # (row, col) = (y, x)
+
             
             # Complete current experience tuple
             current_exp[2] = next_state_idx  # next state
@@ -96,7 +105,7 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
             # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
             # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
             # CHANGED - introducing a warmup period for the SR
-            if step == 0 or episode < 3000:
+            if step == 0 or episode < 100:
                 # print("Normal Action Taken")
                 next_action = agent.sample_random_action(obs, epsilon=epsilon)
             
@@ -139,10 +148,10 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
 
             # Check reward Occurence
             # Iterate over the grid and increment reward occurrence where object type == 8 (goal)
-            # for y in range(env.height):
-            #     for x in range(env.width):
-            #         if object_layer[y, x] == 8:
-            #             reward_occurence_map[y, x] += 1
+            for y in range(env.height):
+                for x in range(env.width):
+                    if object_layer[y, x] == 8:
+                        reward_occurence_map[y, x] += 1
             
             # Rotate the grid to match render_mode = human 
             # normalized_grid = np.flipud(normalized_grid)
@@ -247,24 +256,24 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
 
 
         # Generate visualizations occasionally
-        if episode % 100 == 0:
-            save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
-            save_all_wvf(agent, save_path=generate_save_path(f"wvf_episode_{episode}"))
+        # if episode % 100 == 0:
+        #     save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
+        #     save_all_wvf(agent, save_path=generate_save_path(f"wvf_episode_{episode}"))
 
-            # Saving the SR
-            # Averaged SR matrix: shape (state_size, state_size)
-            averaged_M = np.mean(agent.M, axis=0)
+        #     # Saving the SR
+        #     # Averaged SR matrix: shape (state_size, state_size)
+        #     averaged_M = np.mean(agent.M, axis=0)
 
-            # Create a figure
-            plt.figure(figsize=(6, 5))
-            im = plt.imshow(averaged_M, cmap='hot')
-            plt.title(f"Averaged SR Matrix (Episode {episode})")
-            plt.colorbar(im, label="SR Value")  # Add colorbar
-            plt.tight_layout()
-            plt.savefig(generate_save_path(f'averaged_M_{episode}.png'))
-            plt.close()  # Close the figure to free memory
+        #     # Create a figure
+        #     plt.figure(figsize=(6, 5))
+        #     im = plt.imshow(averaged_M, cmap='hot')
+        #     plt.title(f"Averaged SR Matrix (Episode {episode})")
+        #     plt.colorbar(im, label="SR Value")  # Add colorbar
+        #     plt.tight_layout()
+        #     plt.savefig(generate_save_path(f'averaged_M_{episode}.png'))
+        #     plt.close()  # Close the figure to free memory
 
-            save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"episode_{episode}"))
+        #     save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"episode_{episode}"))
         
     ae_model.save(generate_save_path('vision_model.h5'))
     
@@ -281,15 +290,25 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
     plt.grid(True)
     plt.savefig(generate_save_path("ae_training_triggers.png"))
 
+    # Plotting state occupancy
+    plt.figure(figsize=(6, 6))
+    plt.imshow(state_occupancy, cmap='Blues', interpolation='nearest')
+    plt.title('State Occupancy Heatmap')
+    plt.colorbar(label='Number of Visits')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.savefig(generate_save_path("state_occupancy_heatmap.png"))
+    plt.close()
+
     # Plotting the number of reward occurences in each state
-    # plt.figure(figsize=(6, 6))
-    # plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
-    # plt.title('Reward Occurrence Map (Heatmap)')
-    # plt.colorbar(label='Times Reward Observed')
-    # plt.xlabel('X')
-    # plt.ylabel('Y')
-    # plt.savefig("results/reward_occurrence_heatmap.png")
-    # plt.close()
+    plt.figure(figsize=(6, 6))
+    plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
+    plt.title('Reward Occurrence Map (Heatmap)')
+    plt.colorbar(label='Times Reward Observed')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.savefig(generate_save_path("reward_occurences.png"))
+    plt.close()
 
     # Plotting the number of steps taken in each episode - See if its learning
     rolling = pd.Series(step_counts).rolling(window).mean()
