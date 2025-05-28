@@ -75,6 +75,7 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
             # Tracking where the agent is going
             agent_pos = tuple(env.agent_pos)  # (x, y)
             state_occupancy[agent_pos[1], agent_pos[0]] += 1  # (row, col) = (y, x)
+            agent.update_visit_counts(env.agent_pos) # for the exploration bonus
             
             # Complete current experience tuple
             current_exp[2] = next_state_idx  # next state
@@ -92,33 +93,33 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
             # best_map_index = np.argmax(max_vals)   # index of the map with the highest max value
             # chosen_map = agent.wvf[best_map_index]  # shape: (10, 10)
 
-            reward_threshold = 0.5
-            agent_y, agent_x = env.agent_pos  # assuming (y, x) format
+            # reward_threshold = 0.5
+            # agent_y, agent_x = env.agent_pos  # assuming (y, x) format
 
-            # Step 1: Create a mask of where values exceed the threshold
-            exceeds_threshold = agent.wvf > reward_threshold  # shape: (num_maps, H, W)
+            # # Step 1: Create a mask of where values exceed the threshold
+            # exceeds_threshold = agent.wvf > reward_threshold  # shape: (num_maps, H, W)
 
-            # Step 2: Compute distance of each exceeding point to the agent
-            H, W = agent.wvf.shape[1:]
-            y_coords, x_coords = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
-            distances = np.sqrt((y_coords - agent_y)**2 + (x_coords - agent_x)**2)  # shape: (H, W)
+            # # Step 2: Compute distance of each exceeding point to the agent
+            # H, W = agent.wvf.shape[1:]
+            # y_coords, x_coords = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+            # distances = np.sqrt((y_coords - agent_y)**2 + (x_coords - agent_x)**2)  # shape: (H, W)
 
-            # Broadcast distances to all maps
-            distances_broadcasted = np.broadcast_to(distances, agent.wvf.shape)  # (num_maps, H, W)
+            # # Broadcast distances to all maps
+            # distances_broadcasted = np.broadcast_to(distances, agent.wvf.shape)  # (num_maps, H, W)
 
-            # Step 3: Mask distances where threshold not exceeded
-            masked_distances = np.where(exceeds_threshold, distances_broadcasted, np.inf)
+            # # Step 3: Mask distances where threshold not exceeded
+            # masked_distances = np.where(exceeds_threshold, distances_broadcasted, np.inf)
 
-            # Step 4: Get minimum distance for each map
-            min_dist_per_map = masked_distances.min(axis=(1, 2))  # shape: (num_maps,)
+            # # Step 4: Get minimum distance for each map
+            # min_dist_per_map = masked_distances.min(axis=(1, 2))  # shape: (num_maps,)
 
-            # Step 5: Only consider maps where at least one value exceeded the threshold
-            valid_maps = np.any(exceeds_threshold, axis=(1, 2))  # shape: (num_maps,)
-            valid_dists = np.where(valid_maps, min_dist_per_map, np.inf)
+            # # Step 5: Only consider maps where at least one value exceeded the threshold
+            # valid_maps = np.any(exceeds_threshold, axis=(1, 2))  # shape: (num_maps,)
+            # valid_dists = np.where(valid_maps, min_dist_per_map, np.inf)
 
-            # Step 6: Choose the map with the smallest such distance
-            best_map_index = np.argmin(valid_dists)
-            chosen_map = agent.wvf[best_map_index]
+            # # Step 6: Choose the map with the smallest such distance
+            # best_map_index = np.argmin(valid_dists)
+            # chosen_map = agent.wvf[best_map_index]
 
             
             # Random actions for the firt N episodes to check if SR improves
@@ -136,7 +137,7 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
             # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
             # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
             # CHANGED - introducing a warmup period for the SR
-            if step == 0 or episode < 100:
+            if step == 0 or episode < 1:
                 # print("Normal Action Taken")
                 next_action = agent.sample_random_action(obs, epsilon=epsilon)
             
@@ -146,7 +147,7 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
                     #   print("First WVF Action Taken")
                 #     print_flag = False
                 # Sample an action from the max WVF
-                next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon, chosen_reward_map=chosen_map)
+                next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
                 
             # Create next experience tuple
             next_exp = [next_state_idx, next_action, None, None, None]

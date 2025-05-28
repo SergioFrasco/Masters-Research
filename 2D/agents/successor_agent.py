@@ -40,6 +40,15 @@ class SuccessorAgent:
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
         # self.wvf = np.zeros((self.state_size, self.state_size)) 
 
+        # Track visit counts for exploration bonus
+        self.visit_counts = np.zeros((self.grid_size, self.grid_size), dtype=np.int32)
+        self.exploration_weight = 1.0  # Weight for exploration bonus
+
+    def update_visit_counts(self, agent_pos):
+        """Update visit counts for exploration bonus"""
+        x, y = agent_pos
+        self.visit_counts[y, x] += 1
+
     # older non-trandsformed version
     def get_state_index(self, obs):
         """Convert MiniGrid observation to state index"""
@@ -90,31 +99,105 @@ class SuccessorAgent:
         """Sample an action uniformly at random"""
         return np.random.randint(self.action_size)
 
-    def sample_action_with_wvf(self, obs, chosen_reward_map, epsilon=0.0):
+
+    def sample_action_with_wvf(self, obs, epsilon=0.0, chosen_reward_map=None):
         """
-        Sample an action using epsilon-greedy selection where the values are computed
-        using the successor representation and a given reward map.
-        
-        Parameters:
-        obs: observation from which to determine the current state.
-        chosen_reward_map: a 2D reward map (grid_size x grid_size) to be used as the goal.
-        epsilon: probability of choosing a random action.
-        
-        Returns:
-        The selected action (an integer).
+        Sample an action using epsilon-greedy selection with improved target selection
         """
-        # Convert observation into a state index (or coordinate) used by SR.
         state_idx = self.get_state_index(obs)
         
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
         else:
-            # print("non random action taken")
-            # Compute Q-values using the chosen reward map.
+            # If no specific reward map provided, select one using improved method
+            if chosen_reward_map is None:
+                chosen_reward_map = self.select_target_with_exploration()
+            
+            # Compute Q-values using the chosen reward map
             values = self.value_estimates_with_wvf(state_idx, chosen_reward_map)
             action = np.argmax(values)
-            # Break Ties
             return action
+
+    def select_target_with_exploration(self):
+        """
+        Select target using exploration bonus and probabilistic selection
+        """
+        agent_y, agent_x = self.env.agent_pos
+        reward_threshold = 0.5
+        
+        # Step 1: Add exploration bonus to WVF
+        exploration_bonus = self.exploration_weight / (self.visit_counts + 1)
+        modified_wvf = self.wvf + exploration_bonus[np.newaxis, :, :]
+        
+        # Step 2: Find maps with values exceeding threshold (using modified WVF)
+        exceeds_threshold = modified_wvf > reward_threshold
+        
+        # Step 3: Compute distances
+        H, W = modified_wvf.shape[1:]
+        y_coords, x_coords = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+        distances = np.sqrt((y_coords - agent_y)**2 + (x_coords - agent_x)**2)
+        distances_broadcasted = np.broadcast_to(distances, modified_wvf.shape)
+        
+        # Step 4: Mask distances and find valid maps
+        masked_distances = np.where(exceeds_threshold, distances_broadcasted, np.inf)
+        min_dist_per_map = masked_distances.min(axis=(1, 2))
+        valid_maps = np.any(exceeds_threshold, axis=(1, 2))
+        
+        if not np.any(valid_maps):
+            # No valid maps, return the first one as fallback
+            return self.wvf[0]
+        
+        # Step 5: Probabilistic selection instead of always picking closest
+        valid_indices = np.where(valid_maps)[0]
+        
+        if len(valid_indices) == 1:
+            # Only one valid map
+            best_map_index = valid_indices[0]
+        else:
+            # Multiple valid maps - use probabilistic selection
+            max_vals = modified_wvf.max(axis=(1, 2))
+            valid_max_vals = max_vals[valid_indices]
+            valid_min_dists = min_dist_per_map[valid_indices]
+            
+            # Compute weights: higher value, lower distance = higher weight
+            # Add small epsilon to avoid division by zero
+            value_weights = valid_max_vals + 1e-6
+            distance_weights = 1.0 / (valid_min_dists + 1e-6)
+            combined_weights = value_weights * distance_weights
+            
+            # Normalize to probabilities
+            probabilities = combined_weights / combined_weights.sum()
+            
+            # Sample based on probabilities
+            chosen_idx = np.random.choice(len(valid_indices), p=probabilities)
+            best_map_index = valid_indices[chosen_idx]
+        
+        return modified_wvf[best_map_index]  
+    # def sample_action_with_wvf(self, obs, chosen_reward_map, epsilon=0.0):
+    #     """
+    #     Sample an action using epsilon-greedy selection where the values are computed
+    #     using the successor representation and a given reward map.
+        
+    #     Parameters:
+    #     obs: observation from which to determine the current state.
+    #     chosen_reward_map: a 2D reward map (grid_size x grid_size) to be used as the goal.
+    #     epsilon: probability of choosing a random action.
+        
+    #     Returns:
+    #     The selected action (an integer).
+    #     """
+    #     # Convert observation into a state index (or coordinate) used by SR.
+    #     state_idx = self.get_state_index(obs)
+        
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         return np.random.randint(self.action_size)
+    #     else:
+    #         # print("non random action taken")
+    #         # Compute Q-values using the chosen reward map.
+    #         values = self.value_estimates_with_wvf(state_idx, chosen_reward_map)
+    #         action = np.argmax(values)
+    #         # Break Ties
+    #         return action
 
 
     def value_estimates_with_wvf(self, state_idx, reward_map):
@@ -200,8 +283,8 @@ class SuccessorAgent:
         self.M[s_a, s, :] *= (1.0 - lambda_reg)
 
         # # Regularization
-        # entropy_reg = 0.01
-        # self.M[s_a, s, :] += entropy_reg * (1.0/self.state_size - self.M[s_a, s, :])
+        entropy_reg = 0.01
+        self.M[s_a, s, :] += entropy_reg * (1.0/self.state_size - self.M[s_a, s, :])
 
         return np.mean(np.abs(td_error))
     
