@@ -18,7 +18,6 @@ from utils import create_video_from_images, get_latest_run_dir
 from models.construct_sr import constructSR
 from agents import SuccessorAgent
 
-
 # Suppress TensorFlow logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
@@ -44,7 +43,6 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
 
     # Tracking where the agent is going
     state_occupancy = np.zeros((env.size, env.size), dtype=np.int32)
-
 
     # Tracking where rewards are occuring
     reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
@@ -285,7 +283,6 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
         # Store episode statistics
         episode_rewards.append(total_reward)
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
-
 
         # Generate visualizations occasionally
         if episode % 100 == 0:

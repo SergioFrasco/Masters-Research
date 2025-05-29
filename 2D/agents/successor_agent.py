@@ -461,11 +461,11 @@ class SuccessorAgent:
         td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
 
-        # Apply small L2 shrinkage for stability
+        # Apply small L2: Prevents values from growing too large
         lambda_reg = 1e-4
         self.M[s_a, s, :] *= (1.0 - lambda_reg)
 
-        # # Regularization
+        # Regularization : Encourages uniform state visitation by pulling values toward 1/state_size
         entropy_reg = 0.01
         self.M[s_a, s, :] += entropy_reg * (1.0/self.state_size - self.M[s_a, s, :])
 
