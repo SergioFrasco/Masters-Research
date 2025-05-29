@@ -1,0 +1,3 @@
+This was run to get WVFs plotting again to answer Devons discord message 
+about why its incentivised when there is no goal there.
+I want to see if WVF blow up and hot spot occupancy are correlated

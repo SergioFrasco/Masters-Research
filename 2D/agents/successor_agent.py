@@ -100,79 +100,262 @@ class SuccessorAgent:
         return np.random.randint(self.action_size)
 
 
-    def sample_action_with_wvf(self, obs, epsilon=0.0, chosen_reward_map=None):
+    # Helper funcitons for local action selection
+    def _get_next_position(self, current_pos, action):
         """
-        Sample an action using epsilon-greedy selection with improved target selection
+        Simulate the next position given current position and action
+        MiniGrid action space:
+        - 0: turn left
+        - 1: turn right  
+        - 2: move forward
         """
-        state_idx = self.get_state_index(obs)
+        x, y = current_pos
+        agent_dir = self.env.agent_dir
         
+        if action == 0:  # turn left
+            # Position doesn't change, only direction changes
+            return (x, y)
+        elif action == 1:  # turn right
+            # Position doesn't change, only direction changes
+            return (x, y)
+        elif action == 2:  # move forward
+            # Move in current direction
+            if agent_dir == 0:  # right
+                return (x + 1, y)
+            elif agent_dir == 1:  # down
+                return (x, y + 1)
+            elif agent_dir == 2:  # left
+                return (x - 1, y)
+            elif agent_dir == 3:  # up
+                return (x, y - 1)
+        
+        return current_pos
+
+    def _position_to_state_index(self, pos):
+        """Convert position to state index"""
+        x, y = pos
+        return x + y * self.grid_size
+
+    def _is_valid_position(self, pos):
+        """Check if position is valid (within bounds and not a wall)"""
+        x, y = pos
+        if x < 0 or x >= self.grid_size or y < 0 or y >= self.grid_size:
+            return False
+        
+        # Check if it's a wall
+        cell = self.env.grid.get(x, y)
+        from minigrid.core.world_object import Wall
+        return cell is None or not isinstance(cell, Wall)
+
+    # the previous one had to have a higher agent pos value than moving forward, this one intelligently makes the move to maximize the next step too
+    def sample_action_with_wvf(self, obs, epsilon=0.0):
+        """
+        Sample action by evaluating all 4 neighboring positions and choosing
+        the action sequence that gets us to the highest-value neighbor
+        """
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
-        else:
-            # If no specific reward map provided, select one using improved method
-            if chosen_reward_map is None:
-                chosen_reward_map = self.select_target_with_exploration()
-            
-            # Compute Q-values using the chosen reward map
-            values = self.value_estimates_with_wvf(state_idx, chosen_reward_map)
-            action = np.argmax(values)
-            return action
+        
+        current_pos = self.env.agent_pos
+        x, y = current_pos
+        current_dir = self.env.agent_dir
+        
+        # Define the 4 neighboring positions
+        neighbors = [
+            ((x + 1, y), 0),  # right, direction 0
+            ((x, y + 1), 1),  # down, direction 1  
+            ((x - 1, y), 2),  # left, direction 2
+            ((x, y - 1), 3),  # up, direction 3
+        ]
+        
+        best_value = -np.inf
+        best_action = np.random.randint(self.action_size)
+        
+        for neighbor_pos, target_dir in neighbors:
+            if self._is_valid_position(neighbor_pos):
+                next_y, next_x = neighbor_pos
+                
+                # Get max WVF value at this neighbor
+                max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
+                
+                if max_value_across_maps > best_value:
+                    best_value = max_value_across_maps
+                    # Determine what action to take to move toward this neighbor
+                    best_action = self._get_action_toward_direction(current_dir, target_dir)
+        
+        return best_action
 
-    def select_target_with_exploration(self):
+    def _get_action_toward_direction(self, current_dir, target_dir):
         """
-        Select target using exploration bonus and probabilistic selection
+        Get the action needed to face the target direction from current direction
         """
-        agent_y, agent_x = self.env.agent_pos
-        reward_threshold = 0.5
+        if current_dir == target_dir:
+            return 2  # move forward
         
-        # Step 1: Add exploration bonus to WVF
-        exploration_bonus = self.exploration_weight / (self.visit_counts + 1)
-        modified_wvf = self.wvf + exploration_bonus[np.newaxis, :, :]
+        # Calculate the shortest rotation
+        diff = (target_dir - current_dir) % 4
         
-        # Step 2: Find maps with values exceeding threshold (using modified WVF)
-        exceeds_threshold = modified_wvf > reward_threshold
+        if diff == 1:  # need to turn right once
+            return 1  # turn right
+        elif diff == 3:  # need to turn left once (or right 3 times)
+            return 0  # turn left  
+        elif diff == 2:  # need to turn around (180 degrees)
+            # Choose randomly between left and right (both take 2 steps)
+            return np.random.choice([0, 1])
         
-        # Step 3: Compute distances
-        H, W = modified_wvf.shape[1:]
-        y_coords, x_coords = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
-        distances = np.sqrt((y_coords - agent_y)**2 + (x_coords - agent_x)**2)
-        distances_broadcasted = np.broadcast_to(distances, modified_wvf.shape)
+        return 2  # fallback: move forward
+
+    # # This verion looks at all imediate states
+    # def sample_action_with_wvf(self, obs, epsilon=0.0):
+    #     """
+    #     Sample action by looking at all WVF maps at the 4 possible next positions
+    #     and choosing the action that leads to the highest value across all maps
+    #     """
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         return np.random.randint(self.action_size)
         
-        # Step 4: Mask distances and find valid maps
-        masked_distances = np.where(exceeds_threshold, distances_broadcasted, np.inf)
-        min_dist_per_map = masked_distances.min(axis=(1, 2))
-        valid_maps = np.any(exceeds_threshold, axis=(1, 2))
+    #     current_pos = self.env.agent_pos
+    #     action_values = []
         
-        if not np.any(valid_maps):
-            # No valid maps, return the first one as fallback
-            return self.wvf[0]
-        
-        # Step 5: Probabilistic selection instead of always picking closest
-        valid_indices = np.where(valid_maps)[0]
-        
-        if len(valid_indices) == 1:
-            # Only one valid map
-            best_map_index = valid_indices[0]
-        else:
-            # Multiple valid maps - use probabilistic selection
-            max_vals = modified_wvf.max(axis=(1, 2))
-            valid_max_vals = max_vals[valid_indices]
-            valid_min_dists = min_dist_per_map[valid_indices]
+    #     # For each possible action
+    #     for action in range(self.action_size):
+    #         # Get the next position this action would lead to
+    #         next_pos = self._get_next_position(current_pos, action)
             
-            # Compute weights: higher value, lower distance = higher weight
-            # Add small epsilon to avoid division by zero
-            value_weights = valid_max_vals + 1e-6
-            distance_weights = 1.0 / (valid_min_dists + 1e-6)
-            combined_weights = value_weights * distance_weights
-            
-            # Normalize to probabilities
-            probabilities = combined_weights / combined_weights.sum()
-            
-            # Sample based on probabilities
-            chosen_idx = np.random.choice(len(valid_indices), p=probabilities)
-            best_map_index = valid_indices[chosen_idx]
+    #         if self._is_valid_position(next_pos):
+    #             next_y, next_x = next_pos
+                
+    #             # Look at ALL WVF maps at this position and find the maximum value
+    #             max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
+    #             action_values.append(max_value_across_maps)
+    #         else:
+    #             # Invalid position (wall/boundary)
+    #             action_values.append(-np.inf)
         
-        return modified_wvf[best_map_index]  
+    #     # Choose action that leads to position with highest cross-map value
+    #     return np.argmax(action_values)
+
+    # # This version 
+    # def sample_action_with_cross_map_wvf_alternative(self, obs, epsilon=0.0):
+    #     """
+    #     Alternative interpretation: For each next position, find which map gives
+    #     the highest value, then compare across positions
+    #     """
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         return np.random.randint(self.action_size)
+        
+    #     current_pos = self.env.agent_pos
+    #     action_info = []
+        
+    #     # For each possible action
+    #     for action in range(self.action_size):
+    #         next_pos = self._get_next_position(current_pos, action)
+            
+    #         if self._is_valid_position(next_pos):
+    #             next_y, next_x = next_pos
+                
+    #             # Find which map gives the highest value at this position
+    #             values_at_position = self.wvf[:, next_y, next_x]  # All map values at this position
+    #             best_map_idx = np.argmax(values_at_position)
+    #             best_value = values_at_position[best_map_idx]
+                
+    #             action_info.append({
+    #                 'action': action,
+    #                 'value': best_value,
+    #                 'map_idx': best_map_idx,
+    #                 'position': next_pos
+    #             })
+    #         else:
+    #             action_info.append({
+    #                 'action': action,
+    #                 'value': -np.inf,
+    #                 'map_idx': None,
+    #                 'position': next_pos
+    #             })
+        
+    #     # Find action with highest value
+    #     best_action_info = max(action_info, key=lambda x: x['value'])
+        
+    #     # Optional: You could also store which map was chosen for debugging
+    #     self.last_chosen_map_idx = best_action_info['map_idx']
+        
+    #     return best_action_info['action']
+
+    # # this version was the global version with exploration
+    # def sample_action_with_wvf(self, obs, epsilon=0.0, chosen_reward_map=None):
+    #     """
+    #     Sample an action using epsilon-greedy selection with improved target selection
+    #     """
+    #     state_idx = self.get_state_index(obs)
+        
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         return np.random.randint(self.action_size)
+    #     else:
+    #         # If no specific reward map provided, select one using improved method
+    #         if chosen_reward_map is None:
+    #             chosen_reward_map = self.select_target_with_exploration()
+            
+    #         # Compute Q-values using the chosen reward map
+    #         values = self.value_estimates_with_wvf(state_idx, chosen_reward_map)
+    #         action = np.argmax(values)
+    #         return action
+
+    # def select_target_with_exploration(self):
+    #     """
+    #     Select target using exploration bonus and probabilistic selection
+    #     """
+    #     agent_y, agent_x = self.env.agent_pos
+    #     reward_threshold = 0.5
+        
+    #     # Step 1: Add exploration bonus to WVF
+    #     exploration_bonus = self.exploration_weight / (self.visit_counts + 1)
+    #     modified_wvf = self.wvf + exploration_bonus[np.newaxis, :, :]
+        
+    #     # Step 2: Find maps with values exceeding threshold (using modified WVF)
+    #     exceeds_threshold = modified_wvf > reward_threshold
+        
+    #     # Step 3: Compute distances
+    #     H, W = modified_wvf.shape[1:]
+    #     y_coords, x_coords = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
+    #     distances = np.sqrt((y_coords - agent_y)**2 + (x_coords - agent_x)**2)
+    #     distances_broadcasted = np.broadcast_to(distances, modified_wvf.shape)
+        
+    #     # Step 4: Mask distances and find valid maps
+    #     masked_distances = np.where(exceeds_threshold, distances_broadcasted, np.inf)
+    #     min_dist_per_map = masked_distances.min(axis=(1, 2))
+    #     valid_maps = np.any(exceeds_threshold, axis=(1, 2))
+        
+    #     if not np.any(valid_maps):
+    #         # No valid maps, return the first one as fallback
+    #         return self.wvf[0]
+        
+    #     # Step 5: Probabilistic selection instead of always picking closest
+    #     valid_indices = np.where(valid_maps)[0]
+        
+    #     if len(valid_indices) == 1:
+    #         # Only one valid map
+    #         best_map_index = valid_indices[0]
+    #     else:
+    #         # Multiple valid maps - use probabilistic selection
+    #         max_vals = modified_wvf.max(axis=(1, 2))
+    #         valid_max_vals = max_vals[valid_indices]
+    #         valid_min_dists = min_dist_per_map[valid_indices]
+            
+    #         # Compute weights: higher value, lower distance = higher weight
+    #         # Add small epsilon to avoid division by zero
+    #         value_weights = valid_max_vals + 1e-6
+    #         distance_weights = 1.0 / (valid_min_dists + 1e-6)
+    #         combined_weights = value_weights * distance_weights
+            
+    #         # Normalize to probabilities
+    #         probabilities = combined_weights / combined_weights.sum()
+            
+    #         # Sample based on probabilities
+    #         chosen_idx = np.random.choice(len(valid_indices), p=probabilities)
+    #         best_map_index = valid_indices[chosen_idx]
+        
+    #     return modified_wvf[best_map_index]  
+
     # def sample_action_with_wvf(self, obs, chosen_reward_map, epsilon=0.0):
     #     """
     #     Sample an action using epsilon-greedy selection where the values are computed

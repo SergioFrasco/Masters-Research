@@ -290,7 +290,7 @@ def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=
         # Generate visualizations occasionally
         if episode % 100 == 0:
             # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
-            # save_all_wvf(agent, save_path=generate_save_path(f"wvf_episode_{episode}"))
+            save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
             # Saving the SR
             # Averaged SR matrix: shape (state_size, state_size)
