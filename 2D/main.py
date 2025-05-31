@@ -32,7 +32,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """

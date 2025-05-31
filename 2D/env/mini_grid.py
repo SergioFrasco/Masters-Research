@@ -91,9 +91,11 @@ class SimpleEnv(MiniGridEnv):
         numGoals = random.randint(1, 5)
 
         # Generate all valid interior positions (excluding borders)
-        valid_positions = [(x, y) for x in range(1, width - 1) for y in range(1, height - 1)]
+        valid_positions = [(x, y) for x in range(0, width) for y in range(0, height)]
+        # print (valid_positions)
 
         # Sample unique positions uniformly
+        # TODO np.random.choice
         goalPositions = sample(valid_positions, numGoals)
 
         for (x, y) in goalPositions:

@@ -420,6 +420,8 @@ class SuccessorAgent:
         self.w[s_1] += self.learning_rate * error
         return error
     
+    # TODO pick by best action, if 2 action shave the same value divide by those 2
+    #  Multiply by probability of tkzing that action
     def update_sr(self, current_exp, next_exp):
         """
         Update successor features using policy-independent learning.
@@ -461,13 +463,13 @@ class SuccessorAgent:
         td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
 
-        # Apply small L2: Prevents values from growing too large
-        lambda_reg = 1e-4
-        self.M[s_a, s, :] *= (1.0 - lambda_reg)
+        # # Apply small L2: Prevents values from growing too large
+        # lambda_reg = 1e-4
+        # self.M[s_a, s, :] *= (1.0 - lambda_reg)
 
-        # Regularization : Encourages uniform state visitation by pulling values toward 1/state_size
-        entropy_reg = 0.01
-        self.M[s_a, s, :] += entropy_reg * (1.0/self.state_size - self.M[s_a, s, :])
+        # # Regularization : Encourages uniform state visitation by pulling values toward 1/state_size
+        # entropy_reg = 0.01
+        # self.M[s_a, s, :] += entropy_reg * (1.0/self.state_size - self.M[s_a, s, :])
 
         return np.mean(np.abs(td_error))
     
