@@ -51,9 +51,10 @@ class SuccessorAgent:
 
     # older non-trandsformed version
     def get_state_index(self, obs):
-        """Convert MiniGrid observation to state index"""
+        """Convert MiniGrid observation to state index - make consistent"""
         agent_pos = self.env.agent_pos
-        return agent_pos[0] + agent_pos[1] * self.grid_size
+        x, y = agent_pos
+        return y * self.grid_size + x  # Use (y,x) consistently
     
     # Trying to transform it to fit human render
     # def get_state_index(self, obs):
@@ -268,21 +269,8 @@ class SuccessorAgent:
                 s_a_1 = next_exp[1]  # actual next action
                 td_target = I + self.gamma * self.M[s_a_1, s_1, :]
             else:
-                # Option 2: Use uniform policy for SR learning (policy-independent)
-                # Average over all possible next actions
-                uniform_next_sr = np.mean(self.M[:, s_1, :], axis=0)
-                td_target = I + self.gamma * uniform_next_sr
-                
-                # Option 3: Use epsilon-greedy with high epsilon for exploration
-                # if np.random.random() < 0.8:  # High exploration
-                #     random_action = np.random.randint(self.action_size)
-                #     td_target = I + self.gamma * self.M[random_action, s_1, :]
-                # else:
-                #     # Occasionally use current policy
-                #     best_a_prime = np.argmax([
-                #         np.dot(self.M[a, s_1, :], self.w) for a in range(self.action_size)
-                #     ])
-                #     td_target = I + self.gamma * self.M[best_a_prime, s_1, :]
+                # For terminal states only
+                td_target = I
 
         td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
