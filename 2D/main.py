@@ -32,7 +32,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -46,8 +46,6 @@ def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=
 
     # Tracking where rewards are occuring
     reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
-
-    print_flag = True
     
     for episode in tqdm(range(episodes), "Training Successor Agent"):
         plt.close('all')  # to close all open figures and save memory
@@ -64,7 +62,16 @@ def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=
         current_state_idx = agent.get_state_index(obs)
         current_action = agent.sample_random_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
-        
+
+        # Check reward Occurence
+        # Iterate over the grid and increment reward occurrence where object type == 8 (goal)
+        grid1 = env.grid.encode()
+        object_layer1 = grid1[..., 0]
+        for y in range(env.height):
+            for x in range(env.width):
+                if object_layer1[y, x] == 8:
+                    reward_occurence_map[y, x] += 1
+
         for step in range(max_steps):
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
@@ -84,53 +91,6 @@ def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=
             # 1. Build the WVF for this moment in time
             # 2. Choose the Max one of these Maps
             # 3. Sample an Action from this map with decaying epsilon probability
-            
-            # CHANGED - I think this may be causing the agent to learn to move to only 1 position
-            # # Get the map with the single highest max value
-            # max_vals = agent.wvf.max(axis=(1, 2))  # shape: (100,)
-            # best_map_index = np.argmax(max_vals)   # index of the map with the highest max value
-            # chosen_map = agent.wvf[best_map_index]  # shape: (10, 10)
-
-            # reward_threshold = 0.5
-            # agent_y, agent_x = env.agent_pos  # assuming (y, x) format
-
-            # # Step 1: Create a mask of where values exceed the threshold
-            # exceeds_threshold = agent.wvf > reward_threshold  # shape: (num_maps, H, W)
-
-            # # Step 2: Compute distance of each exceeding point to the agent
-            # H, W = agent.wvf.shape[1:]
-            # y_coords, x_coords = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
-            # distances = np.sqrt((y_coords - agent_y)**2 + (x_coords - agent_x)**2)  # shape: (H, W)
-
-            # # Broadcast distances to all maps
-            # distances_broadcasted = np.broadcast_to(distances, agent.wvf.shape)  # (num_maps, H, W)
-
-            # # Step 3: Mask distances where threshold not exceeded
-            # masked_distances = np.where(exceeds_threshold, distances_broadcasted, np.inf)
-
-            # # Step 4: Get minimum distance for each map
-            # min_dist_per_map = masked_distances.min(axis=(1, 2))  # shape: (num_maps,)
-
-            # # Step 5: Only consider maps where at least one value exceeded the threshold
-            # valid_maps = np.any(exceeds_threshold, axis=(1, 2))  # shape: (num_maps,)
-            # valid_dists = np.where(valid_maps, min_dist_per_map, np.inf)
-
-            # # Step 6: Choose the map with the smallest such distance
-            # best_map_index = np.argmin(valid_dists)
-            # chosen_map = agent.wvf[best_map_index]
-
-            
-            # Random actions for the firt N episodes to check if SR improves
-            # warmup_episodes = 100
-            # if episode < warmup_episodes:
-            #     next_action = agent.sample_random_action(obs, epsilon=epsilon)
-            # else:
-            #     # Get reward map from 
-            #     if print_flag:
-            #         print("First WVF Action Taken")
-            #         print_flag = False
-                
-            #     next_action = agent.sample_action_with_wvf(obs, chosen_reward_map=chosen_map, epsilon=epsilon)
 
             # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
             # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
@@ -175,13 +135,6 @@ def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=
             normalized_grid[object_layer == 2] = 0.0   # Wall 
             normalized_grid[object_layer == 1] = 0.0   # Open space
             normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
-
-            # Check reward Occurence
-            # Iterate over the grid and increment reward occurrence where object type == 8 (goal)
-            for y in range(env.height):
-                for x in range(env.width):
-                    if object_layer[y, x] == 8:
-                        reward_occurence_map[y, x] += 1
             
             # Rotate the grid to match render_mode = human 
             # normalized_grid = np.flipud(normalized_grid)
@@ -199,6 +152,7 @@ def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=
             predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
             predicted_reward_map_2d[object_layer == 8] = 1.0 
 
+            # No longer flipping to match human
             # predicted_reward_map_2d = np.flipud(predicted_reward_map_2d)
             # predicted_reward_map_2d = np.rot90(predicted_reward_map_2d, k=-1)
             # predicted_reward_map_2d = np.rot90(normalized_grid, k=-1)
@@ -245,7 +199,6 @@ def train_successor_agent(agent, env, episodes = 2000, ae_model=None, max_steps=
                 # print(f"Vision model training loss: {step_loss:.4f}")
             
             # Update the agents WVF with the SR and predicted true reward map
-
             # Decompose the reward map into individual reward maps for each goal
             # Update per-state reward maps from true_reward_map
             agent.reward_maps.fill(0)  # Reset all maps to zero

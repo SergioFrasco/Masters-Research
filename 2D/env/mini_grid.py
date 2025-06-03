@@ -31,7 +31,6 @@ from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Point, WorldObj
 
 
-
 class SimpleEnv(MiniGridEnv):
     def __init__(
         self,
@@ -42,6 +41,12 @@ class SimpleEnv(MiniGridEnv):
         **kwargs,
     ):
         self.size = size
+
+        # Initialize position pool for goals (all valid grid positions)
+        self.all_positions = [(x, y) for x in range(0, size) for y in range(0, size)]
+        self.available_positions = self.all_positions.copy()
+        
+        print(f"Initialized with {len(self.all_positions)} total positions")
 
         # Randomize agent position if not provided
         if agent_start_pos is None:
@@ -66,6 +71,31 @@ class SimpleEnv(MiniGridEnv):
             **kwargs,
         )
 
+    def _select_goal_positions(self):
+        """Select goal positions without replacement from available positions."""
+        # Reset pool if empty
+        if not self.available_positions:
+            self.available_positions = self.all_positions.copy()
+            # print("Position pool reset - all positions available again")
+        
+        # Randomly decide how many goals for this episode (1 to 5)
+        num_goals = random.randint(1, 5)
+        
+        # Make sure we don't try to select more positions than available
+        num_goals = min(num_goals, len(self.available_positions))
+        
+        # Sample positions without replacement
+        selected_positions = sample(self.available_positions, num_goals)
+        
+        # Remove selected positions from available pool
+        for pos in selected_positions:
+            self.available_positions.remove(pos)
+        
+        # print(f"Selected {num_goals} goal positions: {selected_positions}")
+        # print(f"Remaining available positions: {len(self.available_positions)}")
+        
+        return selected_positions
+
     @staticmethod
     def _gen_mission():
         return "grand mission"
@@ -74,59 +104,12 @@ class SimpleEnv(MiniGridEnv):
         # Create an empty grid
         self.grid = Grid(width, height)
 
-        # CHANGED - remoed boundaary walls
-        # Generate the surrounding walls
-        # self.grid.wall_rect(0, 0, width, height)
+        # Select goal positions without replacement
+        goal_positions = self._select_goal_positions()
 
-        # Generate vertical separation wall
-        # for i in range(0, height):
-        #     self.grid.set(5, i, Wall())
-        
-        # # Place the door and key
-        # self.grid.set(5, 6, Door(COLOR_NAMES[0], is_locked=True))
-        # self.grid.set(3, 6, Key(COLOR_NAMES[0]))
-        
-       
-
-        numGoals = random.randint(1, 5)
-
-        # Generate all valid interior positions (excluding borders)
-        valid_positions = [(x, y) for x in range(0, width) for y in range(0, height)]
-        # print (valid_positions)
-
-        # Sample unique positions uniformly
-        # TODO np.random.choice
-        goalPositions = sample(valid_positions, numGoals)
-
-        for (x, y) in goalPositions:
+        # Place goals at selected positions
+        for (x, y) in goal_positions:
             self.put_obj(Goal(), x, y)
-
-        # # Place a goal square in the top-left corner
-        # self.put_obj(Goal(), width - 9, height - 9)
-        # # Place a goal square in the bottom-right corner
-        # self.put_obj(Goal(), width - 2, height - 2)
-        # # and the other 2 corners
-        # self.put_obj(Goal(), width - 9, height - 2)
-        # self.put_obj(Goal(), width - 2, height - 9)
-        
-
-        # numGoals = random.randint(1,5)
-        # goalPositions = set() # To avoid duplicate positions
-
-        # for _ in range (numGoals):
-        #     x = random.randint(1, width-2)
-        #     y = random.randint(1, height-2)
-
-        #     # Ensure the spot is not already occupied
-        #     if (x, y) not in goalPositions:
-        #         self.put_obj(Goal(), x, y)
-        #         goalPositions.add((x, y))
-                
-        #         continue  # Move to the next goal
-        # goalPositions.add((1,8))
-
-
-
 
         # Place the agent
         if self.agent_start_pos is not None:
@@ -137,7 +120,7 @@ class SimpleEnv(MiniGridEnv):
 
         self.mission = "grand mission"
 
-    # Overriding the bas eimplementation of step
+    # Overriding the base implementation of step
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         self.step_count += 1
 
@@ -210,3 +193,11 @@ class SimpleEnv(MiniGridEnv):
         obs = self.gen_obs()
 
         return obs, reward, terminated, truncated, {}
+
+    def get_position_status(self):
+        """Utility method to check available positions."""
+        return {
+            'total_positions': len(self.all_positions),
+            'available_positions': len(self.available_positions),
+            'used_positions': len(self.all_positions) - len(self.available_positions)
+        }
