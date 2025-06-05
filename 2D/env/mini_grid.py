@@ -45,15 +45,11 @@ class SimpleEnv(MiniGridEnv):
         # Initialize position pool for goals (all valid grid positions)
         self.all_positions = [(x, y) for x in range(0, size) for y in range(0, size)]
         self.available_positions = self.all_positions.copy()
+
+        # Initialize position pool for agent position (all valid grid positions)
+        self.all_agent_positions = [(x, y) for x in range(0, size) for y in range(0, size)]
+        self.available_agent_position = self.all_agent_positions.copy()
         
-        print(f"Initialized with {len(self.all_positions)} total positions")
-
-        # Randomize agent position if not provided
-        if agent_start_pos is None:
-            x = random.randint(1, size - 2)
-            y = random.randint(1, size - 2)
-            agent_start_pos = (x, y)
-
         self.agent_start_pos = agent_start_pos
         self.agent_start_dir = agent_start_dir
 
@@ -95,6 +91,25 @@ class SimpleEnv(MiniGridEnv):
         # print(f"Remaining available positions: {len(self.available_positions)}")
         
         return selected_positions
+    
+    def _select_agent_position(self):
+        """Select goal positions without replacement from available positions."""
+        # Reset pool if empty
+        if not self.available_agent_position:
+            self.available_agent_position = self.all_agent_positions.copy()
+            # print("Position pool reset - all positions available again")
+        
+        # Sample positions without replacement
+        selected_agent_position = sample(self.available_agent_position, 1)[0]
+        
+        # Remove selected positions from available pool
+        self.available_agent_position.remove(selected_agent_position)
+        
+        # print(f"Selected {num_goals} goal positions: {selected_positions}")
+        # print(f"Remaining available positions: {len(self.available_positions)}")
+        
+        return selected_agent_position
+
 
     @staticmethod
     def _gen_mission():
@@ -111,12 +126,15 @@ class SimpleEnv(MiniGridEnv):
         for (x, y) in goal_positions:
             self.put_obj(Goal(), x, y)
 
-        # Place the agent
-        if self.agent_start_pos is not None:
-            self.agent_pos = self.agent_start_pos
+        # Set agent position for this episode
+        if self.agent_start_pos is None:
+        # Use the cycling system
+            self.agent_pos = self._select_agent_position()
             self.agent_dir = self.agent_start_dir
         else:
-            self.place_agent()
+            # Use provided fixed position
+            self.agent_pos = self.agent_start_pos
+            self.agent_dir = self.agent_start_dir
 
         self.mission = "grand mission"
 

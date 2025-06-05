@@ -32,7 +32,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -43,6 +43,9 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
 
     # Tracking where the agent is going
     state_occupancy = np.zeros((env.size, env.size), dtype=np.int32)
+
+    # Tracking where the agent is starting
+    agent_starting_positions = np.zeros((env.size, env.size), dtype=np.int32)
 
     # Tracking where rewards are occuring
     reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
@@ -81,6 +84,9 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             agent_pos = tuple(env.agent_pos)  # (x, y)
             state_occupancy[agent_pos[1], agent_pos[0]] += 1  # (row, col) = (y, x)
             agent.update_visit_counts(env.agent_pos) # for the exploration bonus
+
+            if step == 0:
+                agent_starting_positions[agent_pos[1], agent_pos[0]] += 1
             
             # Complete current experience tuple
             current_exp[2] = next_state_idx  # next state
@@ -288,6 +294,17 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
     plt.ylabel('Y')
     plt.savefig(generate_save_path("state_occupancy_heatmap.png"))
     plt.close()
+
+    # Plotting state starting state occupancy
+    plt.figure(figsize=(6, 6))
+    plt.imshow(agent_starting_positions, cmap='Blues', interpolation='nearest')
+    plt.title('Starting State Occupancy Heatmap')
+    plt.colorbar(label='Number of starts')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.savefig(generate_save_path("starting_state_occupancy_heatmap.png"))
+    plt.close()
+
 
     # Plotting the number of reward occurences in each state
     plt.figure(figsize=(6, 6))
