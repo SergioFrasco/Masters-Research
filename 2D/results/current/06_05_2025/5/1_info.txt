@@ -1,0 +1,2 @@
+Trying to lower the learning rate
+and also initialize SR without identity

@@ -1,0 +1,2 @@
+Just checking the agent starts uniform random as well as goals
+Both are workign fine

@@ -32,7 +32,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -45,16 +45,19 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
     state_occupancy = np.zeros((env.size, env.size), dtype=np.int32)
 
     # Tracking where the agent is starting
-    agent_starting_positions = np.zeros((env.size, env.size), dtype=np.int32)
+    # agent_starting_positions = np.zeros((env.size, env.size), dtype=np.int32)
 
     # Tracking where rewards are occuring
-    reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
+    # reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
     
     for episode in tqdm(range(episodes), "Training Successor Agent"):
         plt.close('all')  # to close all open figures and save memory
         obs = env.reset()
         total_reward = 0
         step_count = 0
+
+        # agent_pos = tuple(env.agent_pos)  
+        # agent_starting_positions[agent_pos[1], agent_pos[0]] += 1
 
         # For every new episode, reset the reward map, and WVF, the SR stays consistent with the environment i.e doesn't reset
         agent.true_reward_map = np.zeros((env.size, env.size))
@@ -68,12 +71,12 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
 
         # Check reward Occurence
         # Iterate over the grid and increment reward occurrence where object type == 8 (goal)
-        grid1 = env.grid.encode()
-        object_layer1 = grid1[..., 0]
-        for y in range(env.height):
-            for x in range(env.width):
-                if object_layer1[y, x] == 8:
-                    reward_occurence_map[y, x] += 1
+        # grid1 = env.grid.encode()
+        # object_layer1 = grid1[..., 0]
+        # for y in range(env.height):
+        #     for x in range(env.width):
+        #         if object_layer1[y, x] == 8:
+        #             reward_occurence_map[y, x] += 1
 
         for step in range(max_steps):
             # Take action and observe result
@@ -81,12 +84,9 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             next_state_idx = agent.get_state_index(obs)
 
             # Tracking where the agent is going
-            agent_pos = tuple(env.agent_pos)  # (x, y)
-            state_occupancy[agent_pos[1], agent_pos[0]] += 1  # (row, col) = (y, x)
+            agent_pos = tuple(env.agent_pos)  
+            state_occupancy[agent_pos[1], agent_pos[0]] += 1  
             agent.update_visit_counts(env.agent_pos) # for the exploration bonus
-
-            if step == 0:
-                agent_starting_positions[agent_pos[1], agent_pos[0]] += 1
             
             # Complete current experience tuple
             current_exp[2] = next_state_idx  # next state
@@ -296,25 +296,25 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
     plt.close()
 
     # Plotting state starting state occupancy
-    plt.figure(figsize=(6, 6))
-    plt.imshow(agent_starting_positions, cmap='Blues', interpolation='nearest')
-    plt.title('Starting State Occupancy Heatmap')
-    plt.colorbar(label='Number of starts')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.savefig(generate_save_path("starting_state_occupancy_heatmap.png"))
-    plt.close()
+    # plt.figure(figsize=(6, 6))
+    # plt.imshow(agent_starting_positions, cmap='Blues', interpolation='nearest')
+    # plt.title('Starting State Occupancy Heatmap')
+    # plt.colorbar(label='Number of starts')
+    # plt.xlabel('X')
+    # plt.ylabel('Y')
+    # plt.savefig(generate_save_path("starting_state_occupancy_heatmap.png"))
+    # plt.close()
 
 
     # Plotting the number of reward occurences in each state
-    plt.figure(figsize=(6, 6))
-    plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
-    plt.title('Reward Occurrence Map (Heatmap)')
-    plt.colorbar(label='Times Reward Observed')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.savefig(generate_save_path("reward_occurences.png"))
-    plt.close()
+    # plt.figure(figsize=(6, 6))
+    # plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
+    # plt.title('Reward Occurrence Map (Heatmap)')
+    # plt.colorbar(label='Times Reward Observed')
+    # plt.xlabel('X')
+    # plt.ylabel('Y')
+    # plt.savefig(generate_save_path("reward_occurences.png"))
+    # plt.close()
 
     # Plotting the number of steps taken in each episode - See if its learning
     rolling = pd.Series(step_counts).rolling(window).mean()

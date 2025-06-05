@@ -7,7 +7,7 @@ from gym import spaces
 class SuccessorAgent:
     # learning rate = 0.1
     # Tried 0.01
-    def __init__(self, env, learning_rate=0.1, gamma=0.99):
+    def __init__(self, env, learning_rate=0.01, gamma=0.99):
         self.env = env
         self.learning_rate = learning_rate
         self.gamma = gamma
@@ -22,7 +22,12 @@ class SuccessorAgent:
         # Initialize successor features matrix
         # CHANGED initialize to zeros
         # self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
+        # self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
+
+        # Trying smaller initialization
+        self.M = np.zeros((self.action_size, self.state_size, self.state_size))
+        # Add small random noise
+        self.M += np.random.normal(0, 0.01, self.M.shape)
 
         # self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
         self.w = np.zeros([self.state_size])
@@ -99,38 +104,6 @@ class SuccessorAgent:
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""
         return np.random.randint(self.action_size)
-
-
-    # Helper funcitons for local action selection
-    def _get_next_position(self, current_pos, action):
-        """
-        Simulate the next position given current position and action
-        MiniGrid action space:
-        - 0: turn left
-        - 1: turn right  
-        - 2: move forward
-        """
-        x, y = current_pos
-        agent_dir = self.env.agent_dir
-        
-        if action == 0:  # turn left
-            # Position doesn't change, only direction changes
-            return (x, y)
-        elif action == 1:  # turn right
-            # Position doesn't change, only direction changes
-            return (x, y)
-        elif action == 2:  # move forward
-            # Move in current direction
-            if agent_dir == 0:  # right
-                return (x + 1, y)
-            elif agent_dir == 1:  # down
-                return (x, y + 1)
-            elif agent_dir == 2:  # left
-                return (x - 1, y)
-            elif agent_dir == 3:  # up
-                return (x, y - 1)
-        
-        return current_pos
 
     def _position_to_state_index(self, pos):
         """Convert position to state index"""
@@ -228,54 +201,143 @@ class SuccessorAgent:
         Qs = np.matmul(self.M[:, state_idx, :], goal_vector)
         return Qs
     
-    def update(self, current_exp, next_exp=None):
-        """Update both reward weights and successor features"""
-        error_w = self.update_w(current_exp)
-        error_sr = 0
-        if next_exp is not None:
-            error_sr = self.update_sr(current_exp, next_exp)
-        return error_w, error_sr
-    
-    def update_w(self, current_exp):
-        """Update reward weights"""
-        s_1 = current_exp[2]  # next state index
-        r = current_exp[3]    # reward
-        error = r - self.w[s_1]
-        self.w[s_1] += self.learning_rate * error
-        return error
-    
-    # TODO change this to a sarsa update that only occurs at the end of an episode
-    # TODO pick by best action, if 2 action shave the same value divide by those 2
-    #  Multiply by probability of tkzing that action
     def update_sr(self, current_exp, next_exp):
         """
         Update successor features using policy-independent learning.
         The SR should capture state transition dynamics regardless of reward structure.
+        Only updates when action is 'move forward' (actual state transition).
         """
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action
         s_1 = current_exp[2]  # next state index
         done = current_exp[4] # terminal flag
-
+        
+        # MiniGrid action constants
+        TURN_LEFT = 0
+        TURN_RIGHT = 1
+        MOVE_FORWARD = 2
+        
+        # Only update SR for move forward actions (actual state transitions)
+        if s_a != MOVE_FORWARD:
+            return 0.0  # No update, return zero TD error
+        
+        # Additional safety check: ensure we actually transitioned states
+        # This handles edge cases where move forward might fail (e.g., hitting wall)
+        if s == s_1 and not done:
+            return 0.0  # No actual state transition occurred
+        
         I = self._onehot(s, self.state_size)
-
+        
         if done:
             # Terminal state: no future state occupancy expected
             td_target = I
         else:
-            # For continuing states, we need to be careful about action selection
-            # Option 1: Use the actual next action that was taken (SARSA-style)
+            # For continuing states, we need to handle the temporal discount properly
             if next_exp is not None:
                 s_a_1 = next_exp[1]  # actual next action
-                td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+                
+                # Key insight: If next action is also move forward, we discount normally
+                # If next action is a turn, we need to look ahead to the next move forward
+                if s_a_1 == MOVE_FORWARD:
+                    # Next action transitions states, use normal discount
+                    td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+                else:
+                    # Next action is a turn - it doesn't change state but takes time
+                    # We need to account for the temporal cost of turning
+                    # Option 1: Use undiscounted SR since no spatial transition
+                    td_target = I + self.M[MOVE_FORWARD, s_1, :]  # No gamma discount for turns
+                    
+                    # Option 2: Use discounted but with move forward SR
+                    # td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
             else:
-                # For terminal states only
+                # Fallback case - shouldn't happen in normal operation
                 td_target = I
-
+        
         td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
-
+        
         return np.mean(np.abs(td_error))
+
+    def update(self, current_exp, next_exp=None):
+        """
+        Update both reward weights and successor features.
+        Modified to handle temporal consistency.
+        """
+        # Always update reward weights when we observe a reward
+        error_w = self.update_w(current_exp)
+        
+        # Only update SR for actual state transitions (move forward)
+        error_sr = 0
+        if next_exp is not None:
+            error_sr = self.update_sr(current_exp, next_exp)
+        
+        return error_w, error_sr
+
+    def update_w(self, current_exp):
+        """
+        Update reward weights - now more careful about when to update.
+        Only update when we actually observe a reward.
+        """
+        s_1 = current_exp[2]  # next state index
+        r = current_exp[3]    # reward
+        
+        # Only update if we actually received a reward
+        if r != 0:
+            error = r - self.w[s_1]
+            self.w[s_1] += self.learning_rate * error
+            return error
+        
+        return 0.0  # No reward observed, no update
+
+    # # Before change
+    # def update(self, current_exp, next_exp=None):
+    #     """Update both reward weights and successor features"""
+    #     error_w = self.update_w(current_exp)
+    #     error_sr = 0
+    #     if next_exp is not None:
+    #         error_sr = self.update_sr(current_exp, next_exp)
+    #     return error_w, error_sr
+    
+    # def update_w(self, current_exp):
+    #     """Update reward weights"""
+    #     s_1 = current_exp[2]  # next state index
+    #     r = current_exp[3]    # reward
+    #     error = r - self.w[s_1]
+    #     self.w[s_1] += self.learning_rate * error
+    #     return error
+    
+    # # TODO change this to a sarsa update that only occurs at the end of an episode
+    # # TODO pick by best action, if 2 action shave the same value divide by those 2
+    # #  Multiply by probability of tkzing that action
+    # def update_sr(self, current_exp, next_exp):
+    #     """
+    #     Update successor features using policy-independent learning.
+    #     The SR should capture state transition dynamics regardless of reward structure.
+    #     """
+    #     s = current_exp[0]    # current state index
+    #     s_a = current_exp[1]  # current action
+    #     s_1 = current_exp[2]  # next state index
+    #     done = current_exp[4] # terminal flag
+
+    #     I = self._onehot(s, self.state_size)
+
+    #     if done:
+    #         # Terminal state: no future state occupancy expected
+    #         td_target = I
+    #     else:
+    #         # For continuing states, we need to be careful about action selection
+    #         # Option 1: Use the actual next action that was taken (SARSA-style)
+    #         if next_exp is not None:
+    #             s_a_1 = next_exp[1]  # actual next action
+    #             td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+    #         else:
+    #             # For terminal states only
+    #             td_target = I
+
+    #     td_error = td_target - self.M[s_a, s, :]
+    #     self.M[s_a, s, :] += self.learning_rate * td_error
+
+    #     return np.mean(np.abs(td_error))
 
     
     def _onehot(self, index, size):

@@ -36,7 +36,7 @@ class SimpleEnv(MiniGridEnv):
         self,
         size=10,
         agent_start_pos=None,
-        agent_start_dir=0,
+        agent_start_dir=None,
         max_steps: int | None = None,
         **kwargs,
     ):
@@ -130,7 +130,8 @@ class SimpleEnv(MiniGridEnv):
         if self.agent_start_pos is None:
         # Use the cycling system
             self.agent_pos = self._select_agent_position()
-            self.agent_dir = self.agent_start_dir
+            random_direction = np.random.randint(0,3)
+            self.agent_dir = random_direction
         else:
             # Use provided fixed position
             self.agent_pos = self.agent_start_pos
