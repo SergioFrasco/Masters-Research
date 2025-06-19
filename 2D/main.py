@@ -149,14 +149,15 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
             # Reshape for the autoencoder (add batch and channel dims)
             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
             
-            # CHANGED - commented this out to see if perfect reward map trains the SR correctly
             # Get the predicted reward map from the AE
-            # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
-            # predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
-            predicted_reward_map_2d = grid[..., 0]
-            predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
-            predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
-            predicted_reward_map_2d[object_layer == 8] = 1.0 
+            predicted_reward_map = ae_model.predict(input_grid, verbose=0)
+            predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
+
+            # Give the vision model output as a perfect reward map
+            # predicted_reward_map_2d = grid[..., 0]
+            # predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
+            # predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
+            # predicted_reward_map_2d[object_layer == 8] = 1.0 
 
             # No longer flipping to match human
             # predicted_reward_map_2d = np.flipud(predicted_reward_map_2d)
