@@ -32,7 +32,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -150,21 +150,15 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
             
             # Get the predicted reward map from the AE
-            predicted_reward_map = ae_model.predict(input_grid, verbose=0)
-            predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
+            # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
+            # predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
 
             # Give the vision model output as a perfect reward map
-            # predicted_reward_map_2d = grid[..., 0]
-            # predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
-            # predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
-            # predicted_reward_map_2d[object_layer == 8] = 1.0 
-
-            # No longer flipping to match human
-            # predicted_reward_map_2d = np.flipud(predicted_reward_map_2d)
-            # predicted_reward_map_2d = np.rot90(predicted_reward_map_2d, k=-1)
-            # predicted_reward_map_2d = np.rot90(normalized_grid, k=-1)
-
-            
+            predicted_reward_map_2d = grid[..., 0]
+            predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
+            predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
+            predicted_reward_map_2d[object_layer == 8] = 1.0 
+   
             # Update the rest of the true_reward_map with AE predictions
             for y in range(agent.true_reward_map.shape[0]):
                 for x in range(agent.true_reward_map.shape[1]):
@@ -323,7 +317,7 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
     plt.plot(rolling, label=f'Rolling Avg Step Count (window={window})', color='orange')
     plt.xlabel('Episode')
     plt.ylabel('Number of Steps Taken')
-    plt.title('Steos taken per Episode')
+    plt.title('Steps taken per Episode')
     plt.legend()
     plt.grid(True)
     plt.savefig(generate_save_path("step_count.png"))

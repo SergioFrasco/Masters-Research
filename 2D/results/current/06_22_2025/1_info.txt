@@ -1,0 +1,1 @@
+Just running again to confirm the issue is with the vision model distorting the SR

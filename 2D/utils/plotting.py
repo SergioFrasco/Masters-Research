@@ -158,6 +158,7 @@ def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
         axes[idx].axis('off')
 
     plt.tight_layout()
+    plt.colorbar(label="WVF Value")
     plt.savefig(save_path)
     plt.close()
 
