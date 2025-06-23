@@ -146,10 +146,10 @@ def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
     fig, axes = plt.subplots(num_rows, maps_per_row, figsize=(maps_per_row * 2, num_rows * 2))
     axes = axes.flatten()
     
+    im = None  # Store the last imshow object for the colorbar anchor
     for idx in range(num_maps):
         ax = axes[idx]
-        ax.imshow(agent.wvf[idx], cmap='viridis', vmin=0, vmax=1)
-        # ax.imshow(agent.reward_maps[idx], cmap='viridis')
+        im = ax.imshow(agent.wvf[idx], cmap='viridis', vmin=0, vmax=1)
         ax.set_title(f"State {idx}", fontsize=8)
         ax.axis('off')
     
@@ -157,10 +157,13 @@ def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
     for idx in range(num_maps, len(axes)):
         axes[idx].axis('off')
 
-    plt.tight_layout()
-    plt.colorbar(label="WVF Value")
-    plt.savefig(save_path)
+    fig.tight_layout()
+    if im is not None:
+        fig.colorbar(im, ax=axes[:num_maps], shrink=0.6, label="WVF Value")
+
+    fig.savefig(save_path)
     plt.close()
+
 
 def save_max_wvf_maps(max_wvfs, episode):
      # Compute a suitable grid size (square-ish)
@@ -194,7 +197,7 @@ def save_env_map_pred(agent, normalized_grid, predicted_reward_map_2d, episode, 
     
     # Agent's true reward map
     ax2.imshow(agent.true_reward_map, cmap='viridis')
-    ax2.set_title("Agent's Reward Map (red=visited)")
+    ax2.set_title("Agent's Understanding of Reward")
     
     # AE prediction
     ax3.imshow(predicted_reward_map_2d, cmap='viridis')

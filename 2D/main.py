@@ -32,7 +32,7 @@ sys.path.append(".")
 # epsilon decay = 0.995 before
 # 0.999 better
 
-def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -63,6 +63,9 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
         agent.true_reward_map = np.zeros((env.size, env.size))
         agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
         ae_trigger_count_this_episode = 0
+
+        # Reset visited positions for new episode
+        agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
         
         # Store first experience
         current_state_idx = agent.get_state_index(obs)
@@ -85,8 +88,7 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
 
             # Tracking where the agent is going
             agent_pos = tuple(env.agent_pos)  
-            state_occupancy[agent_pos[1], agent_pos[0]] += 1  
-            agent.update_visit_counts(env.agent_pos) # for the exploration bonus
+            state_occupancy[agent_pos[0], agent_pos[1]] += 1  
             
             # Complete current experience tuple
             current_exp[2] = next_state_idx  # next state
@@ -126,10 +128,10 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             current_exp = next_exp
             current_action = next_action
             
-            # ------------------Vision model----------------
+            # ------------------ Vision model -------------------
+
             # Update the agent's true_reward_map based on current observation
             agent_position = tuple(env.agent_pos)
-            # print(agent_position)
 
             # Get the current environment grid
             grid = env.grid.encode()
@@ -142,44 +144,45 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             normalized_grid[object_layer == 1] = 0.0   # Open space
             normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
             
-            # Rotate the grid to match render_mode = human 
-            # normalized_grid = np.flipud(normalized_grid)
-            # normalized_grid = np.rot90(normalized_grid, k=-1)
-            
             # Reshape for the autoencoder (add batch and channel dims)
             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
             
             # Get the predicted reward map from the AE
-            # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
-            # predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
+            predicted_reward_map = ae_model.predict(input_grid, verbose=0)
+            predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
 
             # Give the vision model output as a perfect reward map
-            predicted_reward_map_2d = grid[..., 0]
-            predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
-            predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
-            predicted_reward_map_2d[object_layer == 8] = 1.0 
-   
+            # predicted_reward_map_2d = grid[..., 0].copy()
+            # predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
+            # predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
+            # predicted_reward_map_2d[object_layer == 8] = 1.0 
+
+            # Mark position as visited
+            agent.visited_positions[agent_position[0], agent_position[1]] = True
+
+             # Learning Signal
+            if done and step < max_steps:
+                agent.true_reward_map[agent_position[0], agent_position[1]] = 1
+            else:
+                agent.true_reward_map[agent_position[0], agent_position[1]] = 0
+
             # Update the rest of the true_reward_map with AE predictions
             for y in range(agent.true_reward_map.shape[0]):
                 for x in range(agent.true_reward_map.shape[1]):
-                    if (x, y) != agent_position:  # Skip the reward position
+                    # Skip visited positions - don't override ground truth
+                    if not agent.visited_positions[y, x]:
                         # Get the predicted value for this position from the AE
                         predicted_value = predicted_reward_map_2d[y, x]
-                        agent.true_reward_map[y, x] = predicted_value
-
-            # Learning Signal
-            if done:
-                agent.true_reward_map[agent_position[1], agent_position[0]] = 1
-            else:
-                agent.true_reward_map[agent_position[1], agent_position[0]] = 0
-
+                        if predicted_value > 0.001:
+                            agent.true_reward_map[y, x] = predicted_value
+                        else:
+                            agent.true_reward_map[y, x] = 0
 
             trigger_ae_training = False
-            if abs(predicted_reward_map_2d[agent_position[1], agent_position[0]] - agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold:
+            if abs(predicted_reward_map_2d[agent_position[0], agent_position[1]] - agent.true_reward_map[agent_position[0], agent_position[1]]) > train_vision_threshold:
                 ae_trigger_count_this_episode += 1
                 trigger_ae_training = True
                 
-            
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
             if trigger_ae_training:
@@ -210,7 +213,8 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
                     idx = y * agent.grid_size + x
                     reward_threshold = 0.5
                     if reward > reward_threshold:
-                        agent.reward_maps[idx, y, x] = reward
+                        # changed from = reward to 1
+                        agent.reward_maps[idx, y, x] = 1
                     else:
                         agent.reward_maps[idx, y, x] = 0 
 
@@ -253,10 +257,10 @@ def train_successor_agent(agent, env, episodes = 2001, ae_model=None, max_steps=
             plt.title(f"Averaged SR Matrix (Episode {episode})")
             plt.colorbar(im, label="SR Value")  # Add colorbar
             plt.tight_layout()
-            plt.savefig(generate_save_path(f'SR/averaged_M_{episode}.png'))
+            plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
             plt.close()  # Close the figure to free memory
 
-        #     save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"episode_{episode}"))
+            save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
         
     ae_model.save(generate_save_path('vision_model.h5'))
     

@@ -19,21 +19,13 @@ class SuccessorAgent:
         # MiniGrid default actions: left, right, forward
         self.action_size = 3
         
-        # Initialize successor features matrix
-        # CHANGED initialize to zeros
-        # self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        # self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
-
-        # Trying smaller initialization
+        # initialization of the SR
         self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        # Add small random noise
-        self.M += np.random.normal(0, 0.01, self.M.shape)
+        self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
 
-        # self.M = np.stack([np.identity(self.state_size) for _ in range(self.action_size)])
         self.w = np.zeros([self.state_size])
 
         # Initialize the true map to track discovered reward locations and predictions
-        # Initially filled with zeros, shape: (grid_size, grid_size)
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
         self.true_reward_map_explored = np.zeros((self.grid_size, self.grid_size), dtype=bool)
 
@@ -41,13 +33,12 @@ class SuccessorAgent:
         # Initialize individual reward maps: one per state
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
 
+        # Track states we have visited to inform our map updates correctly
+        self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
+
         # World Value Function - Mappings of values to each state goal pair
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
-        # self.wvf = np.zeros((self.state_size, self.state_size)) 
 
-        # Track visit counts for exploration bonus
-        self.visit_counts = np.zeros((self.grid_size, self.grid_size), dtype=np.int32)
-        self.exploration_weight = 1.0  # Weight for exploration bonus
 
     def update_visit_counts(self, agent_pos):
         """Update visit counts for exploration bonus"""
@@ -60,46 +51,6 @@ class SuccessorAgent:
         agent_pos = self.env.agent_pos
         x, y = agent_pos
         return y * self.grid_size + x  # Use (y,x) consistently
-    
-    # Trying to transform it to fit human render
-    # def get_state_index(self, obs):
-    #     # raw MiniGrid agent_pos is (x,y) with (0,0) bottom-left
-    #     x, y = self.env.agent_pos
-
-    #     # AE saw:
-    #     #   normalized_grid = flipud  →  row’ = H-1 - row
-    #     #   then rot90(k=-1) → 90° CW: (r’,c’) → (c',  H-1-r')
-    #     H = self.grid_size
-
-    #     # apply same sequence to (x,y):
-    #     # 1) flipud on y: y1 = H-1 - y
-    #     # 2) rot90 CW: new_x =  y1,  new_y = H-1 - x
-    #     y1 = H - 1 - y
-    #     x2 =  y1
-    #     y2 =  H - 1 - x
-
-    #     # now flatten in row-major order (row = y2, col = x2)
-    #     return int(x2 + y2 * H)
-
-    
-    # def Q_estimates(self, state_idx, goal=None):
-    #     """Generate Q values for all actions"""
-    #     if goal is None:
-    #         goal = self.w
-    #     else:
-    #         goal = self._onehot(goal, self.state_size)
-    #     return np.matmul(self.M[:, state_idx, :], goal)
-    
-    # def sample_action(self, obs, goal=None, epsilon=0.0):
-    #     """Sample action using epsilon-greedy approach"""
-    #     state_idx = self.get_state_index(obs)
-        
-    #     if np.random.uniform(0, 1) < epsilon:
-    #         action = np.random.randint(self.action_size)
-    #     else:
-    #         Qs = self.Q_estimates(state_idx, goal)
-    #         action = np.argmax(Qs)
-    #     return action
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""
@@ -289,57 +240,6 @@ class SuccessorAgent:
         
         return 0.0  # No reward observed, no update
 
-    # # Before change
-    # def update(self, current_exp, next_exp=None):
-    #     """Update both reward weights and successor features"""
-    #     error_w = self.update_w(current_exp)
-    #     error_sr = 0
-    #     if next_exp is not None:
-    #         error_sr = self.update_sr(current_exp, next_exp)
-    #     return error_w, error_sr
-    
-    # def update_w(self, current_exp):
-    #     """Update reward weights"""
-    #     s_1 = current_exp[2]  # next state index
-    #     r = current_exp[3]    # reward
-    #     error = r - self.w[s_1]
-    #     self.w[s_1] += self.learning_rate * error
-    #     return error
-    
-    # # TODO change this to a sarsa update that only occurs at the end of an episode
-    # # TODO pick by best action, if 2 action shave the same value divide by those 2
-    # #  Multiply by probability of tkzing that action
-    # def update_sr(self, current_exp, next_exp):
-    #     """
-    #     Update successor features using policy-independent learning.
-    #     The SR should capture state transition dynamics regardless of reward structure.
-    #     """
-    #     s = current_exp[0]    # current state index
-    #     s_a = current_exp[1]  # current action
-    #     s_1 = current_exp[2]  # next state index
-    #     done = current_exp[4] # terminal flag
-
-    #     I = self._onehot(s, self.state_size)
-
-    #     if done:
-    #         # Terminal state: no future state occupancy expected
-    #         td_target = I
-    #     else:
-    #         # For continuing states, we need to be careful about action selection
-    #         # Option 1: Use the actual next action that was taken (SARSA-style)
-    #         if next_exp is not None:
-    #             s_a_1 = next_exp[1]  # actual next action
-    #             td_target = I + self.gamma * self.M[s_a_1, s_1, :]
-    #         else:
-    #             # For terminal states only
-    #             td_target = I
-
-    #     td_error = td_target - self.M[s_a, s, :]
-    #     self.M[s_a, s, :] += self.learning_rate * td_error
-
-    #     return np.mean(np.abs(td_error))
-
-    
     def _onehot(self, index, size):
         """Create one-hot encoded vector"""
         vec = np.zeros(size)
