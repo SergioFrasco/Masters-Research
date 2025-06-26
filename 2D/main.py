@@ -29,10 +29,59 @@ tf.config.set_visible_devices([], "GPU")
 absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
     
-# epsilon decay = 0.995 before
-# 0.999 better
+def evaluate_goal_state_values(agent, env, episode, log_file_path):
+    """
+    Evaluate state values around the agent when it reaches a goal.
+    Compare goal state value with neighboring states and log the result.
+    """
+    current_pos = env.agent_pos
+    x, y = current_pos
+    
+    # Get the current state index (goal state)
+    goal_state_idx = agent.get_state_index(None)  # We don't need obs for this
+    
+    # Define neighboring positions (left, right, up, down)
+    neighbors = [
+        (x - 1, y),  # left
+        (x + 1, y),  # right
+        (x, y - 1),  # up
+        (x, y + 1),  # down
+    ]
+    
+    # Get the maximum WVF value at the goal state across all reward maps
+    goal_max_value = np.max(agent.wvf[:, y, x])
+    
+    # Check neighboring states
+    neighbor_values = []
+    for nx, ny in neighbors:
+        # Check if neighbor is within bounds and not a wall
+        if (0 <= nx < agent.grid_size and 0 <= ny < agent.grid_size):
+            # Check if it's a valid position (not a wall)
+            cell = env.grid.get(nx, ny)
+            from minigrid.core.world_object import Wall
+            if cell is None or not isinstance(cell, Wall):
+                # Get max WVF value at this neighbor
+                neighbor_max_value = np.max(agent.wvf[:, ny, nx])
+                neighbor_values.append(neighbor_max_value)
+    
+    # Determine if goal state has the highest value
+    if len(neighbor_values) == 0:
+        # No valid neighbors (shouldn't happen in normal grids)
+        result = f"Episode {episode}: No valid neighbors to compare\n"
+    else:
+        max_neighbor_value = max(neighbor_values)
+        if goal_max_value >= max_neighbor_value:
+            result = f"Episode {episode}: Agent chose to stay at goal.\n"
+        else:
+            result = f"Episode {episode}: Agent did not choose to stay in the same position.\n"
+    
+    # Write to log file
+    with open(log_file_path, 'a') as f:
+        f.write(result)
+    
+    return result.strip()  # Return without newline for potential printing
 
-def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -43,6 +92,13 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
 
     # Tracking where the agent is going
     state_occupancy = np.zeros((env.size, env.size), dtype=np.int32)
+
+    # Create log file for goal state evaluations
+    log_file_path = generate_save_path("goal_state_evaluations.txt")
+    # Clear the file at the start
+    with open(log_file_path, 'w') as f:
+        f.write("Goal State Value Evaluations\n")
+        f.write("="*50 + "\n")
 
     # Tracking where the agent is starting
     # agent_starting_positions = np.zeros((env.size, env.size), dtype=np.int32)
@@ -232,6 +288,11 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
 
             # Reward found, next episode
             if done:
+
+                 # BEFORE breaking, evaluate the goal state values
+                if episode % 100 == 0:
+                    evaluate_goal_state_values(agent, env, episode, log_file_path)
+                
                 step_counts.append(step)
                 break
                 
