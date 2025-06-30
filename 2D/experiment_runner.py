@@ -119,10 +119,6 @@ class ExperimentRunner:
                 # Update agent
                 agent.update(current_exp, None if done else next_exp)
 
-                # Prepare for next step
-                current_exp = next_exp
-                current_action = next_action
-
                 # Vision Model
                 # Update the agent's true_reward_map based on current observation
                 agent_position = tuple(env.agent_pos)
@@ -168,13 +164,7 @@ class ExperimentRunner:
                 # Train the vision model
                 trigger_ae_training = False
                 train_vision_threshold = 0.1
-                if (
-                    abs(
-                        predicted_reward_map_2d[agent_position[0], agent_position[1]]
-                        - agent.true_reward_map[agent_position[0], agent_position[1]]
-                    )
-                    > train_vision_threshold
-                ):
+                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
                     trigger_ae_training = True
 
                 if trigger_ae_training:
@@ -195,10 +185,10 @@ class ExperimentRunner:
 
                 for y in range(agent.grid_size):
                     for x in range(agent.grid_size):
-                        reward = agent.true_reward_map[y, x]
+                        curr_reward = agent.true_reward_map[y, x]
                         idx = y * agent.grid_size + x
                         reward_threshold = 0.5
-                        if reward > reward_threshold:
+                        if curr_reward > reward_threshold:
                             # changed from = reward to 1
                             agent.reward_maps[idx, y, x] = 1
                         else:
@@ -229,36 +219,92 @@ class ExperimentRunner:
             "final_epsilon": epsilon,
             "algorithm": "Successor Agent",
         }
+    
+    def run_sarsa_sr_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run SARSA SR baseline experiment"""
+        np.random.seed(seed)
+        
+        # avoid circular imports
+        from agents import SARSASRAgent
+        
+        env = SimpleEnv(size=self.env_size)
+        agent = SARSASRAgent(env)
+        
+        episode_rewards = []
+        episode_lengths = []
+        
+        for episode in tqdm(range(episodes), desc=f"SARSA SR (seed {seed})"):
+            obs = env.reset()
+            agent.reset_episode()
+            total_reward = 0
+            steps = 0
+            
+            state_idx = agent.get_state_index(obs)
+            action = agent.choose_action(state_idx)
+            
+            for step in range(max_steps):
+                obs, reward, done, _, _ = env.step(action)
+                next_state_idx = agent.get_state_index(obs)
+                
+                if done:
+                    # Terminal state update
+                    agent.update(state_idx, action, reward, next_state_idx, 0, done)
+                    total_reward += reward
+                    steps += 1
+                    break
+                else:
+                    # Choose next action for SARSA update
+                    next_action = agent.choose_action(next_state_idx)
+                    
+                    # SARSA update with actual next action
+                    agent.update(state_idx, action, reward, next_state_idx, next_action, done)
+                    
+                    # Move to next state-action pair
+                    state_idx = next_state_idx
+                    action = next_action
+                
+                total_reward += reward
+                steps += 1
+            
+            agent.decay_epsilon()
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+        
+        return {
+            'rewards': episode_rewards,
+            'lengths': episode_lengths,
+            'final_epsilon': agent.epsilon,
+            'algorithm': 'SARSA SR'
+        }
 
     def run_comparison_experiment(self, episodes=5000):
         """Run comparison between all agents across multiple seeds"""
         all_results = {}
-
+        
         for seed in range(self.num_seeds):
             print(f"\n=== Running experiments with seed {seed} ===")
-
+            
             # Run Q-learning
-            qlearning_results = self.run_qlearning_experiment(
-                episodes=episodes, seed=seed
-            )
-
+            qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
+            
+            # Run SARSA SR
+            sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
+            
             # Run your successor agent
-            successor_results = self.run_successor_experiment(
-                episodes=episodes, seed=seed
-            )
-
+            successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
+            
             # Store results
-            if "Q-Learning" not in all_results:
-                all_results["Q-Learning"] = []
-            if "Successor Agent" not in all_results:
-                all_results["Successor Agent"] = []
-
-            all_results["Q-Learning"].append(qlearning_results)
-            all_results["Successor Agent"].append(successor_results)
-
+            algorithms = ['Q-Learning', 'SARSA SR', 'Successor Agent']
+            results_list = [qlearning_results, sarsa_sr_results, successor_results]
+            
+            for alg, result in zip(algorithms, results_list):
+                if alg not in all_results:
+                    all_results[alg] = []
+                all_results[alg].append(result)
+        
         self.results = all_results
         return all_results
-
+    
     def analyze_results(self, window=100):
         """Analyze and plot comparison results"""
         if not self.results:
@@ -420,7 +466,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=1000)
+    results = runner.run_comparison_experiment(episodes=3000)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=50)
