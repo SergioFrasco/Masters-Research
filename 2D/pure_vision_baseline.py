@@ -130,7 +130,7 @@ class SpatialValueAgent:
         self.episode_rewards = []
         self.training_losses = []
         self.value_predictions = []
-        
+    
     def render_env_as_image(self):
         """Convert environment to image representation"""
         grid = self.env.grid.encode()
@@ -154,6 +154,43 @@ class SpatialValueAgent:
         image[agent_x, agent_y, 2] = self.env.agent_dir / 4.0  # Normalize direction
         
         return image
+    
+    def get_reward_map(self):
+        """Extract reward map from environment"""
+        reward_map = np.zeros((self.grid_size, self.grid_size))
+        
+        # Iterate through all cells in the grid
+        for x in range(self.grid_size):
+            for y in range(self.grid_size):
+                cell = self.env.grid.get(x, y)
+                if cell is not None:
+                    # Check if it's a goal or reward-giving object
+                    if hasattr(cell, 'type') and cell.type == 'goal':
+                        reward_map[x, y] = 1.0  # Goal gives positive reward
+                    elif hasattr(cell, 'type') and cell.type == 'lava':
+                        reward_map[x, y] = -1.0  # Lava gives negative reward
+                    elif hasattr(cell, 'reward'):
+                        reward_map[x, y] = cell.reward
+        
+        return reward_map
+    
+    def get_environment_layout(self):
+        """Get the static environment layout (walls, goals, etc.)"""
+        layout = np.zeros((self.grid_size, self.grid_size))
+        
+        for x in range(self.grid_size):
+            for y in range(self.grid_size):
+                cell = self.env.grid.get(x, y)
+                if cell is not None:
+                    if hasattr(cell, 'type'):
+                        if cell.type == 'wall':
+                            layout[x, y] = -1  # Walls
+                        elif cell.type == 'goal':
+                            layout[x, y] = 1   # Goals
+                        elif cell.type == 'lava':
+                            layout[x, y] = -0.5  # Lava/obstacles
+        
+        return layout
     
     def get_action(self, obs, use_epsilon=True):
         """Choose action using epsilon-greedy policy based on value map"""
@@ -332,9 +369,14 @@ class SpatialValueMonitor:
         # Save value map snapshot periodically
         if episode % 100 == 0:
             value_map = agent.get_current_value_map()
+            reward_map = agent.get_reward_map()
+            env_layout = agent.get_environment_layout()
+            
             self.value_map_snapshots.append({
                 'episode': episode,
                 'value_map': value_map.copy(),
+                'reward_map': reward_map.copy(),
+                'env_layout': env_layout.copy(),
                 'agent_pos': agent.env.agent_pos
             })
         
@@ -346,11 +388,11 @@ class SpatialValueMonitor:
                   f"Length: {length}, Loss: {loss:.4f}, Epsilon: {agent.epsilon:.3f}")
     
     def plot_results(self):
-        """Plot comprehensive training results"""
-        fig = plt.figure(figsize=(20, 12))
+        """Plot training metrics only"""
+        fig = plt.figure(figsize=(15, 5))
         
         # Episode rewards
-        ax1 = plt.subplot(2, 4, 1)
+        ax1 = plt.subplot(1, 3, 1)
         plt.plot(self.episode_rewards, alpha=0.3, label='Episode Rewards')
         if len(self.episode_rewards) >= 50:
             smoothed = pd.Series(self.episode_rewards).rolling(50).mean()
@@ -362,7 +404,7 @@ class SpatialValueMonitor:
         plt.grid(True, alpha=0.3)
         
         # Training loss
-        ax2 = plt.subplot(2, 4, 2)
+        ax2 = plt.subplot(1, 3, 2)
         if self.training_losses:
             plt.plot(self.training_losses, alpha=0.7)
             plt.title('Training Loss (TD Error)')
@@ -371,7 +413,7 @@ class SpatialValueMonitor:
             plt.grid(True, alpha=0.3)
         
         # Episode lengths
-        ax3 = plt.subplot(2, 4, 3)
+        ax3 = plt.subplot(1, 3, 3)
         plt.plot(self.episode_lengths, alpha=0.3, label='Episode Length')
         if len(self.episode_lengths) >= 50:
             smoothed = pd.Series(self.episode_lengths).rolling(50).mean()
@@ -382,23 +424,105 @@ class SpatialValueMonitor:
         plt.legend()
         plt.grid(True, alpha=0.3)
         
-        # Value map evolution
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_dir, 'training_metrics.png'), 
+                   dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        # Create detailed comparison plots
         if self.value_map_snapshots:
-            n_snapshots = min(4, len(self.value_map_snapshots))
+            self.plot_detailed_comparison()
+    
+    def plot_detailed_comparison(self):
+        """Create detailed comparison plots showing multiple episodes"""
+        if not self.value_map_snapshots:
+            return
+        
+        # Get up to 4 snapshots to display
+        n_snapshots = min(4, len(self.value_map_snapshots))
+        if n_snapshots == 0:
+            return
             
-            for i, snapshot in enumerate(self.value_map_snapshots[-n_snapshots:]):
-                ax = plt.subplot(2, 4, 4 + i + 1)
-                im = plt.imshow(snapshot['value_map'], cmap='viridis')
-                
-                # Mark agent position
-                agent_x, agent_y = snapshot['agent_pos']
-                plt.scatter(agent_y, agent_x, c='red', s=100, marker='o', edgecolors='white', linewidth=2)
-                
-                plt.title(f'Value Map\nEpisode {snapshot["episode"]}')
-                plt.colorbar(im, shrink=0.8)
+        selected_snapshots = self.value_map_snapshots[-n_snapshots:]
+        
+        # Create figure with 3 rows (env layout, reward space, value maps) and n_snapshots columns
+        fig = plt.figure(figsize=(6 * n_snapshots, 18))
+        
+        for i, snapshot in enumerate(selected_snapshots):
+            episode_num = snapshot['episode']
+            agent_x, agent_y = snapshot['agent_pos']
+            env_layout = snapshot['env_layout']
+            reward_map = snapshot['reward_map']
+            value_map = snapshot['value_map']
+            
+            # Masks for different environment elements
+            walls_mask = env_layout == -1
+            goals_mask = env_layout == 1
+            obstacles_mask = env_layout == -0.5
+            
+            # Row 1: Environment Layout
+            ax1 = plt.subplot(3, n_snapshots, i + 1)
+            im1 = ax1.imshow(env_layout, cmap='RdYlBu', alpha=0.8)
+            
+            # Mark agent position
+            ax1.scatter(agent_y, agent_x, c='orange', s=150, marker='o', 
+                       edgecolors='white', linewidth=3, label='Agent')
+            
+            ax1.set_title(f'Environment Layout\n(Episode {episode_num})', fontsize=12, fontweight='bold')
+            ax1.legend()
+            plt.colorbar(im1, ax=ax1, shrink=0.8)
+            
+            # Row 2: Reward Space
+            ax2 = plt.subplot(3, n_snapshots, n_snapshots + i + 1)
+            im2 = ax2.imshow(reward_map, cmap='RdYlGn', alpha=0.8, vmin=-1, vmax=1)
+            
+            # Overlay walls
+            if np.any(walls_mask):
+                ax2.imshow(np.where(walls_mask, 0.5, np.nan), cmap='gray', alpha=0.9, vmin=0, vmax=1)
+            
+            # Mark specific reward locations
+            reward_positions = np.where(reward_map != 0)
+            for rx, ry in zip(reward_positions[0], reward_positions[1]):
+                reward_val = reward_map[rx, ry]
+                color = 'darkgreen' if reward_val > 0 else 'darkred'
+                marker = 'o' if reward_val > 0 else 'x'
+                ax2.scatter(ry, rx, c=color, s=200, marker=marker, 
+                           edgecolors='white', linewidth=3, alpha=0.9)
+            
+            # Mark agent position
+            ax2.scatter(agent_y, agent_x, c='orange', s=150, marker='o', 
+                       edgecolors='white', linewidth=3, label='Agent')
+            
+            ax2.set_title(f'Reward Space\n(Episode {episode_num})', fontsize=12, fontweight='bold')
+            ax2.legend()
+            plt.colorbar(im2, ax=ax2, shrink=0.8)
+            
+            # Row 3: Learned Value Map
+            ax3 = plt.subplot(3, n_snapshots, 2 * n_snapshots + i + 1)
+            im3 = ax3.imshow(value_map, cmap='viridis', alpha=0.9)
+            
+            # Overlay environment structure
+            if np.any(walls_mask):
+                ax3.imshow(np.where(walls_mask, 1, np.nan), cmap='gray', alpha=0.7, vmin=0, vmax=1)
+            
+            # Mark goals with red squares
+            if np.any(goals_mask):
+                goal_positions = np.where(goals_mask)
+                for gx, gy in zip(goal_positions[0], goal_positions[1]):
+                    ax3.scatter(gy, gx, c='red', s=200, marker='s', alpha=0.8, 
+                              edgecolors='white', linewidth=2)
+            
+            # Mark agent position
+            ax3.scatter(agent_y, agent_x, c='orange', s=150, marker='o', 
+                       edgecolors='white', linewidth=3, label='Agent')
+            
+            ax3.set_title(f'Learned Value Map\n(Episode {episode_num})', fontsize=12, fontweight='bold')
+            ax3.legend()
+            plt.colorbar(im3, ax=ax3, shrink=0.8)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, 'training_results.png'), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(self.save_dir, 'detailed_comparison.png'), 
+                   dpi=300, bbox_inches='tight')
         plt.show()
 
 def run_spatial_value_experiment(env_size=10, episodes=3000):
@@ -476,4 +600,4 @@ def run_spatial_value_experiment(env_size=10, episodes=3000):
 
 # Run the experiment
 if __name__ == "__main__":
-    monitor, agent = run_spatial_value_experiment(env_size=10, episodes=4001)
+    monitor, agent = run_spatial_value_experiment(env_size=10, episodes=3001)
