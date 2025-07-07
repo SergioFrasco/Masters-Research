@@ -7,7 +7,7 @@ class SARSASRAgent:
     Uses on-policy SARSA updates for both SR and reward prediction.
     """
     
-    def __init__(self, env, learning_rate=0.01, gamma=0.99, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995):
+    def __init__(self, env, learning_rate=0.01, gamma=0.99, epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.9995):
         self.env = env
         self.learning_rate = learning_rate
         self.gamma = gamma
@@ -24,11 +24,10 @@ class SARSASRAgent:
         # M[s,a,s'] = expected discounted future occupancy of state s' when taking action a in state s
         self.M = np.zeros((self.state_size, self.action_size, self.state_size))
         
-        # Initialize with identity for immediate occupancy
         for s in range(self.state_size):
             for a in range(self.action_size):
-                self.M[s, a, s] = 1.0
-        
+                self.M[s, a, s] = 1.0 
+                
         # Reward prediction weights - learns to predict immediate rewards
         self.w = np.zeros(self.state_size)
         
@@ -64,23 +63,19 @@ class SARSASRAgent:
         Update Successor Representation using SARSA:
         M(s,a) = M(s,a) + lr * [I(s) + γ * M(s',a') - M(s,a)]
         """
-        # Create one-hot encoding for current state
         I_s = np.zeros(self.state_size)
         I_s[state] = 1.0
         
         if done:
-            # Terminal state: only immediate occupancy matters
             td_target = I_s
         else:
-            # SARSA update: use the actual next action that will be taken
+            # SARSA SR: bootstrap from the next state-action pair's SR
             td_target = I_s + self.gamma * self.M[next_state, next_action, :]
         
-        # Update SR matrix
         td_error = td_target - self.M[state, action, :]
         self.M[state, action, :] += self.learning_rate * td_error
-        
-        return np.mean(np.abs(td_error))
-    
+
+
     def update_reward_prediction(self, state, action, reward, next_state, next_action, done):
         """
         Update reward prediction weights using SARSA:

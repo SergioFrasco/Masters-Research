@@ -65,6 +65,108 @@ class ExperimentRunner:
             "algorithm": "Q-Learning",
         }
 
+    def run_honours_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run the honours agent experiment, where the perfect reward map is given"""
+        np.random.seed(seed)
+
+        env = SimpleEnv(size=self.env_size)
+        agent = SuccessorAgent(env)
+
+        episode_rewards = []
+        episode_lengths = []
+        epsilon = 1.0
+        epsilon_end = 0.05
+        epsilon_decay = 0.9995
+
+        for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
+
+            # Reset for new episode (from your code)
+            agent.true_reward_map = np.zeros((env.size, env.size))
+            agent.wvf = np.zeros(
+                (agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32
+            )
+            agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
+
+            current_state_idx = agent.get_state_index(obs)
+            current_action = agent.sample_random_action(obs, epsilon=epsilon)
+            current_exp = [current_state_idx, current_action, None, None, None]
+
+            for step in range(max_steps):
+                obs, reward, done, _, _ = env.step(current_action)
+                next_state_idx = agent.get_state_index(obs)
+
+                # Complete experience
+                current_exp[2] = next_state_idx
+                current_exp[3] = reward
+                current_exp[4] = done
+
+                # Choose next action
+                if step == 0 or episode < 1:  # Warmup period
+                    next_action = agent.sample_random_action(obs, epsilon=epsilon)
+                else:
+                    next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+
+                next_exp = [next_state_idx, next_action, None, None, None]
+
+                # Update agent
+                agent.update(current_exp, None if done else next_exp)
+
+                # Vision Model
+                # Update the agent's true_reward_map based on current observation
+                agent_position = tuple(env.agent_pos)
+
+                # Get the current environment grids reward map
+                grid = env.grid.encode()
+                object_layer = grid[..., 0]
+                predicted_reward_map_2d = grid[..., 0]
+                predicted_reward_map_2d[object_layer == 2] = 0.0   
+                predicted_reward_map_2d[object_layer == 1] = 0.0   
+                predicted_reward_map_2d[object_layer == 8] = 1.0
+
+                # Mark position as visited
+                agent.visited_positions[agent_position[0], agent_position[1]] = True
+
+                agent.reward_maps.fill(0)  # Reset all maps to zero
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        curr_reward = predicted_reward_map_2d[y, x]
+                        idx = y * agent.grid_size + x
+                        reward_threshold = 0.5
+                        if curr_reward > reward_threshold:
+                            # changed from = reward to 1
+                            agent.reward_maps[idx, y, x] = 1
+                        else:
+                            agent.reward_maps[idx, y, x] = 0
+
+                    M_flat = np.mean(agent.M, axis=0)
+                    R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                    V_all = M_flat @ R_flat_all.T
+                    agent.wvf = V_all.T.reshape(
+                        agent.state_size, agent.grid_size, agent.grid_size
+                    )
+
+                total_reward += reward
+                steps += 1
+                current_exp = next_exp
+                current_action = next_action
+
+                if done:
+                    break
+
+            epsilon = max(epsilon_end, epsilon * epsilon_decay)
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": epsilon,
+            "algorithm": "Successor Agent",
+        }
+    
     def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
         """Run Master agent experiment"""
         np.random.seed(seed)
@@ -72,7 +174,7 @@ class ExperimentRunner:
         env = SimpleEnv(size=self.env_size)
         agent = SuccessorAgent(env)
 
-        # Setup vision model (simplified version of your setup)
+        # Setup vision model
         input_shape = (env.size, env.size, 1)
         ae_model = build_autoencoder(input_shape)
         ae_model.compile(optimizer="adam", loss="mse")
@@ -80,8 +182,8 @@ class ExperimentRunner:
         episode_rewards = []
         episode_lengths = []
         epsilon = 1.0
-        epsilon_end = 0.1
-        epsilon_decay = 0.995
+        epsilon_end = 0.05
+        epsilon_decay = 0.9995
 
         for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
             obs = env.reset()
@@ -289,13 +391,16 @@ class ExperimentRunner:
             
             # Run SARSA SR
             sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
+
+            # Run Honours successor
+            honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
             
-            # Run your successor agent
+            # Run Masters successor
             successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
             
             # Store results
-            algorithms = ['Q-Learning', 'SARSA SR', 'Successor Agent']
-            results_list = [qlearning_results, sarsa_sr_results, successor_results]
+            algorithms = ['Q-Learning', 'SARSA SR', 'Masters Successor', 'Honours Successor']
+            results_list = [qlearning_results, sarsa_sr_results, successor_results, honours_results]
             
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
@@ -466,7 +571,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=3000)
+    results = runner.run_comparison_experiment(episodes=2000)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=50)
