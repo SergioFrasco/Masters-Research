@@ -13,48 +13,122 @@ from utils.plotting import generate_save_path
 import json
 import time
 
+class SpatialAttentionModule(layers.Layer):
+    """Spatial attention mechanism for focusing on important regions"""
+    
+    def __init__(self, filters, **kwargs):
+        super().__init__(**kwargs)
+        self.filters = filters
+        self.conv_query = layers.Conv2D(filters // 8, 1, activation='relu')
+        self.conv_key = layers.Conv2D(filters // 8, 1, activation='relu')
+        self.conv_value = layers.Conv2D(filters, 1, activation='relu')
+        self.conv_output = layers.Conv2D(filters, 1, activation='relu')
+        self.softmax = layers.Softmax(axis=-1)
+        
+    def call(self, inputs, training=None):
+        batch_size = tf.shape(inputs)[0]
+        height = tf.shape(inputs)[1]
+        width = tf.shape(inputs)[2]
+        
+        # Generate query, key, value
+        query = self.conv_query(inputs, training=training)
+        key = self.conv_key(inputs, training=training)
+        value = self.conv_value(inputs, training=training)
+        
+        # Reshape for attention computation
+        query = tf.reshape(query, [batch_size, height * width, -1])
+        key = tf.reshape(key, [batch_size, height * width, -1])
+        value = tf.reshape(value, [batch_size, height * width, -1])
+        
+        # Compute attention weights
+        attention_weights = tf.matmul(query, key, transpose_b=True)
+        attention_weights = self.softmax(attention_weights)
+        
+        # Apply attention to values
+        attended = tf.matmul(attention_weights, value)
+        attended = tf.reshape(attended, [batch_size, height, width, self.filters])
+        
+        # Final output projection
+        output = self.conv_output(attended, training=training)
+        
+        # Residual connection
+        return inputs + output
+
 class SpatialValueCNN(keras.Model):
-    """CNN that predicts value function for every cell in the environment"""
+    """Improved CNN with skip connections and attention mechanisms"""
     
     def __init__(self, grid_size, **kwargs):
         super().__init__(**kwargs)
         self.grid_size = grid_size
         
-        # Encoder: Extract features from environment image
-        self.encoder = keras.Sequential([
-            layers.Conv2D(32, 3, padding='same', activation='relu'),
-            layers.Conv2D(32, 3, padding='same', activation='relu'),
-            layers.Conv2D(64, 3, padding='same', activation='relu'),
-            layers.Conv2D(64, 3, padding='same', activation='relu'),
-            layers.Conv2D(128, 3, padding='same', activation='relu'),
-            layers.Conv2D(128, 3, padding='same', activation='relu'),
-        ])
+        # Encoder with skip connections
+        self.conv1 = layers.Conv2D(32, 3, padding='same', activation='relu')
+        self.conv2 = layers.Conv2D(32, 3, padding='same', activation='relu')
+        self.skip1 = layers.Conv2D(32, 1, padding='same', activation='linear')
         
-        # Decoder: Produce dense value map
-        self.decoder = keras.Sequential([
-            layers.Conv2D(128, 3, padding='same', activation='relu'),
-            layers.Conv2D(64, 3, padding='same', activation='relu'),
-            layers.Conv2D(64, 3, padding='same', activation='relu'),
-            layers.Conv2D(32, 3, padding='same', activation='relu'),
-            layers.Conv2D(32, 3, padding='same', activation='relu'),
-            layers.Conv2D(1, 3, padding='same', activation='linear'),  # Output value map
-        ])
+        self.conv3 = layers.Conv2D(64, 3, padding='same', activation='relu')
+        self.conv4 = layers.Conv2D(64, 3, padding='same', activation='relu')
+        self.skip2 = layers.Conv2D(64, 1, padding='same', activation='linear')
         
-        # Optional: Add skip connections for better spatial resolution
-        self.skip_conv = layers.Conv2D(1, 1, padding='same', activation='linear')
+        self.conv5 = layers.Conv2D(128, 3, padding='same', activation='relu')
+        self.conv6 = layers.Conv2D(128, 3, padding='same', activation='relu')
+        self.skip3 = layers.Conv2D(128, 1, padding='same', activation='linear')
+        
+        # Attention mechanism
+        self.attention = SpatialAttentionModule(128)
+        
+        # Decoder with skip connections
+        self.deconv1 = layers.Conv2D(128, 3, padding='same', activation='relu')
+        self.deconv2 = layers.Conv2D(64, 3, padding='same', activation='relu')
+        self.skip4 = layers.Conv2D(64, 1, padding='same', activation='linear')
+        
+        self.deconv3 = layers.Conv2D(64, 3, padding='same', activation='relu')
+        self.deconv4 = layers.Conv2D(32, 3, padding='same', activation='relu')
+        self.skip5 = layers.Conv2D(32, 1, padding='same', activation='linear')
+        
+        self.deconv5 = layers.Conv2D(32, 3, padding='same', activation='relu')
+        self.deconv6 = layers.Conv2D(1, 3, padding='same', activation='linear')
+        
+        # Final skip connection from input
+        self.final_skip = layers.Conv2D(1, 1, padding='same', activation='linear')
         
     def call(self, inputs, training=None):
-        # Encode environment features
-        encoded = self.encoder(inputs, training=training)
+        # Encoder path with skip connections
+        x1 = self.conv1(inputs, training=training)
+        x2 = self.conv2(x1, training=training)
+        skip1_out = self.skip1(x1, training=training)
+        x2 = x2 + skip1_out  # Skip connection
         
-        # Skip connection from input
-        skip = self.skip_conv(inputs, training=training)
+        x3 = self.conv3(x2, training=training)
+        x4 = self.conv4(x3, training=training)
+        skip2_out = self.skip2(x3, training=training)
+        x4 = x4 + skip2_out  # Skip connection
         
-        # Decode to value map
-        decoded = self.decoder(encoded, training=training)
+        x5 = self.conv5(x4, training=training)
+        x6 = self.conv6(x5, training=training)
+        skip3_out = self.skip3(x5, training=training)
+        x6 = x6 + skip3_out  # Skip connection
         
-        # Combine with skip connection
-        value_map = decoded + skip
+        # Apply attention mechanism
+        attended = self.attention(x6, training=training)
+        
+        # Decoder path with skip connections
+        d1 = self.deconv1(attended, training=training)
+        d2 = self.deconv2(d1, training=training)
+        skip4_out = self.skip4(x4, training=training)  # Skip from encoder
+        d2 = d2 + skip4_out  # Skip connection
+        
+        d3 = self.deconv3(d2, training=training)
+        d4 = self.deconv4(d3, training=training)
+        skip5_out = self.skip5(x2, training=training)  # Skip from encoder
+        d4 = d4 + skip5_out  # Skip connection
+        
+        d5 = self.deconv5(d4, training=training)
+        d6 = self.deconv6(d5, training=training)
+        
+        # Final skip connection from input
+        final_skip = self.final_skip(inputs, training=training)
+        value_map = d6 + final_skip
         
         return tf.squeeze(value_map, axis=-1)  # Remove channel dimension -> [B, H, W]
 
@@ -91,7 +165,7 @@ class ExperienceReplayBuffer:
         return len(self.buffer)
 
 class SpatialValueAgent:
-    """Agent that learns spatial value functions over the entire environment"""
+    """Agent that learns spatial value functions with improved architecture and training"""
     
     def __init__(self, env, learning_rate=0.001, gamma=0.99, epsilon=1.0, epsilon_decay=0.995):
         self.env = env
@@ -101,6 +175,19 @@ class SpatialValueAgent:
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
         self.epsilon_min = 0.01
+        
+        # Training parameters with adaptive learning rate
+        self.initial_learning_rate = learning_rate
+        self.current_learning_rate = learning_rate
+        self.fine_tune_lr = learning_rate * 0.1  # Lower LR for fine-tuning
+        self.convergence_threshold = 0.01  # Loss threshold for switching to fine-tuning
+        self.fine_tune_mode = False
+        
+        # Adaptive smoothness penalty
+        self.smoothness_weight = 0.01
+        self.smoothness_weights = [0.001, 0.005, 0.01, 0.05, 0.1]  # Different values to try
+        self.current_smoothness_idx = 2  # Start with 0.01
+        self.smoothness_update_freq = 500  # Update every 500 episodes
         
         # Build value network and target network
         self.value_network = SpatialValueCNN(self.grid_size)
@@ -114,8 +201,8 @@ class SpatialValueAgent:
         # Copy weights to target network
         self.update_target_network()
         
-        # Optimizer
-        self.optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
+        # Optimizer with learning rate scheduling
+        self.optimizer = keras.optimizers.Adam(learning_rate=self.current_learning_rate)
         
         # Experience replay
         self.replay_buffer = ExperienceReplayBuffer(capacity=10000)
@@ -126,10 +213,31 @@ class SpatialValueAgent:
         self.target_update_freq = 100  # Update target network every 100 training steps
         self.training_step = 0
         
-        # Metrics
+        # Metrics for adaptive training
         self.episode_rewards = []
         self.training_losses = []
+        self.recent_losses = deque(maxlen=100)  # Track recent losses for convergence detection
         self.value_predictions = []
+    
+    def update_learning_rate(self):
+        """Update learning rate based on training progress"""
+        if len(self.recent_losses) >= 50:
+            avg_recent_loss = np.mean(list(self.recent_losses)[-50:])
+            
+            # Switch to fine-tuning mode if loss is converging
+            if avg_recent_loss < self.convergence_threshold and not self.fine_tune_mode:
+                self.fine_tune_mode = True
+                self.current_learning_rate = self.fine_tune_lr
+                self.optimizer.learning_rate.assign(self.current_learning_rate)
+                print(f"Switching to fine-tuning mode with LR: {self.current_learning_rate}")
+    
+    def update_smoothness_weight(self, episode):
+        """Experiment with different smoothness penalty weights"""
+        if episode % self.smoothness_update_freq == 0 and episode > 0:
+            # Cycle through different smoothness weights
+            self.current_smoothness_idx = (self.current_smoothness_idx + 1) % len(self.smoothness_weights)
+            self.smoothness_weight = self.smoothness_weights[self.current_smoothness_idx]
+            print(f"Updated smoothness weight to: {self.smoothness_weight}")
     
     def render_env_as_image(self):
         """Convert environment to image representation"""
@@ -254,7 +362,7 @@ class SpatialValueAgent:
         self.replay_buffer.push(experience)
     
     def train_step(self):
-        """Perform one training step using TD(0) updates"""
+        """Perform one training step with adaptive regularization"""
         # Sample batch from replay buffer
         batch = self.replay_buffer.sample(self.batch_size)
         if batch is None:
@@ -299,19 +407,31 @@ class SpatialValueAgent:
             # Compute TD error
             td_error = tf.reduce_mean(tf.square(current_values - td_targets))
             
-            # Optional: Add regularization to encourage smooth value maps
-            # Spatial smoothness penalty
+            # Enhanced spatial regularization
+            # Spatial smoothness penalty (gradient-based)
             dx = current_value_maps[:, 1:, :] - current_value_maps[:, :-1, :]
             dy = current_value_maps[:, :, 1:] - current_value_maps[:, :, :-1]
             smoothness_loss = tf.reduce_mean(tf.square(dx)) + tf.reduce_mean(tf.square(dy))
             
-            total_loss = td_error + 0.01 * smoothness_loss
+            # Second-order smoothness (Laplacian)
+            laplacian_x = dx[:, 1:, :] - dx[:, :-1, :]
+            laplacian_y = dy[:, :, 1:] - dy[:, :, :-1]
+            second_order_smoothness = tf.reduce_mean(tf.square(laplacian_x)) + tf.reduce_mean(tf.square(laplacian_y))
+            
+            # Total loss with adaptive regularization
+            total_loss = td_error + self.smoothness_weight * (smoothness_loss + 0.1 * second_order_smoothness)
         
         # Compute gradients and update
         gradients = tape.gradient(total_loss, self.value_network.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.value_network.trainable_variables))
         
         self.training_step += 1
+        
+        # Track loss for adaptive learning rate
+        self.recent_losses.append(total_loss.numpy())
+        
+        # Update learning rate based on convergence
+        self.update_learning_rate()
         
         # Update target network periodically
         if self.training_step % self.target_update_freq == 0:
@@ -357,14 +477,22 @@ class SpatialValueMonitor:
         self.episode_rewards = []
         self.episode_lengths = []
         self.training_losses = []
+        self.learning_rates = []
+        self.smoothness_weights = []
         self.value_map_snapshots = []
         
     def log_episode(self, episode, reward, length, loss, agent):
-        """Log episode results"""
+        """Log episode results with additional metrics"""
         self.episode_rewards.append(reward)
         self.episode_lengths.append(length)
+        self.learning_rates.append(agent.current_learning_rate)
+        self.smoothness_weights.append(agent.smoothness_weight)
+        
         if loss > 0:
             self.training_losses.append(loss)
+        
+        # Update smoothness weight periodically
+        agent.update_smoothness_weight(episode)
         
         # Save value map snapshot periodically
         if episode % 100 == 0:
@@ -377,22 +505,28 @@ class SpatialValueMonitor:
                 'value_map': value_map.copy(),
                 'reward_map': reward_map.copy(),
                 'env_layout': env_layout.copy(),
-                'agent_pos': agent.env.agent_pos
+                'agent_pos': agent.env.agent_pos,
+                'learning_rate': agent.current_learning_rate,
+                'smoothness_weight': agent.smoothness_weight,
+                'fine_tune_mode': agent.fine_tune_mode
             })
         
-        # Print progress
+        # Print progress with additional info
         if episode % 50 == 0:
             recent_rewards = self.episode_rewards[-10:]
             avg_reward = np.mean(recent_rewards) if recent_rewards else 0
+            mode = "Fine-tune" if agent.fine_tune_mode else "Initial"
             print(f"Episode {episode}: Avg Reward: {avg_reward:.2f}, "
-                  f"Length: {length}, Loss: {loss:.4f}, Epsilon: {agent.epsilon:.3f}")
+                  f"Length: {length}, Loss: {loss:.4f}, Epsilon: {agent.epsilon:.3f}, "
+                  f"LR: {agent.current_learning_rate:.6f}, Smoothness: {agent.smoothness_weight:.3f}, "
+                  f"Mode: {mode}")
     
     def plot_results(self):
-        """Plot training metrics only"""
-        fig = plt.figure(figsize=(15, 5))
+        """Plot enhanced training metrics"""
+        fig = plt.figure(figsize=(20, 10))
         
         # Episode rewards
-        ax1 = plt.subplot(1, 3, 1)
+        ax1 = plt.subplot(2, 4, 1)
         plt.plot(self.episode_rewards, alpha=0.3, label='Episode Rewards')
         if len(self.episode_rewards) >= 50:
             smoothed = pd.Series(self.episode_rewards).rolling(50).mean()
@@ -404,7 +538,7 @@ class SpatialValueMonitor:
         plt.grid(True, alpha=0.3)
         
         # Training loss
-        ax2 = plt.subplot(1, 3, 2)
+        ax2 = plt.subplot(2, 4, 2)
         if self.training_losses:
             plt.plot(self.training_losses, alpha=0.7)
             plt.title('Training Loss (TD Error)')
@@ -413,7 +547,7 @@ class SpatialValueMonitor:
             plt.grid(True, alpha=0.3)
         
         # Episode lengths
-        ax3 = plt.subplot(1, 3, 3)
+        ax3 = plt.subplot(2, 4, 3)
         plt.plot(self.episode_lengths, alpha=0.3, label='Episode Length')
         if len(self.episode_lengths) >= 50:
             smoothed = pd.Series(self.episode_lengths).rolling(50).mean()
@@ -424,8 +558,38 @@ class SpatialValueMonitor:
         plt.legend()
         plt.grid(True, alpha=0.3)
         
+        # Learning rate evolution
+        ax4 = plt.subplot(2, 4, 4)
+        plt.plot(self.learning_rates, linewidth=2, color='orange')
+        plt.title('Learning Rate Evolution')
+        plt.xlabel('Episode')
+        plt.ylabel('Learning Rate')
+        plt.yscale('log')
+        plt.grid(True, alpha=0.3)
+        
+        # Smoothness weight evolution
+        ax5 = plt.subplot(2, 4, 5)
+        plt.plot(self.smoothness_weights, linewidth=2, color='green')
+        plt.title('Smoothness Weight Evolution')
+        plt.xlabel('Episode')
+        plt.ylabel('Smoothness Weight')
+        plt.yscale('log')
+        plt.grid(True, alpha=0.3)
+        
+        # Value map quality over time (if available)
+        if self.value_map_snapshots:
+            ax6 = plt.subplot(2, 4, 6)
+            episodes = [snap['episode'] for snap in self.value_map_snapshots]
+            value_ranges = [np.max(snap['value_map']) - np.min(snap['value_map']) 
+                           for snap in self.value_map_snapshots]
+            plt.plot(episodes, value_ranges, 'o-', linewidth=2, color='purple')
+            plt.title('Value Map Dynamic Range')
+            plt.xlabel('Episode')
+            plt.ylabel('Value Range')
+            plt.grid(True, alpha=0.3)
+        
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, 'training_metrics.png'), 
+        plt.savefig(os.path.join(self.save_dir, 'enhanced_training_metrics.png'), 
                    dpi=300, bbox_inches='tight')
         plt.show()
         
@@ -445,7 +609,7 @@ class SpatialValueMonitor:
             
         selected_snapshots = self.value_map_snapshots[-n_snapshots:]
         
-        # Create figure with 3 rows (env layout, reward space, value maps) and n_snapshots columns
+        # Create figure with 3 rows and n_snapshots columns
         fig = plt.figure(figsize=(6 * n_snapshots, 18))
         
         for i, snapshot in enumerate(selected_snapshots):
@@ -454,6 +618,9 @@ class SpatialValueMonitor:
             env_layout = snapshot['env_layout']
             reward_map = snapshot['reward_map']
             value_map = snapshot['value_map']
+            lr = snapshot['learning_rate']
+            smooth_weight = snapshot['smoothness_weight']
+            fine_tune = snapshot['fine_tune_mode']
             
             # Masks for different environment elements
             walls_mask = env_layout == -1
@@ -468,7 +635,9 @@ class SpatialValueMonitor:
             ax1.scatter(agent_y, agent_x, c='orange', s=150, marker='o', 
                        edgecolors='white', linewidth=3, label='Agent')
             
-            ax1.set_title(f'Environment Layout\n(Episode {episode_num})', fontsize=12, fontweight='bold')
+            mode_text = "Fine-tune" if fine_tune else "Initial"
+            ax1.set_title(f'Environment Layout\n(Episode {episode_num}, {mode_text})', 
+                         fontsize=12, fontweight='bold')
             ax1.legend()
             plt.colorbar(im1, ax=ax1, shrink=0.8)
             
@@ -480,20 +649,12 @@ class SpatialValueMonitor:
             if np.any(walls_mask):
                 ax2.imshow(np.where(walls_mask, 0.5, np.nan), cmap='gray', alpha=0.9, vmin=0, vmax=1)
             
-            # Mark specific reward locations
-            reward_positions = np.where(reward_map != 0)
-            for rx, ry in zip(reward_positions[0], reward_positions[1]):
-                reward_val = reward_map[rx, ry]
-                color = 'darkgreen' if reward_val > 0 else 'darkred'
-                marker = 'o' if reward_val > 0 else 'x'
-                ax2.scatter(ry, rx, c=color, s=200, marker=marker, 
-                           edgecolors='white', linewidth=3, alpha=0.9)
-            
             # Mark agent position
             ax2.scatter(agent_y, agent_x, c='orange', s=150, marker='o', 
                        edgecolors='white', linewidth=3, label='Agent')
             
-            ax2.set_title(f'Reward Space\n(Episode {episode_num})', fontsize=12, fontweight='bold')
+            ax2.set_title(f'Reward Space\n(LR: {lr:.6f}, Smooth: {smooth_weight:.3f})', 
+                         fontsize=12, fontweight='bold')
             ax2.legend()
             plt.colorbar(im2, ax=ax2, shrink=0.8)
             
@@ -516,28 +677,32 @@ class SpatialValueMonitor:
             ax3.scatter(agent_y, agent_x, c='orange', s=150, marker='o', 
                        edgecolors='white', linewidth=3, label='Agent')
             
-            ax3.set_title(f'Learned Value Map\n(Episode {episode_num})', fontsize=12, fontweight='bold')
+            value_range = np.max(value_map) - np.min(value_map)
+            ax3.set_title(f'Learned Value Map\n(Range: {value_range:.3f})', 
+                         fontsize=12, fontweight='bold')
             ax3.legend()
             plt.colorbar(im3, ax=ax3, shrink=0.8)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, 'detailed_comparison.png'), 
+        plt.savefig(os.path.join(self.save_dir, 'enhanced_detailed_comparison.png'), 
                    dpi=300, bbox_inches='tight')
         plt.show()
 
 def run_spatial_value_experiment(env_size=10, episodes=3000):
-    """Run the spatial value function experiment"""
+    """Run the enhanced spatial value function experiment"""
     
     # Initialize environment and agent
     env = SimpleEnv(size=env_size)
     agent = SpatialValueAgent(env, learning_rate=0.001, gamma=0.99)
     monitor = SpatialValueMonitor()
     
-    print("Starting Spatial Value Function Learning...")
+    print("Starting Enhanced Spatial Value Function Learning...")
     print(f"Environment size: {env_size}x{env_size}")
     print(f"Training episodes: {episodes}")
+    print(f"Architecture: Skip connections + Spatial attention")
+    print(f"Training: Adaptive learning rate + Variable smoothness penalty")
     
-    for episode in tqdm(range(episodes), desc="Training Spatial Value Agent"):
+    for episode in tqdm(range(episodes), desc="Training Enhanced Spatial Value Agent"):
         obs = env.reset()
         total_reward = 0
         step_count = 0
@@ -588,16 +753,21 @@ def run_spatial_value_experiment(env_size=10, episodes=3000):
         
         # Save model periodically
         if episode % 500 == 0 and episode > 0:
-            agent.save_model(os.path.join(monitor.save_dir, f'spatial_value_model_{episode}.h5'))
+            agent.save_model(os.path.join(monitor.save_dir, f'enhanced_spatial_value_model_{episode}.h5'))
     
     # Final visualization
     monitor.plot_results()
     
     # Save final model
-    agent.save_model(os.path.join(monitor.save_dir, 'spatial_value_model_final.h5'))
+    agent.save_model(os.path.join(monitor.save_dir, 'enhanced_spatial_value_model_final.h5'))
+    
+    print(f"\nTraining completed!")
+    print(f"Final learning rate: {agent.current_learning_rate:.6f}")
+    print(f"Final smoothness weight: {agent.smoothness_weight:.3f}")
+    print(f"Fine-tuning mode: {'Yes' if agent.fine_tune_mode else 'No'}")
     
     return monitor, agent
 
-# Run the experiment
+# Run the enhanced experiment
 if __name__ == "__main__":
-    monitor, agent = run_spatial_value_experiment(env_size=10, episodes=3001)
+    monitor, agent = run_spatial_value_experiment(env_size=10, episodes=6001)
