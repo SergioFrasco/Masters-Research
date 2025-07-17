@@ -76,20 +76,20 @@ def build_autoencoder(input_shape):
     
     inputs = layers.Input(shape=input_shape)
     # Encoder
-    x1 = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same')(inputs)
-    x2 = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same')(x1)
-    x3 = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same')(x2)  # New deeper encoding layer
+    x1 = layers.Conv2D(32, (3, 3), strides=1, activation='relu', padding='same', use_bias = False)(inputs)
+    x2 = layers.Conv2D(64, (3, 3), strides=1, activation='relu', padding='same', use_bias = False)(x1)
+    x3 = layers.Conv2D(64, (2, 2), strides=1, activation='relu', padding='same', use_bias = False)(x2)  # New deeper encoding layer
 
     # Decoder
-    x4 = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same')(x3)
+    x4 = layers.Conv2DTranspose(64, (2, 2), strides=1, activation='relu', padding='same', use_bias = False)(x3)
     x5 = layers.Concatenate(axis=-1)([x2, x4])  # Skip connection
-    x5 = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same')(x5)
+    x5 = layers.Conv2DTranspose(64, (3, 3), strides=1, activation='relu', padding='same', use_bias = False)(x5)
 
     x6 = layers.Concatenate(axis=-1)([x1, x5])  # Skip connection
-    x6 = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same')(x6)
+    x6 = layers.Conv2DTranspose(32, (3, 3), strides=1, activation='relu', padding='same', use_bias = False)(x6)
 
     x7 = layers.Concatenate(axis=-1)([inputs, x6])  # Final merge with input
-    outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same')(x7)
+    outputs = layers.Conv2DTranspose(input_shape[-1], (3, 3), activation=None, padding='same', use_bias = False)(x7)
 
 
     autoencoder = models.Model(inputs, outputs)
