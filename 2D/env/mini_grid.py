@@ -75,7 +75,7 @@ class SimpleEnv(MiniGridEnv):
             # print("Position pool reset - all positions available again")
         
         # Randomly decide how many goals for this episode (1 to 5)
-        num_goals = random.randint(1, 5)
+        num_goals = random.randint(1, 1)
         
         # Make sure we don't try to select more positions than available
         num_goals = min(num_goals, len(self.available_positions))
@@ -119,6 +119,10 @@ class SimpleEnv(MiniGridEnv):
         # Create an empty grid
         self.grid = Grid(width, height)
 
+        # Added as a sanity check 
+        # self.put_obj(Goal(), 5, 5)
+        
+        # Uncomment to use original random Placements
         # Select goal positions without replacement
         goal_positions = self._select_goal_positions()
 

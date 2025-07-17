@@ -1,0 +1,1 @@
+This is a sanity check to make sure the Pure vision model can learn when the reward space does not change
