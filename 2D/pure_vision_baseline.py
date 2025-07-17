@@ -1,3 +1,32 @@
+# -------------------------------
+# Vision Model Value Prediction
+# -------------------------------
+#
+# The vision model (autoencoder) is trained to predict the value function
+# of the environment from a 2D visual grid representation.
+#
+# ✅ Training Setup:
+# - Input: A 2D grid image of the environment (walls, agent, goal).
+# - Target: The ground truth value map learned by the agent via TD learning.
+# - Loss: Mean Squared Error (MSE) between predicted and true value maps.
+#
+# 🔁 Training Loop (called every few steps):
+# 1. Collect (input_data, target_data) via `agent.prepare_training_data()`.
+#    - input_data: Current grid state (encoded).
+#    - target_data: Agent’s learned value map (Q-values per cell).
+# 2. Train the autoencoder with: model.fit(input_data, target_data)
+#
+# 🧠 Temporal Difference (TD) Learning:
+# - Q-learning is used internally by the agent to compute target values.
+# - The update rule used is:
+#     V(s) ← V(s) + α [r + γ max_a' V(s') - V(s)]
+#
+# 🎯 Purpose:
+# - The model learns to map raw grid layouts to spatial value predictions.
+# - It bootstraps off Q-learning without relying on SR or latent features.
+# - This creates a pure vision-based value function baseline for comparison.
+
+
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
