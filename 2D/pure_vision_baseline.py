@@ -533,7 +533,7 @@ def main():
     rewards, steps, losses = train_improved_vision_agent(
         agent, env, 
         ae_model=ae_model, 
-        episodes=2000,
+        episodes=6001,
         train_every=5
     )
     
