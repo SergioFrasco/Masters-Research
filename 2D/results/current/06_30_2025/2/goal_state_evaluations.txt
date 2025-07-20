@@ -1,0 +1,194 @@
+Goal State Value Evaluations
+==================================================
+Episode 200: Agent did not choose to stay in the same position.
+Episode 300: Agent did not choose to stay in the same position.
+Episode 400: Agent chose to stay at goal.
+Episode 500: Agent did not choose to stay in the same position.
+Episode 800: Agent did not choose to stay in the same position.
+Episode 1100: Agent did not choose to stay in the same position.
+Episode 1200: Agent chose to stay at goal.
+Episode 1300: Agent did not choose to stay in the same position.
+Episode 1400: Agent did not choose to stay in the same position.
+Episode 1500: Agent chose to stay at goal.
+Episode 1600: Agent did not choose to stay in the same position.
+Episode 1700: Agent chose to stay at goal.
+Episode 1800: Agent did not choose to stay in the same position.
+Episode 1900: Agent did not choose to stay in the same position.
+Episode 2000: Agent chose to stay at goal.
+Episode 2100: Agent did not choose to stay in the same position.
+Episode 2200: Agent did not choose to stay in the same position.
+Episode 2400: Agent did not choose to stay in the same position.
+Episode 2500: Agent did not choose to stay in the same position.
+Episode 2600: Agent did not choose to stay in the same position.
+Episode 2700: Agent did not choose to stay in the same position.
+Episode 2800: Agent did not choose to stay in the same position.
+Episode 2900: Agent did not choose to stay in the same position.
+Episode 3000: Agent did not choose to stay in the same position.
+Episode 3100: Agent did not choose to stay in the same position.
+Episode 3200: Agent did not choose to stay in the same position.
+Episode 3300: Agent did not choose to stay in the same position.
+Episode 3400: Agent chose to stay at goal.
+Episode 3500: Agent did not choose to stay in the same position.
+Episode 3600: Agent did not choose to stay in the same position.
+Episode 3700: Agent did not choose to stay in the same position.
+Episode 3800: Agent did not choose to stay in the same position.
+Episode 3900: Agent did not choose to stay in the same position.
+Episode 4000: Agent did not choose to stay in the same position.
+Episode 4100: Agent did not choose to stay in the same position.
+Episode 4200: Agent did not choose to stay in the same position.
+Episode 4300: Agent did not choose to stay in the same position.
+Episode 4400: Agent chose to stay at goal.
+Episode 4500: Agent did not choose to stay in the same position.
+Episode 4600: Agent chose to stay at goal.
+Episode 4700: Agent did not choose to stay in the same position.
+Episode 4800: Agent did not choose to stay in the same position.
+Episode 4900: Agent did not choose to stay in the same position.
+Episode 5000: Agent did not choose to stay in the same position.
+Episode 5100: Agent did not choose to stay in the same position.
+Episode 5200: Agent did not choose to stay in the same position.
+Episode 5300: Agent chose to stay at goal.
+Episode 5400: Agent did not choose to stay in the same position.
+Episode 5500: Agent did not choose to stay in the same position.
+Episode 5600: Agent did not choose to stay in the same position.
+Episode 5700: Agent did not choose to stay in the same position.
+Episode 5800: Agent did not choose to stay in the same position.
+Episode 5900: Agent chose to stay at goal.
+Episode 6000: Agent did not choose to stay in the same position.
+Episode 6100: Agent did not choose to stay in the same position.
+Episode 6200: Agent did not choose to stay in the same position.
+Episode 6300: Agent did not choose to stay in the same position.
+Episode 6400: Agent did not choose to stay in the same position.
+Episode 6500: Agent did not choose to stay in the same position.
+Episode 6600: Agent did not choose to stay in the same position.
+Episode 6700: Agent chose to stay at goal.
+Episode 6800: Agent did not choose to stay in the same position.
+Episode 6900: Agent did not choose to stay in the same position.
+Episode 7000: Agent did not choose to stay in the same position.
+Episode 7100: Agent did not choose to stay in the same position.
+Episode 7200: Agent chose to stay at goal.
+Episode 7300: Agent did not choose to stay in the same position.
+Episode 7400: Agent did not choose to stay in the same position.
+Episode 7500: Agent did not choose to stay in the same position.
+Episode 7600: Agent did not choose to stay in the same position.
+Episode 7800: Agent did not choose to stay in the same position.
+Episode 7900: Agent did not choose to stay in the same position.
+Episode 8000: Agent did not choose to stay in the same position.
+Episode 8100: Agent did not choose to stay in the same position.
+Episode 8200: Agent did not choose to stay in the same position.
+Episode 8300: Agent chose to stay at goal.
+Episode 8400: Agent did not choose to stay in the same position.
+Episode 8500: Agent did not choose to stay in the same position.
+Episode 8600: Agent chose to stay at goal.
+Episode 8700: Agent chose to stay at goal.
+Episode 8800: Agent did not choose to stay in the same position.
+Episode 8900: Agent did not choose to stay in the same position.
+Episode 9000: Agent did not choose to stay in the same position.
+Episode 9100: Agent did not choose to stay in the same position.
+Episode 9200: Agent did not choose to stay in the same position.
+Episode 9300: Agent did not choose to stay in the same position.
+Episode 9400: Agent did not choose to stay in the same position.
+Episode 9500: Agent did not choose to stay in the same position.
+Episode 9600: Agent did not choose to stay in the same position.
+Episode 9700: Agent did not choose to stay in the same position.
+Episode 9800: Agent chose to stay at goal.
+Episode 9900: Agent did not choose to stay in the same position.
+Episode 10000: Agent chose to stay at goal.
+Episode 10100: Agent did not choose to stay in the same position.
+Episode 10200: Agent did not choose to stay in the same position.
+Episode 10300: Agent chose to stay at goal.
+Episode 10400: Agent did not choose to stay in the same position.
+Episode 10500: Agent chose to stay at goal.
+Episode 10600: Agent chose to stay at goal.
+Episode 10700: Agent did not choose to stay in the same position.
+Episode 10800: Agent did not choose to stay in the same position.
+Episode 10900: Agent chose to stay at goal.
+Episode 11000: Agent did not choose to stay in the same position.
+Episode 11100: Agent did not choose to stay in the same position.
+Episode 11200: Agent did not choose to stay in the same position.
+Episode 11300: Agent chose to stay at goal.
+Episode 11400: Agent did not choose to stay in the same position.
+Episode 11500: Agent did not choose to stay in the same position.
+Episode 11600: Agent did not choose to stay in the same position.
+Episode 11700: Agent did not choose to stay in the same position.
+Episode 11800: Agent did not choose to stay in the same position.
+Episode 11900: Agent did not choose to stay in the same position.
+Episode 12000: Agent did not choose to stay in the same position.
+Episode 12100: Agent did not choose to stay in the same position.
+Episode 12200: Agent did not choose to stay in the same position.
+Episode 12300: Agent did not choose to stay in the same position.
+Episode 12400: Agent did not choose to stay in the same position.
+Episode 12500: Agent did not choose to stay in the same position.
+Episode 12600: Agent did not choose to stay in the same position.
+Episode 12700: Agent did not choose to stay in the same position.
+Episode 12800: Agent did not choose to stay in the same position.
+Episode 12900: Agent chose to stay at goal.
+Episode 13000: Agent did not choose to stay in the same position.
+Episode 13100: Agent chose to stay at goal.
+Episode 13200: Agent did not choose to stay in the same position.
+Episode 13300: Agent did not choose to stay in the same position.
+Episode 13400: Agent chose to stay at goal.
+Episode 13500: Agent did not choose to stay in the same position.
+Episode 13600: Agent did not choose to stay in the same position.
+Episode 13700: Agent did not choose to stay in the same position.
+Episode 13800: Agent chose to stay at goal.
+Episode 13900: Agent did not choose to stay in the same position.
+Episode 14000: Agent did not choose to stay in the same position.
+Episode 14100: Agent did not choose to stay in the same position.
+Episode 14200: Agent chose to stay at goal.
+Episode 14300: Agent did not choose to stay in the same position.
+Episode 14400: Agent did not choose to stay in the same position.
+Episode 14500: Agent did not choose to stay in the same position.
+Episode 14600: Agent did not choose to stay in the same position.
+Episode 14700: Agent did not choose to stay in the same position.
+Episode 14800: Agent did not choose to stay in the same position.
+Episode 14900: Agent did not choose to stay in the same position.
+Episode 15000: Agent did not choose to stay in the same position.
+Episode 15100: Agent did not choose to stay in the same position.
+Episode 15200: Agent chose to stay at goal.
+Episode 15300: Agent did not choose to stay in the same position.
+Episode 15400: Agent did not choose to stay in the same position.
+Episode 15500: Agent did not choose to stay in the same position.
+Episode 15600: Agent did not choose to stay in the same position.
+Episode 15700: Agent did not choose to stay in the same position.
+Episode 15800: Agent did not choose to stay in the same position.
+Episode 15900: Agent did not choose to stay in the same position.
+Episode 16000: Agent did not choose to stay in the same position.
+Episode 16100: Agent did not choose to stay in the same position.
+Episode 16200: Agent did not choose to stay in the same position.
+Episode 16300: Agent did not choose to stay in the same position.
+Episode 16400: Agent did not choose to stay in the same position.
+Episode 16500: Agent did not choose to stay in the same position.
+Episode 16600: Agent did not choose to stay in the same position.
+Episode 16700: Agent did not choose to stay in the same position.
+Episode 16800: Agent did not choose to stay in the same position.
+Episode 16900: Agent chose to stay at goal.
+Episode 17000: Agent did not choose to stay in the same position.
+Episode 17100: Agent did not choose to stay in the same position.
+Episode 17200: Agent chose to stay at goal.
+Episode 17300: Agent did not choose to stay in the same position.
+Episode 17400: Agent did not choose to stay in the same position.
+Episode 17500: Agent did not choose to stay in the same position.
+Episode 17600: Agent did not choose to stay in the same position.
+Episode 17700: Agent did not choose to stay in the same position.
+Episode 17800: Agent did not choose to stay in the same position.
+Episode 17900: Agent did not choose to stay in the same position.
+Episode 18000: Agent did not choose to stay in the same position.
+Episode 18200: Agent did not choose to stay in the same position.
+Episode 18300: Agent did not choose to stay in the same position.
+Episode 18400: Agent chose to stay at goal.
+Episode 18500: Agent did not choose to stay in the same position.
+Episode 18600: Agent did not choose to stay in the same position.
+Episode 18700: Agent did not choose to stay in the same position.
+Episode 18800: Agent did not choose to stay in the same position.
+Episode 18900: Agent did not choose to stay in the same position.
+Episode 19000: Agent chose to stay at goal.
+Episode 19100: Agent did not choose to stay in the same position.
+Episode 19200: Agent chose to stay at goal.
+Episode 19300: Agent did not choose to stay in the same position.
+Episode 19400: Agent chose to stay at goal.
+Episode 19500: Agent chose to stay at goal.
+Episode 19600: Agent did not choose to stay in the same position.
+Episode 19700: Agent chose to stay at goal.
+Episode 19800: Agent did not choose to stay in the same position.
+Episode 19900: Agent chose to stay at goal.
+Episode 20000: Agent did not choose to stay in the same position.
