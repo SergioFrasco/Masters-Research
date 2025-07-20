@@ -1,0 +1,10 @@
+DQN Performance Evaluations
+==================================================
+Episode 100: Goal state does not have highest Q-value (goal: 0.909, max neighbor: 1.014)
+Episode 200: Goal state does not have highest Q-value (goal: 0.946, max neighbor: 0.978)
+Episode 300: Goal state does not have highest Q-value (goal: 0.929, max neighbor: 0.991)
+Episode 400: Goal state does not have highest Q-value (goal: 0.892, max neighbor: 0.988)
+Episode 500: Goal state does not have highest Q-value (goal: 0.954, max neighbor: 1.007)
+Episode 600: Goal state does not have highest Q-value (goal: 0.916, max neighbor: 1.001)
+Episode 700: Goal state does not have highest Q-value (goal: 0.923, max neighbor: 1.002)
+Episode 800: Goal state does not have highest Q-value (goal: 0.926, max neighbor: 1.003)
