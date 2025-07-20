@@ -1,0 +1,2 @@
+This is a large run of the vision model that was run on the cluster
+confirms it doesnt work well
