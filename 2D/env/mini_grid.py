@@ -75,7 +75,7 @@ class SimpleEnv(MiniGridEnv):
             # print("Position pool reset - all positions available again")
         
         # Randomly decide how many goals for this episode (1 to 5)
-        num_goals = random.randint(1, 1)
+        num_goals = random.randint(1, 5)
         
         # Make sure we don't try to select more positions than available
         num_goals = min(num_goals, len(self.available_positions))

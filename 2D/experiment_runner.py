@@ -2,13 +2,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import os
+from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
-from agents import SuccessorAgent
+from agents import SuccessorAgent, ImprovedVisionOnlyAgent, DQNAgent
 from models import build_autoencoder
 from utils.plotting import generate_save_path
 import json
 import time
+import tensorflow as tf
 
 
 class ExperimentRunner:
@@ -63,6 +65,67 @@ class ExperimentRunner:
             "lengths": episode_lengths,
             "final_epsilon": agent.epsilon,
             "algorithm": "Q-Learning",
+        }
+
+    def run_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run DQN baseline experiment"""
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
+
+        env = SimpleEnv(size=self.env_size)
+        agent = DQNAgent(env, 
+                        learning_rate=0.001,
+                        gamma=0.95,
+                        epsilon_start=1.0,
+                        epsilon_end=0.01,
+                        epsilon_decay=0.9995,
+                        memory_size=10000,
+                        batch_size=32,
+                        target_update_freq=100)
+
+        episode_rewards = []
+        episode_lengths = []
+
+        for episode in tqdm(range(episodes), desc=f"DQN (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
+
+            # Get initial state
+            current_state = agent.get_state_vector(obs)
+
+            for step in range(max_steps):
+                # Choose action
+                action = agent.get_action(current_state)
+                
+                # Take action
+                obs, reward, done, _, _ = env.step(action)
+                next_state = agent.get_state_vector(obs)
+                
+                # Store experience
+                agent.remember(current_state, action, reward, next_state, done)
+                
+                # Train the network
+                if len(agent.memory) >= agent.batch_size:
+                    agent.replay()
+                
+                total_reward += reward
+                steps += 1
+                current_state = next_state
+                
+                if done:
+                    break
+
+            # Decay epsilon
+            agent.decay_epsilon()
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": agent.epsilon,
+            "algorithm": "DQN",
         }
 
     def run_honours_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
@@ -164,7 +227,7 @@ class ExperimentRunner:
             "rewards": episode_rewards,
             "lengths": episode_lengths,
             "final_epsilon": epsilon,
-            "algorithm": "Successor Agent",
+            "algorithm": "Honours Successor",
         }
     
     def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
@@ -185,7 +248,7 @@ class ExperimentRunner:
         epsilon_end = 0.05
         epsilon_decay = 0.9995
 
-        for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
+        for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
             obs = env.reset()
             total_reward = 0
             steps = 0
@@ -319,7 +382,7 @@ class ExperimentRunner:
             "rewards": episode_rewards,
             "lengths": episode_lengths,
             "final_epsilon": epsilon,
-            "algorithm": "Successor Agent",
+            "algorithm": "Masters Successor",
         }
     
     def run_sarsa_sr_experiment(self, episodes=5000, max_steps=200, seed=20):
@@ -379,6 +442,89 @@ class ExperimentRunner:
             'algorithm': 'SARSA SR'
         }
 
+    def run_vision_only_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run Vision-Only baseline experiment"""
+        np.random.seed(seed)
+        tf.random.set_seed(seed)
+        
+        env = SimpleEnv(size=self.env_size)
+        agent = ImprovedVisionOnlyAgent(env)
+        
+        # Setup autoencoder
+        input_shape = (env.size, env.size, 1)
+        ae_model = build_autoencoder(input_shape)
+        ae_model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+            loss='mse',
+            metrics=['mae']
+        )
+        
+        episode_rewards = []
+        episode_lengths = []
+        epsilon = 1.0
+        epsilon_end = 0.05
+        epsilon_decay = 0.995
+        train_every = 10
+        
+        for episode in tqdm(range(episodes), desc=f"Vision-Only Agent (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
+            
+            prev_pos = tuple(env.agent_pos)
+            
+            for step in range(max_steps):
+                # Choose action
+                if episode < 50:  # Extended warm-up with random actions
+                    action = env.action_space.sample()
+                else:
+                    action = agent.sample_action_from_values(obs, epsilon=epsilon)
+                
+                # Take action
+                obs, reward, done, _, _ = env.step(action)
+                next_pos = tuple(env.agent_pos)
+                
+                # Update value map
+                agent.update_value_map(prev_pos, action, reward, next_pos, done)
+                
+                # Train autoencoder periodically
+                if step % train_every == 0 or done:
+                    input_data, target_data = agent.prepare_training_data()
+                    
+                    if input_data is not None:
+                        # Train with single epoch to match other experiments
+                        ae_model.fit(
+                            input_data, target_data,
+                            epochs=1,
+                            batch_size=1,
+                            verbose=0
+                        )
+                        
+                        # Update prediction
+                        predicted_values = ae_model.predict(input_data, verbose=0)
+                        agent.predicted_value_map = predicted_values[0, :, :, 0]
+                
+                total_reward += reward
+                steps += 1
+                prev_pos = next_pos
+                
+                if done:
+                    break
+            
+            # Decay epsilon
+            epsilon = max(epsilon_end, epsilon * epsilon_decay)
+            
+            # Store statistics
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+        
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": epsilon,
+            "algorithm": "Vision-Only",
+        }
+
     def run_comparison_experiment(self, episodes=5000):
         """Run comparison between all agents across multiple seeds"""
         all_results = {}
@@ -389,6 +535,9 @@ class ExperimentRunner:
             # Run Q-learning
             qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
             
+            # Run DQN
+            dqn_results = self.run_dqn_experiment(episodes=episodes, seed=seed)
+            
             # Run SARSA SR
             sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
 
@@ -398,9 +547,12 @@ class ExperimentRunner:
             # Run Masters successor
             successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
             
+            # Run Vision-Only agent
+            vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
+            
             # Store results
-            algorithms = ['Q-Learning', 'SARSA SR', 'Masters Successor', 'Honours Successor']
-            results_list = [qlearning_results, sarsa_sr_results, successor_results, honours_results]
+            algorithms = ['Q-Learning', 'DQN', 'SARSA SR', 'Masters Successor', 'Honours Successor', 'Vision-Only']
+            results_list = [qlearning_results, dqn_results, sarsa_sr_results, successor_results, honours_results, vision_results]
             
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
@@ -571,7 +723,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=2000)
+    results = runner.run_comparison_experiment(episodes=3001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=50)
