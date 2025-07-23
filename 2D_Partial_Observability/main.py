@@ -10,8 +10,9 @@ import pandas as pd
 import glob
 
 from minigrid.core.world_object import Goal, Wall
+from minigrid.wrappers import RGBImgPartialObsWrapper, ImgObsWrapper
 from tqdm import tqdm
-from env import SimpleEnv, data_collector
+from env import SimpleEnv
 from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder, weighted_focal_mse_loss
 from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path
 from utils import create_video_from_images, get_latest_run_dir
@@ -33,7 +34,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     Evaluate state values around the agent when it reaches a goal.
     Compare goal state value with neighboring states and log the result.
     """
-    current_pos = env.agent_pos
+    current_pos = env.unwrapped.agent_pos
     x, y = current_pos
     
     # Get the current state index (goal state)
@@ -56,7 +57,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
         # Check if neighbor is within bounds and not a wall
         if (0 <= nx < agent.grid_size and 0 <= ny < agent.grid_size):
             # Check if it's a valid position (not a wall)
-            cell = env.grid.get(nx, ny)
+            cell = env.unwrapped.grid.get(nx, ny)
             from minigrid.core.world_object import Wall
             if cell is None or not isinstance(cell, Wall):
                 # Get max WVF value at this neighbor
@@ -90,7 +91,7 @@ def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps
     step_counts = []
 
     # Tracking where the agent is going
-    state_occupancy = np.zeros((env.size, env.size), dtype=np.int32)
+    state_occupancy = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=np.int32)
 
     # Create log file for goal state evaluations
     log_file_path = generate_save_path("goal_state_evaluations.txt")
@@ -111,16 +112,28 @@ def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps
         total_reward = 0
         step_count = 0
 
+        # # Example at any step
+        # plt.imshow(obs)  # obs is the partial egocentric RGB image
+        # plt.title("Agent's Egocentric Observation")
+        # plt.axis('off')
+        # plt.show()
+
+        # plt.close('all')  # to close all open figures and save memory
+        # obs, _ = env.reset()
+        # total_reward = 0
+        # step_count = 0
+
+
         # agent_pos = tuple(env.agent_pos)  
         # agent_starting_positions[agent_pos[1], agent_pos[0]] += 1
 
         # For every new episode, reset the reward map, and WVF, the SR stays consistent with the environment i.e doesn't reset
-        agent.true_reward_map = np.zeros((env.size, env.size))
+        agent.true_reward_map = np.zeros((env.unwrapped.size, env.unwrapped.size))
         agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
         ae_trigger_count_this_episode = 0
 
         # Reset visited positions for new episode
-        agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
+        agent.visited_positions = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=bool)
         
         # Store first experience
         current_state_idx = agent.get_state_index(obs)
@@ -141,8 +154,14 @@ def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps
             obs, reward, done, _, _ = env.step(current_action)
             next_state_idx = agent.get_state_index(obs)
 
+            # Example at any step
+            plt.imshow(obs)  # obs is now the partial egocentric RGB image
+            plt.title("Agent's Egocentric Observation")
+            plt.axis('off')
+            plt.show()
+
             # Tracking where the agent is going
-            agent_pos = tuple(env.agent_pos)  
+            agent_pos = tuple(env.unwrapped.agent_pos)  
             state_occupancy[agent_pos[0], agent_pos[1]] += 1  
             
             # Complete current experience tuple
@@ -186,10 +205,10 @@ def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps
             # ------------------ Vision model -------------------
 
             # Update the agent's true_reward_map based on current observation
-            agent_position = tuple(env.agent_pos)
+            agent_position = tuple(env.unwrapped.agent_pos)
 
             # Get the current environment grid
-            grid = env.grid.encode()
+            grid = env.unwrapped.grid.encode()
             normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
             # Setting up input for the AE to obtain it's prediction of the space
@@ -389,23 +408,21 @@ def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps
 
 
 def main():
-    # Setup the environment
-    # env = SimpleEnv(size=10, render_mode = "human")
-    env = SimpleEnv(size=10)
+    # Setup partially observable image-based env
+    env = RGBImgPartialObsWrapper(SimpleEnv(size=10, render_mode = "human"))
+    env = ImgObsWrapper(env)  # Optional: if you want only the image in obs
+    print(env)
 
-    # Setup the agent
-    agent = SuccessorAgent(env)
+    # Pass the true environment (not the wrapper) to agent
+    agent = SuccessorAgent(env.unwrapped)
 
-    # Setup the agents Vision System
-    input_shape = (env.size, env.size, 1)  
+    # Setup vision system
+    input_shape = (env.unwrapped.size, env.unwrapped.size, 1)
     ae_model = build_autoencoder(input_shape)
-
-    # CHANGED to quadratic loss
-    # ae_model.compile(optimizer='adam', loss=focal_mse_loss)
     ae_model.compile(optimizer='adam', loss='mse')
 
-    # Train the agent
-    rewards = train_successor_agent(agent, env, ae_model = ae_model) 
+    # Train agent
+    rewards = train_successor_agent(agent, env, ae_model=ae_model)
 
     # Convert to pandas Series for rolling average
     rewards_series = pd.Series(rewards)
