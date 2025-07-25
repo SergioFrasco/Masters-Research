@@ -21,6 +21,79 @@ class ExperimentRunner:
         self.num_seeds = num_seeds
         self.results = {}
 
+    def plot_and_save_trajectory(self, agent_name, episode, trajectory, env_size, seed):
+        """Plot and save the agent's trajectory for failed episodes"""
+        print(f"Agent {agent_name} failed: plotting trajectory")
+        
+        # Create a grid to visualize the path
+        grid = np.zeros((env_size, env_size), dtype=str)
+        grid[:] = '.'  # Empty spaces
+        
+        # Mark the trajectory
+        for i, (x, y, action) in enumerate(trajectory):
+            if i == 0:
+                grid[x, y] = 'S'  # Start
+            elif i == len(trajectory) - 1:
+                grid[x, y] = 'E'  # End
+            else:
+                # Use action arrows
+                action_symbols = {0: '↑', 1: '→', 2: '↓', 3: '←'}
+                grid[x, y] = action_symbols.get(action, str(i % 10))
+        
+        # Create matplotlib figure
+        fig, ax = plt.subplots(figsize=(10, 10))
+        
+        # Create a numerical grid for visualization
+        visual_grid = np.zeros((env_size, env_size))
+        color_map = {'S': 1, 'E': 2, '↑': 3, '→': 4, '↓': 5, '←': 6, '.': 0}
+        
+        for i in range(env_size):
+            for j in range(env_size):
+                visual_grid[i, j] = color_map.get(grid[i, j], 0)
+        
+        # Plot the grid
+        im = ax.imshow(visual_grid, cmap='tab10', alpha=0.8)
+        
+        # Add text annotations
+        for i in range(env_size):
+            for j in range(env_size):
+                ax.text(j, i, grid[i, j], ha='center', va='center', 
+                       fontsize=12, fontweight='bold', color='white')
+        
+        # Customize the plot
+        ax.set_title(f'{agent_name} Trajectory - Episode {episode}\nPath length: {len(trajectory)} steps', 
+                     fontsize=14, fontweight='bold')
+        ax.set_xlabel('X Position', fontsize=12)
+        ax.set_ylabel('Y Position', fontsize=12)
+        
+        # Add grid lines
+        ax.set_xticks(np.arange(-0.5, env_size, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, env_size, 1), minor=True)
+        ax.grid(which='minor', color='gray', linestyle='-', linewidth=0.5)
+        
+        # Add legend
+        legend_elements = [
+            plt.Rectangle((0,0),1,1, facecolor='tab:blue', label='Start (S)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:orange', label='End (E)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:green', label='Up (↑)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:red', label='Right (→)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:purple', label='Down (↓)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:brown', label='Left (←)')
+        ]
+        ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5))
+        
+        plt.tight_layout()
+        
+        # Generate filename and save
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"trajectory_{agent_name.replace(' ', '_').lower()}_episode_{episode}_seed_{seed}_{timestamp}.png"
+        save_path = generate_save_path(filename)
+        
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()  # Close the figure to free memory
+        
+        print(f"Trajectory plot saved to: {save_path}")
+
     def run_qlearning_experiment(self, episodes=5000, max_steps=200, seed=20):
         """Run Q-learning baseline experiment"""
         np.random.seed(seed)
@@ -137,14 +210,15 @@ class ExperimentRunner:
 
         episode_rewards = []
         episode_lengths = []
-        epsilon = 1.0
+        epsilon = 0.1
         epsilon_end = 0.05
-        epsilon_decay = 0.9995
+        epsilon_decay = 1 #Try not to decay epsilon but rather set it to a constant 0.1
 
         for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
             obs = env.reset()
             total_reward = 0
             steps = 0
+            trajectory = []  # Track trajectory for failure analysis
 
             # Reset for new episode (from your code)
             agent.true_reward_map = np.zeros((env.size, env.size))
@@ -158,6 +232,10 @@ class ExperimentRunner:
             current_exp = [current_state_idx, current_action, None, None, None]
 
             for step in range(max_steps):
+                # Record position and action for trajectory
+                agent_pos = tuple(env.agent_pos)
+                trajectory.append((agent_pos[0], agent_pos[1], current_action))
+                
                 obs, reward, done, _, _ = env.step(current_action)
                 next_state_idx = agent.get_state_index(obs)
 
@@ -219,6 +297,10 @@ class ExperimentRunner:
                 if done:
                     break
 
+            # Check for failure in last 100 episodes and save trajectory plot
+            if episode >= episodes - 100 and not done:
+                self.plot_and_save_trajectory("Honours Successor", episode, trajectory, env.size, seed)
+
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
@@ -244,14 +326,15 @@ class ExperimentRunner:
 
         episode_rewards = []
         episode_lengths = []
-        epsilon = 1.0
+        epsilon = 0.1
         epsilon_end = 0.05
-        epsilon_decay = 0.9995
+        epsilon_decay = 1 # Try not decay epsilon and set it to a constant 0.1
 
         for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
             obs = env.reset()
             total_reward = 0
             steps = 0
+            trajectory = []  # Track trajectory for failure analysis
 
             # Reset for new episode (from your code)
             agent.true_reward_map = np.zeros((env.size, env.size))
@@ -265,6 +348,10 @@ class ExperimentRunner:
             current_exp = [current_state_idx, current_action, None, None, None]
 
             for step in range(max_steps):
+                # Record position and action for trajectory
+                agent_pos = tuple(env.agent_pos)
+                trajectory.append((agent_pos[0], agent_pos[1], current_action))
+                
                 obs, reward, done, _, _ = env.step(current_action)
                 next_state_idx = agent.get_state_index(obs)
 
@@ -373,6 +460,10 @@ class ExperimentRunner:
 
                 if done:
                     break
+
+            # Check for failure in last 100 episodes and save trajectory plot
+            if episode >= episodes - 100 and not done:
+                self.plot_and_save_trajectory("Masters Successor", episode, trajectory, env.size, seed)
 
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
@@ -723,7 +814,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=2001)
+    results = runner.run_comparison_experiment(episodes=2501)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=50)
