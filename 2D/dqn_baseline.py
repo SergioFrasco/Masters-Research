@@ -98,6 +98,13 @@ def train_dqn_agent(agent, env, episodes=20001, max_steps=200, save_interval=250
         
         # Get initial state
         current_state = agent.get_state_vector(obs)
+
+        # For each time step:
+        # Choose an action with agent.get_action().
+        # Step in the environment.
+        # Track position, store transition in memory.
+        # Train network if enough data (agent.replay()).
+        # Log Q-values periodically.
         
         for step in range(max_steps):
             # Choose action
