@@ -81,7 +81,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 3001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -107,6 +107,7 @@ def train_successor_agent(agent, env, episodes = 20001, ae_model=None, max_steps
     # reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
     
     for episode in tqdm(range(episodes), "Training Successor Agent"):
+  
         plt.close('all')  # to close all open figures and save memory
         obs = env.reset()
         total_reward = 0

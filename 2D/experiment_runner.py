@@ -210,9 +210,9 @@ class ExperimentRunner:
 
         episode_rewards = []
         episode_lengths = []
-        epsilon = 0.1
+        epsilon = 1
         epsilon_end = 0.05
-        epsilon_decay = 1 #Try not to decay epsilon but rather set it to a constant 0.1
+        epsilon_decay = 0.999
 
         for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
             obs = env.reset()
@@ -326,9 +326,9 @@ class ExperimentRunner:
 
         episode_rewards = []
         episode_lengths = []
-        epsilon = 0.1
+        epsilon = 1
         epsilon_end = 0.05
-        epsilon_decay = 1 # Try not decay epsilon and set it to a constant 0.1
+        epsilon_decay = 0.999
 
         for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
             obs = env.reset()
@@ -441,7 +441,6 @@ class ExperimentRunner:
                         idx = y * agent.grid_size + x
                         reward_threshold = 0.5
                         if curr_reward > reward_threshold:
-                            # changed from = reward to 1
                             agent.reward_maps[idx, y, x] = 1
                         else:
                             agent.reward_maps[idx, y, x] = 0

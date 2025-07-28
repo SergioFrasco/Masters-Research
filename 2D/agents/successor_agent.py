@@ -50,7 +50,7 @@ class SuccessorAgent:
         """Convert MiniGrid observation to state index - make consistent"""
         agent_pos = self.env.agent_pos
         x, y = agent_pos
-        return y * self.grid_size + x  # Use (y,x) consistently
+        return x + y * self.grid_size  # Use same formula as _position_to_state_index
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""
@@ -98,7 +98,7 @@ class SuccessorAgent:
         
         for neighbor_pos, target_dir in neighbors:
             if self._is_valid_position(neighbor_pos):
-                next_y, next_x = neighbor_pos
+                next_x, next_y = neighbor_pos
                 
                 # Get max WVF value at this neighbor
                 max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
@@ -251,3 +251,4 @@ class SuccessorAgent:
         agent_pos = self.env.agent_pos
         cell = self.env.grid.get(*agent_pos)
         return isinstance(cell, Goal)
+    
