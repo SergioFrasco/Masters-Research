@@ -94,7 +94,7 @@ class SuccessorAgent:
         
         for neighbor_pos, target_dir in neighbors:
             if self._is_valid_position(neighbor_pos):
-                next_x, next_y = neighbor_pos
+                next_y, next_x = neighbor_pos
                 
                 # Get max WVF value at this neighbor
                 max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
