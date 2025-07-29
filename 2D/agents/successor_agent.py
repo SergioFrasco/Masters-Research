@@ -50,16 +50,12 @@ class SuccessorAgent:
         """Convert MiniGrid observation to state index - make consistent"""
         agent_pos = self.env.agent_pos
         x, y = agent_pos
-        return x + y * self.grid_size  # Use same formula as _position_to_state_index
+        return y * self.grid_size + x   # Use same formula as _position_to_state_index
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""
         return np.random.randint(self.action_size)
 
-    def _position_to_state_index(self, pos):
-        """Convert position to state index"""
-        x, y = pos
-        return x + y * self.grid_size
 
     def _is_valid_position(self, pos):
         """Check if position is valid (within bounds and not a wall)"""
