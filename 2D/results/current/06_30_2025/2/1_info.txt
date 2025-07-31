@@ -1,0 +1,3 @@
+This was a large run to see what the SR might look like at convergence.
+Sadly the state occupancy map did not plot correctly
+going to rerun today 31/07/2025

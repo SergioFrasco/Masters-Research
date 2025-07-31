@@ -1,0 +1,4 @@
+Seeing if i reverted back fine. 
+It still learns. But has weirdly large occupancy in the bottom right
+Due to the SR blowing up there.
+It probably only gets enbough signal to move when the rewar dis in the bottom right area
