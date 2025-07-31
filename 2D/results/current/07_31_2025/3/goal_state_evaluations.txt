@@ -1,0 +1,3 @@
+Goal State Value Evaluations
+==================================================
+Episode 100: Agent chose to stay at goal.

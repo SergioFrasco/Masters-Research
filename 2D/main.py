@@ -139,6 +139,7 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
         #             reward_occurence_map[y, x] += 1
 
         for step in range(max_steps):
+
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
             next_state_idx = agent.get_state_index(obs)
@@ -305,7 +306,7 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
         # Generate visualizations occasionally
-        if episode % 250 == 0:
+        if episode % 50 == 0:
             # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
