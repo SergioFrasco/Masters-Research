@@ -115,33 +115,65 @@ class SimpleEnv(MiniGridEnv):
     def _gen_mission():
         return "grand mission"
 
+    # Gen grid for complete uniform generation, without replacement
+    # def _gen_grid(self, width, height):
+    #     # Create an empty grid
+    #     self.grid = Grid(width, height)
+
+    #     # Added as a sanity check 
+    #     # self.put_obj(Goal(), 5, 5)
+        
+    #     # Uncomment to use original random Placements
+    #     # Select goal positions without replacement
+    #     goal_positions = self._select_goal_positions()
+
+    #     # Place goals at selected positions
+    #     for (x, y) in goal_positions:
+    #         self.put_obj(Goal(), x, y)
+
+    #     # Set agent position for this episode
+    #     if self.agent_start_pos is None:
+    #     # Use the cycling system
+    #         self.agent_pos = self._select_agent_position()
+    #         random_direction = np.random.randint(0,3)
+    #         self.agent_dir = random_direction
+    #     else:
+    #         # Use provided fixed position
+    #         self.agent_pos = self.agent_start_pos
+    #         self.agent_dir = self.agent_start_dir
+
+    #     self.mission = "grand mission"
+
+    # With Replacement Version
     def _gen_grid(self, width, height):
         # Create an empty grid
         self.grid = Grid(width, height)
 
-        # Added as a sanity check 
-        # self.put_obj(Goal(), 5, 5)
-        
-        # Uncomment to use original random Placements
-        # Select goal positions without replacement
-        goal_positions = self._select_goal_positions()
+        # Number of goals to place
+        num_goals = self._rand_int(1, 5)
 
-        # Place goals at selected positions
-        for (x, y) in goal_positions:
+        # Place goals at completely random positions (with replacement)
+        for _ in range(num_goals):
+            x = self._rand_int(0, width)
+            y = self._rand_int(0, height)
             self.put_obj(Goal(), x, y)
 
-        # Set agent position for this episode
+        # Set agent position randomly
         if self.agent_start_pos is None:
-        # Use the cycling system
-            self.agent_pos = self._select_agent_position()
-            random_direction = np.random.randint(0,3)
-            self.agent_dir = random_direction
+            while True:
+                x = self._rand_int(0, width)
+                y = self._rand_int(0, height)
+                # Optionally: ensure the agent doesn't spawn on a goal
+                if self.grid.get(x, y) is None:
+                    self.agent_pos = (x, y)
+                    break
+            self.agent_dir = self._rand_int(0, 4)  # Random direction (0-3)
         else:
-            # Use provided fixed position
             self.agent_pos = self.agent_start_pos
             self.agent_dir = self.agent_start_dir
 
         self.mission = "grand mission"
+
 
     # Overriding the base implementation of step
     def step(self, action: ActType) -> tuple[ObsType, SupportsFloat, bool, bool, dict[str, Any]]:

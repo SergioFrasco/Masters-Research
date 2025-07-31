@@ -38,8 +38,8 @@ class SuccessorAgent:
 
         # World Value Function - Mappings of values to each state goal pair
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
-        
-        
+
+
     def update_visit_counts(self, agent_pos):
         """Update visit counts for exploration bonus"""
         x, y = agent_pos
@@ -50,12 +50,16 @@ class SuccessorAgent:
         """Convert MiniGrid observation to state index - make consistent"""
         agent_pos = self.env.agent_pos
         x, y = agent_pos
-        return y * self.grid_size + x   # Use same formula as _position_to_state_index
+        return y * self.grid_size + x  # Use (y,x) consistently
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""
         return np.random.randint(self.action_size)
 
+    def _position_to_state_index(self, pos):
+        """Convert position to state index"""
+        x, y = pos
+        return x + y * self.grid_size
 
     def _is_valid_position(self, pos):
         """Check if position is valid (within bounds and not a wall)"""
@@ -69,6 +73,44 @@ class SuccessorAgent:
         return cell is None or not isinstance(cell, Wall)
 
     # the previous one had to have a higher agent pos value than moving forward, this one intelligently makes the move to maximize the next step too
+    # def sample_action_with_wvf(self, obs, epsilon=0.0):
+    #     """
+    #     Sample action by evaluating all 4 neighboring positions and choosing
+    #     the action sequence that gets us to the highest-value neighbor
+    #     """
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         return np.random.randint(self.action_size)
+        
+    #     current_pos = self.env.agent_pos
+    #     x, y = current_pos
+    #     current_dir = self.env.agent_dir
+        
+    #     # Define the 4 neighboring positions
+    #     neighbors = [
+    #         ((x + 1, y), 0),  # right, direction 0
+    #         ((x, y + 1), 1),  # down, direction 1  
+    #         ((x - 1, y), 2),  # left, direction 2
+    #         ((x, y - 1), 3),  # up, direction 3
+    #     ]
+        
+    #     best_value = -np.inf
+    #     best_action = np.random.randint(self.action_size)
+        
+    #     for neighbor_pos, target_dir in neighbors:
+    #         if self._is_valid_position(neighbor_pos):
+    #             next_y, next_x = neighbor_pos
+                
+    #             # Get max WVF value at this neighbor
+    #             max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
+                
+    #             if max_value_across_maps > best_value:
+    #                 best_value = max_value_across_maps
+    #                 # Determine what action to take to move toward this neighbor
+    #                 best_action = self._get_action_toward_direction(current_dir, target_dir)
+        
+    #     return best_action
+    
+    # New one which only chooses between valid actions
     def sample_action_with_wvf(self, obs, epsilon=0.0):
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
@@ -87,7 +129,7 @@ class SuccessorAgent:
         
         for neighbor_pos, target_dir in neighbors:
             if self._is_valid_position(neighbor_pos):
-                next_x, next_y = neighbor_pos
+                next_y, next_x = neighbor_pos
                 max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
                 action_to_take = self._get_action_toward_direction(current_dir, target_dir)
                 
@@ -246,4 +288,3 @@ class SuccessorAgent:
         agent_pos = self.env.agent_pos
         cell = self.env.grid.get(*agent_pos)
         return isinstance(cell, Goal)
-    
