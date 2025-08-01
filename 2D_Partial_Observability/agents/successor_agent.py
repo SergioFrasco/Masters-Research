@@ -73,11 +73,45 @@ class SuccessorAgent:
         return cell is None or not isinstance(cell, Wall)
 
     # the previous one had to have a higher agent pos value than moving forward, this one intelligently makes the move to maximize the next step too
+    # def sample_action_with_wvf(self, obs, epsilon=0.0):
+    #     """
+    #     Sample action by evaluating all 4 neighboring positions and choosing
+    #     the action sequence that gets us to the highest-value neighbor
+    #     """
+    #     if np.random.uniform(0, 1) < epsilon:
+    #         return np.random.randint(self.action_size)
+        
+    #     current_pos = self.env.agent_pos
+    #     x, y = current_pos
+    #     current_dir = self.env.agent_dir
+        
+    #     # Define the 4 neighboring positions
+    #     neighbors = [
+    #         ((x + 1, y), 0),  # right, direction 0
+    #         ((x, y + 1), 1),  # down, direction 1  
+    #         ((x - 1, y), 2),  # left, direction 2
+    #         ((x, y - 1), 3),  # up, direction 3
+    #     ]
+        
+    #     best_value = -np.inf
+    #     best_action = np.random.randint(self.action_size)
+        
+    #     for neighbor_pos, target_dir in neighbors:
+    #         if self._is_valid_position(neighbor_pos):
+    #             next_y, next_x = neighbor_pos
+                
+    #             # Get max WVF value at this neighbor
+    #             max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
+                
+    #             if max_value_across_maps > best_value:
+    #                 best_value = max_value_across_maps
+    #                 # Determine what action to take to move toward this neighbor
+    #                 best_action = self._get_action_toward_direction(current_dir, target_dir)
+        
+    #     return best_action
+    
+    # New one which only chooses between valid actions
     def sample_action_with_wvf(self, obs, epsilon=0.0):
-        """
-        Sample action by evaluating all 4 neighboring positions and choosing
-        the action sequence that gets us to the highest-value neighbor
-        """
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
         
@@ -85,30 +119,33 @@ class SuccessorAgent:
         x, y = current_pos
         current_dir = self.env.agent_dir
         
-        # Define the 4 neighboring positions
         neighbors = [
-            ((x + 1, y), 0),  # right, direction 0
-            ((x, y + 1), 1),  # down, direction 1  
-            ((x - 1, y), 2),  # left, direction 2
-            ((x, y - 1), 3),  # up, direction 3
+            ((x + 1, y), 0), ((x, y + 1), 1), 
+            ((x - 1, y), 2), ((x, y - 1), 3)
         ]
         
-        best_value = -np.inf
-        best_action = np.random.randint(self.action_size)
+        valid_actions = []
+        valid_values = []
         
         for neighbor_pos, target_dir in neighbors:
             if self._is_valid_position(neighbor_pos):
                 next_y, next_x = neighbor_pos
-                
-                # Get max WVF value at this neighbor
                 max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
+                action_to_take = self._get_action_toward_direction(current_dir, target_dir)
                 
-                if max_value_across_maps > best_value:
-                    best_value = max_value_across_maps
-                    # Determine what action to take to move toward this neighbor
-                    best_action = self._get_action_toward_direction(current_dir, target_dir)
+                valid_actions.append(action_to_take)
+                valid_values.append(max_value_across_maps)
         
-        return best_action
+        if not valid_actions:
+            return np.random.randint(self.action_size)
+        
+        # Find the best value among valid actions
+        best_value = max(valid_values)
+        best_indices = [i for i, v in enumerate(valid_values) if v == best_value]
+        
+        # If multiple actions have the same best value, choose randomly among them
+        chosen_index = np.random.choice(best_indices)
+        return valid_actions[chosen_index]
 
     def _get_action_toward_direction(self, current_dir, target_dir):
         """

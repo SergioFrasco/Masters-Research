@@ -155,10 +155,11 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
             next_state_idx = agent.get_state_index(obs)
 
             # Example at any step
-            plt.imshow(obs)  # obs is now the partial egocentric RGB image
-            plt.title("Agent's Egocentric Observation")
-            plt.axis('off')
-            plt.show()
+            # plt.imshow(obs)  # obs is now the partial egocentric RGB image
+            # plt.title("Agent's Egocentric Observation")
+            # plt.axis('off')
+            # plt.show()
+            # plt.savefig("egocentric_observation.png")  # Save the image
 
             # Tracking where the agent is going
             agent_pos = tuple(env.unwrapped.agent_pos)  
