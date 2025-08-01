@@ -813,10 +813,10 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=2501)
+    results = runner.run_comparison_experiment(episodes=5001)
 
     # Analyze and plot results
-    summary = runner.analyze_results(window=50)
+    summary = runner.analyze_results(window=100)
     print("\nExperiment Summary:")
     print(summary)
 

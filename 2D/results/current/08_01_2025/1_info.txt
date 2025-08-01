@@ -1,0 +1,6 @@
+It seems to have worked.
+Changes made to reward generation
+Randomize invalid action selections
+and swapped next_x, next_y.
+have made it all work.
+Next I am running it in the experiment runner again
