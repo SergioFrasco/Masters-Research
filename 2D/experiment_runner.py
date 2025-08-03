@@ -212,7 +212,7 @@ class ExperimentRunner:
         episode_lengths = []
         epsilon = 1
         epsilon_end = 0.05
-        epsilon_decay = 0.999
+        epsilon_decay = 0.995
 
         for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
             obs = env.reset()
@@ -282,12 +282,10 @@ class ExperimentRunner:
                         else:
                             agent.reward_maps[idx, y, x] = 0
 
-                    M_flat = np.mean(agent.M, axis=0)
-                    R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                    V_all = M_flat @ R_flat_all.T
-                    agent.wvf = V_all.T.reshape(
-                        agent.state_size, agent.grid_size, agent.grid_size
-                    )
+                M_flat = np.mean(agent.M, axis=0)
+                R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                V_all = M_flat @ R_flat_all.T
+                agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
                 total_reward += reward
                 steps += 1
@@ -328,7 +326,7 @@ class ExperimentRunner:
         episode_lengths = []
         epsilon = 1
         epsilon_end = 0.05
-        epsilon_decay = 0.999
+        epsilon_decay = 0.995
 
         for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
             obs = env.reset()
@@ -445,12 +443,11 @@ class ExperimentRunner:
                         else:
                             agent.reward_maps[idx, y, x] = 0
 
-                    M_flat = np.mean(agent.M, axis=0)
-                    R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                    V_all = M_flat @ R_flat_all.T
-                    agent.wvf = V_all.T.reshape(
-                        agent.state_size, agent.grid_size, agent.grid_size
-                    )
+                # Update agent WVF
+                M_flat = np.mean(agent.M, axis=0)
+                R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                V_all = M_flat @ R_flat_all.T
+                agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
                 total_reward += reward
                 steps += 1
