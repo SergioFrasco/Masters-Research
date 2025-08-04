@@ -1,0 +1,9 @@
+Large comparison run from the cluster.
+Our algorithms still arent performing where we want them to.
+Fixes im trying:
+Updating epsilon
+Unindenting the WVF calculation block
+
+Maybe Look at:
+It might not be working as well as main
+because of the random seeds that are being used.
