@@ -148,9 +148,9 @@ class ExperimentRunner:
     #         "algorithm": "Q-Learning",
     #     }
 
-    def run_vision_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
+    def run_improved_vision_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
         """
-        Memory-safe Vision-based DQN experiment
+        Run experiment with improved Vision-based DQN agent
         """
         # Set all random seeds
         np.random.seed(seed)
@@ -173,17 +173,19 @@ class ExperimentRunner:
             # Create environment
             env = SimpleEnv(size=self.env_size)
             
-            # Create agent with reduced memory footprint
+            # Create improved agent
             agent = VisionDQNAgent(
                 env, 
-                learning_rate=0.001,
-                gamma=0.95,
+                learning_rate=0.0005,
+                gamma=0.99,
                 epsilon_start=1.0,
                 epsilon_end=0.01,
                 epsilon_decay=0.9995,
-                memory_size=5000,  # Reduced memory size
-                batch_size=16,     # Reduced batch size
-                target_update_freq=100
+                memory_size=50000,
+                batch_size=32,
+                target_update_freq=1000,
+                learning_starts=1000,
+                train_freq=4
             )
             
             # Force agent to use CPU
@@ -193,22 +195,24 @@ class ExperimentRunner:
 
             episode_rewards = []
             episode_lengths = []
+            training_stats = []
 
-            for episode in tqdm(range(episodes), desc=f"Vision DQN (seed {seed})"):
+            for episode in tqdm(range(episodes), desc=f"Improved Vision DQN (seed {seed})"):
                 try:
                     obs = env.reset()
+                    agent.reset_episode()
                     total_reward = 0
                     steps = 0
-                    trajectory = []  # Track trajectory for failure analysis
+                    trajectory = []
 
-                    # Get initial state using vision
+                    # Get initial state using improved vision
                     current_state = agent.get_vision_state(obs)
 
                     for step in range(max_steps):
-                        # Record position and action for trajectory (for debugging)
+                        # Record position and action for trajectory
                         agent_pos = tuple(env.agent_pos)
                         
-                        # Choose action based on vision
+                        # Choose action based on improved vision
                         action = agent.get_action(current_state)
                         trajectory.append((agent_pos[0], agent_pos[1], action))
                         
@@ -219,9 +223,11 @@ class ExperimentRunner:
                         # Store experience
                         agent.remember(current_state, action, reward, next_state, done)
                         
-                        # Train the network (less frequently to save memory)
-                        if len(agent.memory) >= agent.batch_size and step % 4 == 0:
-                            loss, _ = agent.replay()
+                        # Train the network
+                        loss, avg_q = agent.replay()
+                        
+                        # Step the agent
+                        agent.step()
                         
                         total_reward += reward
                         steps += 1
@@ -232,40 +238,54 @@ class ExperimentRunner:
 
                     # Check for failure in last 100 episodes and save trajectory plot
                     if episode >= episodes - 100 and not done:
-                        self.plot_and_save_trajectory("Vision DQN", episode, trajectory, env.size, seed)
+                        self.plot_and_save_trajectory("Improved Vision DQN", episode, trajectory, env.size, seed)
 
                     # Decay epsilon
                     agent.decay_epsilon()
                     episode_rewards.append(total_reward)
                     episode_lengths.append(steps)
                     
-                    # Periodic cleanup
+                    # Collect training statistics
                     if episode % 100 == 0:
+                        stats = agent.get_stats()
+                        training_stats.append({
+                            'episode': episode,
+                            **stats
+                        })
+                        
+                        print(f"Episode {episode}: "
+                            f"Reward={total_reward:.2f}, "
+                            f"Steps={steps}, "
+                            f"Epsilon={stats['epsilon']:.3f}, "
+                            f"Avg Loss={stats['avg_loss']:.4f}")
+                    
+                    # Periodic cleanup
+                    if episode % 500 == 0:
                         gc.collect()
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
 
                 except Exception as e:
                     print(f"Error in episode {episode}: {e}")
-                    # Continue with next episode
                     continue
 
             return {
                 "rewards": episode_rewards,
                 "lengths": episode_lengths,
                 "final_epsilon": agent.epsilon,
-                "algorithm": "Vision DQN",
+                "algorithm": "Improved Vision DQN",
+                "training_stats": training_stats
             }
 
         except Exception as e:
-            print(f"Critical error in DQN experiment: {e}")
+            print(f"Critical error in Improved DQN experiment: {e}")
             import traceback
             traceback.print_exc()
             return {
                 "rewards": [],
                 "lengths": [],
                 "final_epsilon": 0.0,
-                "algorithm": "Vision DQN",
+                "algorithm": "Improved Vision DQN",
                 "error": str(e)
             }
             
