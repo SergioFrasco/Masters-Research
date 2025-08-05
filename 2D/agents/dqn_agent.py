@@ -1,8 +1,33 @@
 import numpy as np
-import tensorflow as tf
+# import tensorflow as tf
 from collections import deque
 import random
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class VisionQNetwork(nn.Module):
+    def __init__(self, grid_size, action_size):
+        super(VisionQNetwork, self).__init__()
+        self.conv1 = nn.Conv2d(2, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, padding=1)
+        
+        self.flattened_size = 16 * grid_size * grid_size
+        self.fc1 = nn.Linear(self.flattened_size + 1, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.out = nn.Linear(64, action_size)
+
+    def forward(self, grid, direction):
+        x = F.relu(self.conv1(grid))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = x.view(x.size(0), -1)
+        x = torch.cat((x, direction), dim=1)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return self.out(x)
 
 class VisionDQNAgent:
     """
@@ -17,6 +42,8 @@ class VisionDQNAgent:
         self.env = env
         self.grid_size = env.size
         self.action_size = action_size  # [turn_left, turn_right, move_forward]
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Hyperparameters
         self.learning_rate = learning_rate
@@ -32,55 +59,16 @@ class VisionDQNAgent:
         self.memory = deque(maxlen=memory_size)
         
         # Neural networks
-        self.q_network = self._build_vision_network()
-        self.target_network = self._build_vision_network()
+        self.q_network = VisionQNetwork(self.grid_size, self.action_size).to(self.device)
+        self.target_network = VisionQNetwork(self.grid_size, self.action_size).to(self.device)
         self.update_target_network()
         
         # Training tracking
+        self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=self.learning_rate)
+        self.loss_fn = nn.MSELoss()
+
         self.training_step = 0
     
-    def _build_vision_network(self):
-        """
-        Build a convolutional neural network for processing grid observations.
-        
-        Architecture:
-        Grid Input (10x10x1) → Conv layers → Flatten → Combine with agent_dir → Dense → Q-values
-        """
-        # Grid input branch
-        grid_input = tf.keras.layers.Input(shape=(self.grid_size, self.grid_size, 2), name='grid_input')
-        
-        # Convolutional layers for spatial feature extraction
-        # Use small kernels and multiple layers to build up receptive field
-        conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(grid_input)
-        conv2 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
-        
-        # Optional: Add another conv layer for more complex patterns
-        conv3 = tf.keras.layers.Conv2D(16, (3, 3), activation='relu', padding='same')(conv2)
-        
-        # Flatten spatial features
-        flattened = tf.keras.layers.Flatten()(conv3)
-        
-        # Agent direction input (non-spatial information)
-        dir_input = tf.keras.layers.Input(shape=(1,), name='direction_input')
-        
-        # Combine spatial and directional information
-        combined = tf.keras.layers.concatenate([flattened, dir_input])
-        
-        # Fully connected layers for decision making
-        dense1 = tf.keras.layers.Dense(128, activation='relu')(combined)
-        dense2 = tf.keras.layers.Dense(64, activation='relu')(dense1)
-        
-        # Output layer: Q-values for each action
-        q_values = tf.keras.layers.Dense(self.action_size, activation='linear', name='q_values')(dense2)
-        
-        # Create the model
-        model = tf.keras.Model(inputs=[grid_input, dir_input], outputs=q_values)
-        
-        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate),
-                    loss='mse')
-        
-        return model
-
     # Old network building method, worked when given explicit goal position
     # def _build_network(self):
     #     """Build the neural network for Q-value approximation."""
@@ -162,15 +150,13 @@ class VisionDQNAgent:
 
     def _find_goal_position(self):
         """
-        Find goal position - keep this method but only use it for debugging/analysis.
-        The network should NOT have access to this information.
+        Find goal position - keep this method but only using it for debugging/analysis.
         """
         grid = self.env.grid.encode()
         object_layer = grid[..., 0]
-        
         goal_positions = np.where(object_layer == 8)
         if len(goal_positions[0]) > 0:
-            return goal_positions[1][0], goal_positions[0][0]  # x, y
+            return goal_positions[1][0], goal_positions[0][0]
         else:
             return self.grid_size // 2, self.grid_size // 2
         
@@ -187,14 +173,14 @@ class VisionDQNAgent:
             
         if np.random.random() <= epsilon:
             return random.randrange(self.action_size)
-        else:
-            # Prepare inputs for the network
-            grid_input = state_dict['grid'][np.newaxis, ...]  # Add batch dimension
-            dir_input = np.array([[state_dict['agent_dir']]])  # Shape: (1, 1)
-            
-            # Get Q-values from network
-            q_values = self.q_network.predict([grid_input, dir_input], verbose=0)
-            return np.argmax(q_values[0])
+        
+        grid = torch.tensor(state_dict['grid'], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(self.device)
+        direction = torch.tensor([[state_dict['agent_dir']]], dtype=torch.float32).to(self.device)
+
+        with torch.no_grad():
+            q_values = self.q_network(grid, direction)
+        return torch.argmax(q_values).item()
+
     
     def remember(self, state_dict, action, reward, next_state_dict, done):
         """
@@ -204,59 +190,58 @@ class VisionDQNAgent:
         self.memory.append((state_dict, action, reward, next_state_dict, done))
     
     def replay(self):
-        """
-        Train the network on a batch of experiences.
-        Updated to handle vision-based states.
-        """
         if len(self.memory) < self.batch_size:
             return None, None
-        
-        # Sample random batch from memory
+
         batch = random.sample(self.memory, self.batch_size)
-        
-        # Separate batch into components
-        state_dicts = [e[0] for e in batch]
-        actions = np.array([e[1] for e in batch])
-        rewards = np.array([e[2] for e in batch])
-        next_state_dicts = [e[3] for e in batch]
-        dones = np.array([e[4] for e in batch])
-        
-        # Prepare batch inputs for current states
-        grid_batch = np.array([s['grid'] for s in state_dicts])
-        dir_batch = np.array([[s['agent_dir']] for s in state_dicts])
-        
-        # Prepare batch inputs for next states  
-        next_grid_batch = np.array([s['grid'] for s in next_state_dicts])
-        next_dir_batch = np.array([[s['agent_dir']] for s in next_state_dicts])
-        
-        # Current Q-values
-        current_q_values = self.q_network.predict([grid_batch, dir_batch], verbose=0)
-        
-        # Next Q-values from target network
-        next_q_values = self.target_network.predict([next_grid_batch, next_dir_batch], verbose=0)
-        
-        # Calculate targets
-        targets = current_q_values.copy()
+        state_dicts = [b[0] for b in batch]
+        actions = torch.tensor([b[1] for b in batch], dtype=torch.int64).to(self.device)
+        rewards = torch.tensor([b[2] for b in batch], dtype=torch.float32).to(self.device)
+        next_state_dicts = [b[3] for b in batch]
+        dones = torch.tensor([b[4] for b in batch], dtype=torch.float32).to(self.device)
+
+        grid_batch = torch.stack([
+            torch.tensor(s['grid'], dtype=torch.float32).permute(2, 0, 1) for s in state_dicts
+        ]).to(self.device)
+
+        dir_batch = torch.tensor([[s['agent_dir']] for s in state_dicts], dtype=torch.float32).to(self.device)
+
+        next_grid_batch = torch.stack([
+            torch.tensor(s['grid'], dtype=torch.float32).permute(2, 0, 1) for s in next_state_dicts
+        ]).to(self.device)
+
+        next_dir_batch = torch.tensor([[s['agent_dir']] for s in next_state_dicts], dtype=torch.float32).to(self.device)
+
+        # Predict Q-values
+        current_q = self.q_network(grid_batch, dir_batch)
+        next_q = self.target_network(next_grid_batch, next_dir_batch)
+
+        # Compute target
+        target_q = current_q.clone().detach()
         for i in range(self.batch_size):
             if dones[i]:
-                targets[i][actions[i]] = rewards[i]
+                target_q[i, actions[i]] = rewards[i]
             else:
-                targets[i][actions[i]] = rewards[i] + self.gamma * np.max(next_q_values[i])
-        
-        # Train the network
-        history = self.q_network.fit([grid_batch, dir_batch], targets, epochs=1, verbose=0)
-        loss = history.history['loss'][0]
-        
-        # Update target network periodically
+                target_q[i, actions[i]] = rewards[i] + self.gamma * torch.max(next_q[i])
+
+        # Loss and optimization
+        self.q_network.train()
+        self.optimizer.zero_grad()
+        predicted_q = self.q_network(grid_batch, dir_batch)
+        loss = self.loss_fn(predicted_q, target_q)
+        loss.backward()
+        self.optimizer.step()
+
         self.training_step += 1
         if self.training_step % self.target_update_freq == 0:
             self.update_target_network()
-        
-        return loss, None
+
+        return loss.item(), None
+
     
     def update_target_network(self):
         """Copy weights from main network to target network."""
-        self.target_network.set_weights(self.q_network.get_weights())
+        self.target_network.load_state_dict(self.q_network.state_dict())
     
     def decay_epsilon(self):
         """Decay epsilon for exploration."""
@@ -265,16 +250,20 @@ class VisionDQNAgent:
     
     def save_model(self, filepath):
         """Save the trained model."""
-        self.q_network.save(filepath)
+        torch.save(self.q_network.state_dict(), filepath)
     
+
     def load_model(self, filepath):
         """Load a trained model."""
-        self.q_network = tf.keras.models.load_model(filepath)
+        self.q_network.load_state_dict(torch.load(filepath))
+        self.q_network.to(self.device)
         self.update_target_network()
     
     def get_q_values(self, state_dict):
         """Get Q-values for all actions in given state."""
-        grid_input = state_dict['grid'][np.newaxis, ...]
-        dir_input = np.array([[state_dict['agent_dir']]])
-        return self.q_network.predict([grid_input, dir_input], verbose=0)[0]
+        grid = torch.tensor(state_dict['grid'], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0).to(self.device)
+        direction = torch.tensor([[state_dict['agent_dir']]], dtype=torch.float32).to(self.device)
+        with torch.no_grad():
+            q_values = self.q_network(grid, direction)
+        return q_values[0].cpu().numpy()
 
