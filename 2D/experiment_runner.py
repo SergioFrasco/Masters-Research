@@ -148,7 +148,7 @@ class ExperimentRunner:
     #         "algorithm": "Q-Learning",
     #     }
 
-    def run_improved_vision_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
+    def run_vision_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
         """
         Run experiment with improved Vision-based DQN agent
         """
