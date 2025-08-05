@@ -920,7 +920,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=3001)
+    results = runner.run_comparison_experiment(episodes=10001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
