@@ -1,3 +1,0 @@
-Goal State Value Evaluations
-==================================================
-Episode 0: Agent did not choose to stay in the same position.

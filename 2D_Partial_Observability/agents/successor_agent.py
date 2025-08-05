@@ -39,18 +39,54 @@ class SuccessorAgent:
         # World Value Function - Mappings of values to each state goal pair
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
 
+        # Path integration for partial observability
+        self.estimated_pos = np.array([1, 1])  # Start position estimate
+        self.estimated_dir = 0  # Start direction estimate
+        self.position_confidence = 1.0  # Confidence in position estimate
+
+        # Track movement history for error correction
+        self.movement_history = []
+        self.max_history = 100
+
 
     def update_visit_counts(self, agent_pos):
         """Update visit counts for exploration bonus"""
         x, y = agent_pos
         self.visit_counts[y, x] += 1
 
-    # older non-trandsformed version
+    # Updated get state index for Partial Observability
     def get_state_index(self, obs):
-        """Convert MiniGrid observation to state index - make consistent"""
-        agent_pos = self.env.agent_pos
-        x, y = agent_pos
-        return y * self.grid_size + x  # Use (y,x) consistently
+        """Use estimated position instead of true position"""
+        x, y = self.estimated_pos
+        # Clamp to valid bounds
+        x = int(np.clip(x, 0, self.grid_size - 1))
+        y = int(np.clip(y, 0, self.grid_size - 1))
+        return y * self.grid_size + x
+
+    def update_position_estimate(self, action):
+        """Update position estimate based on action taken"""
+        TURN_LEFT = 0
+        TURN_RIGHT = 1
+        MOVE_FORWARD = 2
+        
+        if action == TURN_LEFT:
+            self.estimated_dir = (self.estimated_dir - 1) % 4
+        elif action == TURN_RIGHT:
+            self.estimated_dir = (self.estimated_dir + 1) % 4
+        elif action == MOVE_FORWARD:
+            # Calculate forward direction
+            dx, dy = [(1, 0), (0, 1), (-1, 0), (0, -1)][self.estimated_dir]
+            new_pos = self.estimated_pos + np.array([dx, dy])
+            
+            # Check if movement is valid (not into wall)
+            if self._is_valid_position(new_pos):
+                self.estimated_pos = new_pos
+            # If invalid, position stays the same (hit wall)
+        
+        # Store movement for potential correction
+        self.movement_history.append((action, self.estimated_pos.copy(), self.estimated_dir))
+        if len(self.movement_history) > self.max_history:
+            self.movement_history.pop(0)
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""

@@ -81,7 +81,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -108,7 +108,10 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
     
     for episode in tqdm(range(episodes), "Training Successor Agent"):
         plt.close('all')  # to close all open figures and save memory
-        obs = env.reset()
+        obs, info = env.reset()
+
+        initial_agent_pos = info["agent_pos"]
+        initial_agent_dir = info["agent_dir"]
         total_reward = 0
         step_count = 0
 
@@ -118,11 +121,13 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
         # plt.axis('off')
         # plt.show()
 
-        # plt.close('all')  # to close all open figures and save memory
+        plt.close('all')  # to close all open figures and save memory
         # obs, _ = env.reset()
         # total_reward = 0
         # step_count = 0
 
+        agent.estimated_pos = np.array(initial_agent_pos)  # Start position 
+        agent.estimated_dir = initial_agent_dir  # Start direction 
 
         # agent_pos = tuple(env.agent_pos)  
         # agent_starting_positions[agent_pos[1], agent_pos[0]] += 1
@@ -140,18 +145,17 @@ def train_successor_agent(agent, env, episodes = 10001, ae_model=None, max_steps
         current_action = agent.sample_random_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
 
-        # Check reward Occurence
-        # Iterate over the grid and increment reward occurrence where object type == 8 (goal)
-        # grid1 = env.grid.encode()
-        # object_layer1 = grid1[..., 0]
-        # for y in range(env.height):
-        #     for x in range(env.width):
-        #         if object_layer1[y, x] == 8:
-        #             reward_occurence_map[y, x] += 1
-
         for step in range(max_steps):
+            # Check if path integration works
+            print("Agents Position: ", agent.estimated_pos)
+            print("Agents Direction: ", agent.estimated_dir)
+
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
+
+            # Update agents position estimate for Partial Observability
+            agent.update_position_estimate(current_action)
+
             next_state_idx = agent.get_state_index(obs)
 
             # Example at any step
