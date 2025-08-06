@@ -9,30 +9,20 @@ class ImprovedVisionQNetwork(nn.Module):
     def __init__(self, grid_size, action_size):
         super(ImprovedVisionQNetwork, self).__init__()
         
-        # More sophisticated CNN architecture
-        self.conv1 = nn.Conv2d(2, 64, kernel_size=3, stride=1, padding=1)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.conv3 = nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1)
-        self.bn3 = nn.BatchNorm2d(32)
+        # Simplified CNN architecture - no BatchNorm for more stable training
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1)
+        self.conv3 = nn.Conv2d(32, 16, kernel_size=3, stride=1, padding=1)
         
-        # Adaptive pooling to handle different grid sizes
-        self.adaptive_pool = nn.AdaptiveAvgPool2d((4, 4))
+        # Maintain spatial resolution - no aggressive pooling
+        self.flattened_size = 16 * grid_size * grid_size
         
-        # Calculate flattened size after adaptive pooling
-        self.flattened_size = 32 * 4 * 4  # 512
-        
-        # Separate processing for direction
-        self.dir_fc = nn.Linear(1, 16)
-        
-        # Combined feature processing
-        self.fc1 = nn.Linear(self.flattened_size + 16, 256)
-        self.fc2 = nn.Linear(256, 128)
-        self.fc3 = nn.Linear(128, 64)
+        # Simpler fully connected layers
+        self.fc1 = nn.Linear(self.flattened_size, 128)
+        self.fc2 = nn.Linear(128, 64)
         self.out = nn.Linear(64, action_size)
         
-        # Dropout for regularization
+        # Light dropout for regularization
         self.dropout = nn.Dropout(0.1)
         
         # Initialize weights
@@ -44,40 +34,31 @@ class ImprovedVisionQNetwork(nn.Module):
             if module.bias is not None:
                 nn.init.constant_(module.bias, 0)
 
-    def forward(self, grid, direction):
+    def forward(self, grid):
         # Process grid through CNN
-        x = F.relu(self.bn1(self.conv1(grid)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
+        x = F.relu(self.conv1(grid))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
         
-        # Adaptive pooling and flatten
-        x = self.adaptive_pool(x)
+        # Flatten but maintain spatial information
         x = x.view(x.size(0), -1)
         
-        # Process direction
-        dir_features = F.relu(self.dir_fc(direction))
-        
-        # Combine features
-        combined = torch.cat((x, dir_features), dim=1)
-        
         # Forward through fully connected layers
-        x = F.relu(self.fc1(combined))
+        x = F.relu(self.fc1(x))
         x = self.dropout(x)
         x = F.relu(self.fc2(x))
-        x = self.dropout(x)
-        x = F.relu(self.fc3(x))
         
         return self.out(x)
 
 class VisionDQNAgent:
     """
-    Improved Vision-based Deep Q-Network agent with better architecture and training strategies.
+    Simplified Vision-based Deep Q-Network agent focused on learning from raw grid observation.
     """
     
-    def __init__(self, env, action_size=3, learning_rate=0.0005, 
-                 gamma=0.99, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.9995,
-                 memory_size=50000, batch_size=32, target_update_freq=1000,
-                 learning_starts=1000, train_freq=4):
+    def __init__(self, env, action_size=3, learning_rate=0.001, 
+                 gamma=0.99, epsilon_start=0.9, epsilon_end=0.05, epsilon_decay=0.995,
+                 memory_size=10000, batch_size=32, target_update_freq=500,
+                 learning_starts=200, train_freq=1):
         
         self.env = env
         self.grid_size = env.size
@@ -85,7 +66,7 @@ class VisionDQNAgent:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Improved hyperparameters
+        # More aggressive hyperparameters for faster learning
         self.learning_rate = learning_rate
         self.gamma = gamma
         self.epsilon = epsilon_start
@@ -97,7 +78,7 @@ class VisionDQNAgent:
         self.learning_starts = learning_starts
         self.train_freq = train_freq
         
-        # Experience replay with prioritization support
+        # Smaller replay buffer for more recent experiences
         self.memory = deque(maxlen=memory_size)
         
         # Neural networks
@@ -105,20 +86,14 @@ class VisionDQNAgent:
         self.target_network = ImprovedVisionQNetwork(self.grid_size, self.action_size).to(self.device)
         self.update_target_network()
         
-        # Improved optimizer with learning rate scheduling
-        self.optimizer = torch.optim.AdamW(
+        # Standard Adam optimizer
+        self.optimizer = torch.optim.Adam(
             self.q_network.parameters(), 
-            lr=self.learning_rate,
-            weight_decay=1e-4
-        )
-        self.scheduler = torch.optim.lr_scheduler.StepLR(
-            self.optimizer, 
-            step_size=10000, 
-            gamma=0.9
+            lr=self.learning_rate
         )
         
-        # Huber loss for more stable training
-        self.loss_fn = nn.SmoothL1Loss()
+        # MSE loss for cleaner gradients
+        self.loss_fn = nn.MSELoss()
         
         # Training tracking
         self.training_step = 0
@@ -130,95 +105,66 @@ class VisionDQNAgent:
     
     def get_vision_state(self, obs=None):
         """
-        Enhanced vision-based state representation with better feature engineering.
+        Pure vision-based state representation - only using the raw grid observation.
+        No privileged information about agent position or direction.
         """
         # Get the raw grid encoding from environment
         grid = self.env.grid.encode()
         
-        # Extract object layer
+        # Extract only the object layer - this is what the agent "sees"
         object_layer = grid[..., 0].astype(np.float32)
         
-        # Create enhanced two-channel representation
-        env_channel = np.zeros_like(object_layer, dtype=np.float32)
-        agent_channel = np.zeros_like(object_layer, dtype=np.float32)
+        # Simple normalization: 
+        # 0 = empty space, 1 = wall (obstacle), 2 = goal, 3 = agent
+        vision_grid = np.zeros_like(object_layer, dtype=np.float32)
         
-        # Environment channel with better feature encoding
-        env_channel[object_layer == 2] = -1.0  # Wall → -1 (obstacle)
-        env_channel[object_layer == 1] = 0.0   # Open space → 0 (neutral)
-        env_channel[object_layer == 8] = 1.0   # Goal → 1 (reward)
+        # Map object types to simple values
+        vision_grid[object_layer == 1] = 0.0   # Empty space
+        vision_grid[object_layer == 2] = 1.0   # Wall (obstacle)
+        vision_grid[object_layer == 8] = 2.0   # Goal (what we want to learn to recognize)
+        vision_grid[object_layer == 10] = 3.0  # Agent (self-position)
         
-        # Agent channel with directional information
-        agent_x, agent_y = self.env.agent_pos
-        agent_channel[agent_y, agent_x] = 1.0
+        # Normalize to [0, 1] range
+        vision_grid = vision_grid / 3.0
         
-        # Add agent's "vision cone" - mark cells in front of agent
-        agent_dir = self.env.agent_dir
-        front_positions = self._get_front_positions(agent_x, agent_y, agent_dir)
-        for fx, fy in front_positions:
-            if 0 <= fx < self.grid_size and 0 <= fy < self.grid_size:
-                agent_channel[fy, fx] = max(agent_channel[fy, fx], 0.3)
-        
-        # Stack channels and add batch dimension implicitly handled later
-        grid_input = np.stack([env_channel, agent_channel], axis=0)  # Changed to channel-first
-        
-        # Normalize agent direction
-        agent_dir_norm = self.env.agent_dir / 3.0
-        
-        return {
-            'grid': grid_input,
-            'agent_dir': agent_dir_norm
-        }
+        # Add batch and channel dimensions: (1, H, W) -> (1, 1, H, W) when needed
+        return vision_grid
     
-    def _get_front_positions(self, x, y, direction, distance=2):
-        """Get positions in front of the agent up to a certain distance."""
-        positions = []
-        
-        # Direction vectors: 0=right, 1=down, 2=left, 3=up
-        dx_dy = [(1, 0), (0, 1), (-1, 0), (0, -1)]
-        dx, dy = dx_dy[direction]
-        
-        for i in range(1, distance + 1):
-            positions.append((x + i * dx, y + i * dy))
-        
-        return positions
-    
-    def get_action(self, state_dict, epsilon=None):
+    def get_action(self, vision_grid, epsilon=None):
         """
-        Enhanced action selection with better exploration strategies.
+        Action selection with faster epsilon decay for more exploration early on.
         """
         if epsilon is None:
             epsilon = self.epsilon
         
-        # Implement epsilon decay schedule
-        if self.episode_step < self.learning_starts:
-            # Pure exploration during initial phase
-            return random.randrange(self.action_size)
-        
+        # More exploration during early training
         if np.random.random() <= epsilon:
             return random.randrange(self.action_size)
         
-        # Convert state to tensors
-        grid = torch.tensor(state_dict['grid'], dtype=torch.float32).unsqueeze(0).to(self.device)
-        direction = torch.tensor([[state_dict['agent_dir']]], dtype=torch.float32).to(self.device)
+        # Convert state to tensor
+        grid_tensor = torch.tensor(vision_grid, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
 
         self.q_network.eval()
         with torch.no_grad():
-            q_values = self.q_network(grid, direction)
+            q_values = self.q_network(grid_tensor)
             
         # Track Q-values for analysis
         self.recent_q_values.append(torch.max(q_values).item())
         
         return torch.argmax(q_values).item()
     
-    def remember(self, state_dict, action, reward, next_state_dict, done):
-        """Enhanced experience storage with reward clipping."""
-        # Clip rewards for stability
-        clipped_reward = np.clip(reward, -1, 1)
-        self.memory.append((state_dict, action, clipped_reward, next_state_dict, done))
+    def remember(self, vision_grid, action, reward, next_vision_grid, done):
+        """Store experience with reward shaping for better learning signal."""
+        # Simple reward shaping: small negative for each step to encourage efficiency
+        shaped_reward = reward
+        if not done and reward == 0:
+            shaped_reward = -0.01  # Small penalty for each step
+        
+        self.memory.append((vision_grid, action, shaped_reward, next_vision_grid, done))
     
     def replay(self):
         """
-        Improved training with gradient clipping and better target computation.
+        Simplified training with standard DQN updates.
         """
         if len(self.memory) < self.learning_starts:
             return None, None
@@ -229,46 +175,31 @@ class VisionDQNAgent:
         batch = random.sample(self.memory, self.batch_size)
         
         # Prepare batch data
-        state_dicts = [b[0] for b in batch]
+        vision_grids = [b[0] for b in batch]
         actions = torch.tensor([b[1] for b in batch], dtype=torch.int64).to(self.device)
         rewards = torch.tensor([b[2] for b in batch], dtype=torch.float32).to(self.device)
-        next_state_dicts = [b[3] for b in batch]
+        next_vision_grids = [b[3] for b in batch]
         dones = torch.tensor([b[4] for b in batch], dtype=torch.float32).to(self.device)
 
-        # Convert states to tensors
+        # Convert vision grids to tensors
         grid_batch = torch.stack([
-            torch.tensor(s['grid'], dtype=torch.float32) for s in state_dicts
+            torch.tensor(grid, dtype=torch.float32).unsqueeze(0) for grid in vision_grids
         ]).to(self.device)
-
-        dir_batch = torch.tensor(
-            [[s['agent_dir']] for s in state_dicts], 
-            dtype=torch.float32
-        ).to(self.device)
 
         next_grid_batch = torch.stack([
-            torch.tensor(s['grid'], dtype=torch.float32) for s in next_state_dicts
+            torch.tensor(grid, dtype=torch.float32).unsqueeze(0) for grid in next_vision_grids
         ]).to(self.device)
-
-        next_dir_batch = torch.tensor(
-            [[s['agent_dir']] for s in next_state_dicts], 
-            dtype=torch.float32
-        ).to(self.device)
 
         # Current Q-values
         self.q_network.train()
-        current_q_values = self.q_network(grid_batch, dir_batch)
+        current_q_values = self.q_network(grid_batch)
         current_q = current_q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
 
-        # Double DQN: use main network to select actions, target network to evaluate
-        self.q_network.eval()
+        # Target Q-values using target network
         with torch.no_grad():
-            next_q_values = self.q_network(next_grid_batch, next_dir_batch)
-            next_actions = torch.argmax(next_q_values, dim=1)
-            
-            target_next_q_values = self.target_network(next_grid_batch, next_dir_batch)
-            next_q = target_next_q_values.gather(1, next_actions.unsqueeze(1)).squeeze(1)
-            
-            target_q = rewards + (self.gamma * next_q * (1 - dones))
+            target_q_values = self.target_network(next_grid_batch)
+            max_next_q = torch.max(target_q_values, dim=1)[0]
+            target_q = rewards + (self.gamma * max_next_q * (1 - dones))
 
         # Compute loss
         loss = self.loss_fn(current_q, target_q)
@@ -278,10 +209,9 @@ class VisionDQNAgent:
         loss.backward()
         
         # Gradient clipping for stability
-        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
         
         self.optimizer.step()
-        self.scheduler.step()
 
         # Update target network
         self.training_step += 1
@@ -294,15 +224,11 @@ class VisionDQNAgent:
         return loss.item(), torch.mean(current_q_values).item()
     
     def update_target_network(self):
-        """Soft update of target network for more stable training."""
-        tau = 0.005  # Soft update parameter
-        
-        for target_param, local_param in zip(self.target_network.parameters(), 
-                                           self.q_network.parameters()):
-            target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)
+        """Hard update of target network."""
+        self.target_network.load_state_dict(self.q_network.state_dict())
     
     def decay_epsilon(self):
-        """Improved epsilon decay with minimum threshold."""
+        """Faster epsilon decay for more exploration early, then exploitation."""
         if self.epsilon > self.epsilon_end:
             self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
     
@@ -326,34 +252,180 @@ class VisionDQNAgent:
         }
     
     def save_model(self, filepath):
-        """Save the trained model with optimizer state."""
+        """Save the trained model."""
         torch.save({
             'q_network_state_dict': self.q_network.state_dict(),
             'target_network_state_dict': self.target_network.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
             'epsilon': self.epsilon,
             'training_step': self.training_step
         }, filepath)
     
     def load_model(self, filepath):
-        """Load a trained model with optimizer state."""
+        """Load a trained model."""
         checkpoint = torch.load(filepath, map_location=self.device)
         
         self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.target_network.load_state_dict(checkpoint['target_network_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         
         self.epsilon = checkpoint['epsilon']
         self.training_step = checkpoint['training_step']
     
-    def get_q_values(self, state_dict):
+    def get_q_values(self, vision_grid):
         """Get Q-values for all actions in given state."""
-        grid = torch.tensor(state_dict['grid'], dtype=torch.float32).unsqueeze(0).to(self.device)
-        direction = torch.tensor([[state_dict['agent_dir']]], dtype=torch.float32).to(self.device)
+        grid_tensor = torch.tensor(vision_grid, dtype=torch.float32).unsqueeze(0).unsqueeze(0).to(self.device)
         
         self.q_network.eval()
         with torch.no_grad():
-            q_values = self.q_network(grid, direction)
+            q_values = self.q_network(grid_tensor)
         return q_values[0].cpu().numpy()
+
+def run_vision_dqn_experiment(env_class, env_size=10, episodes=5000, max_steps=200, seed=20):
+    """
+    Run experiment with improved Vision-based DQN agent
+    """
+    # Set all random seeds
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    # Set deterministic behavior
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    # Force CPU usage to avoid GPU memory issues
+    device = torch.device("cpu")
+    
+    env = None
+    agent = None
+    
+    try:
+        # Create environment
+        env = env_class(size=env_size)
+        
+        # Create improved agent with more aggressive parameters
+        agent = VisionDQNAgent(
+            env, 
+            learning_rate=0.001,
+            gamma=0.99,
+            epsilon_start=0.9,      # Start with high exploration
+            epsilon_end=0.05,       # Keep some exploration
+            epsilon_decay=0.995,    # Faster decay
+            memory_size=10000,      # Smaller buffer for recent experiences
+            batch_size=32,
+            target_update_freq=250, # More frequent target updates
+            learning_starts=200,    # Start learning sooner
+            train_freq=1            # Train every step
+        )
+        
+        # Force agent to use CPU
+        agent.device = device
+        agent.q_network = agent.q_network.to(device)
+        agent.target_network = agent.target_network.to(device)
+
+        episode_rewards = []
+        episode_lengths = []
+        training_stats = []
+
+        print(f"Starting Improved Vision DQN with seed {seed}")
+        print(f"Agent sees grid as: empty=0.0, wall=0.33, goal=0.67, agent=1.0")
+
+        for episode in range(episodes):
+            try:
+                obs = env.reset()
+                agent.reset_episode()
+                total_reward = 0
+                steps = 0
+
+                # Get initial state using pure vision
+                current_vision = agent.get_vision_state(obs)
+
+                for step in range(max_steps):
+                    # Choose action based on vision only
+                    action = agent.get_action(current_vision)
+                    
+                    # Take action
+                    obs, reward, done, _, _ = env.step(action)
+                    next_vision = agent.get_vision_state(obs)
+                    
+                    # Store experience
+                    agent.remember(current_vision, action, reward, next_vision, done)
+                    
+                    # Train the network
+                    loss, avg_q = agent.replay()
+                    
+                    # Step the agent
+                    agent.step()
+                    
+                    total_reward += reward
+                    steps += 1
+                    current_vision = next_vision
+                    
+                    if done:
+                        break
+
+                # Decay epsilon after each episode
+                agent.decay_epsilon()
+                episode_rewards.append(total_reward)
+                episode_lengths.append(steps)
+                
+                # Collect training statistics
+                if episode % 500 == 0:
+                    stats = agent.get_stats()
+                    training_stats.append({
+                        'episode': episode,
+                        **stats
+                    })
+                    
+                    recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
+                    recent_avg_reward = np.mean(episode_rewards[-100:])
+                    
+                    print(f"Episode {episode}: "
+                          f"Success Rate={recent_success_rate:.2f}, "
+                          f"Avg Reward={recent_avg_reward:.2f}, "
+                          f"Epsilon={stats['epsilon']:.3f}, "
+                          f"Avg Loss={stats['avg_loss']:.4f}")
+
+            except Exception as e:
+                print(f"Error in episode {episode}: {e}")
+                continue
+
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": agent.epsilon,
+            "algorithm": "Improved Vision DQN",
+            "training_stats": training_stats
+        }
+
+    except Exception as e:
+        print(f"Critical error in Improved DQN experiment: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "rewards": [],
+            "lengths": [],
+            "final_epsilon": 0.0,
+            "algorithm": "Improved Vision DQN",
+            "error": str(e)
+        }
+        
+    finally:
+        # Explicit cleanup
+        if agent is not None:
+            del agent.q_network
+            del agent.target_network
+            del agent.memory
+            del agent
+        
+        if env is not None:
+            del env
+        
+        # Force garbage collection
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()

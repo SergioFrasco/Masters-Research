@@ -6,7 +6,8 @@ from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
 from agents import SuccessorAgent, ImprovedVisionOnlyAgent, VisionDQNAgent
-from models import build_autoencoder
+# from models import build_autoencoder
+from models import Autoencoder
 from utils.plotting import generate_save_path
 import json
 import time
@@ -102,51 +103,51 @@ class ExperimentRunner:
         
         print(f"Trajectory plot saved to: {save_path}")
 
-    # def run_qlearning_experiment(self, episodes=5000, max_steps=200, seed=20):
-    #     """Run Q-learning baseline experiment"""
-    #     np.random.seed(seed)
+    def run_qlearning_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run Q-learning baseline experiment"""
+        np.random.seed(seed)
 
-    #     # avoid circular imports
-    #     from agents import QLearningAgent
+        # avoid circular imports
+        from agents import QLearningAgent
 
-    #     env = SimpleEnv(size=self.env_size)
-    #     agent = QLearningAgent(env)
+        env = SimpleEnv(size=self.env_size)
+        agent = QLearningAgent(env)
 
-    #     episode_rewards = []
-    #     episode_lengths = []
+        episode_rewards = []
+        episode_lengths = []
 
-    #     for episode in tqdm(range(episodes), desc=f"Q-Learning (seed {seed})"):
-    #         obs = env.reset()
-    #         total_reward = 0
-    #         steps = 0
+        for episode in tqdm(range(episodes), desc=f"Q-Learning (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
 
-    #         state_idx = agent.get_state_index(obs)
+            state_idx = agent.get_state_index(obs)
 
-    #         for step in range(max_steps):
-    #             action = agent.choose_action(state_idx)
-    #             obs, reward, done, _, _ = env.step(action)
-    #             next_state_idx = agent.get_state_index(obs)
+            for step in range(max_steps):
+                action = agent.choose_action(state_idx)
+                obs, reward, done, _, _ = env.step(action)
+                next_state_idx = agent.get_state_index(obs)
 
-    #             # Update Q-table
-    #             agent.update(state_idx, action, reward, next_state_idx, done)
+                # Update Q-table
+                agent.update(state_idx, action, reward, next_state_idx, done)
 
-    #             total_reward += reward
-    #             steps += 1
-    #             state_idx = next_state_idx
+                total_reward += reward
+                steps += 1
+                state_idx = next_state_idx
 
-    #             if done:
-    #                 break
+                if done:
+                    break
 
-    #         agent.decay_epsilon()
-    #         episode_rewards.append(total_reward)
-    #         episode_lengths.append(steps)
+            agent.decay_epsilon()
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
 
-    #     return {
-    #         "rewards": episode_rewards,
-    #         "lengths": episode_lengths,
-    #         "final_epsilon": agent.epsilon,
-    #         "algorithm": "Q-Learning",
-    #     }
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": agent.epsilon,
+            "algorithm": "Q-Learning",
+        }
 
     def run_vision_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
         """
@@ -306,434 +307,436 @@ class ExperimentRunner:
                 torch.cuda.empty_cache()
 
 
-    # def run_honours_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
-    #     """Run the honours agent experiment, where the perfect reward map is given"""
-    #     np.random.seed(seed)
+    def run_honours_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run the honours agent experiment, where the perfect reward map is given"""
+        np.random.seed(seed)
 
-    #     env = SimpleEnv(size=self.env_size)
-    #     agent = SuccessorAgent(env)
+        env = SimpleEnv(size=self.env_size)
+        agent = SuccessorAgent(env)
 
-    #     episode_rewards = []
-    #     episode_lengths = []
-    #     epsilon = 1
-    #     epsilon_end = 0.05
-    #     epsilon_decay = 0.9995
+        episode_rewards = []
+        episode_lengths = []
+        epsilon = 1
+        epsilon_end = 0.05
+        epsilon_decay = 0.9995
 
-    #     for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
-    #         obs = env.reset()
-    #         total_reward = 0
-    #         steps = 0
-    #         trajectory = []  # Track trajectory for failure analysis
+        for episode in tqdm(range(episodes), desc=f"Successor Agent (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
+            trajectory = []  # Track trajectory for failure analysis
 
-    #         # Reset for new episode (from your code)
-    #         agent.true_reward_map = np.zeros((env.size, env.size))
-    #         agent.wvf = np.zeros(
-    #             (agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32
-    #         )
-    #         agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
+            # Reset for new episode (from your code)
+            agent.true_reward_map = np.zeros((env.size, env.size))
+            agent.wvf = np.zeros(
+                (agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32
+            )
+            agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
 
-    #         current_state_idx = agent.get_state_index(obs)
-    #         current_action = agent.sample_random_action(obs, epsilon=epsilon)
-    #         current_exp = [current_state_idx, current_action, None, None, None]
+            current_state_idx = agent.get_state_index(obs)
+            current_action = agent.sample_random_action(obs, epsilon=epsilon)
+            current_exp = [current_state_idx, current_action, None, None, None]
 
-    #         for step in range(max_steps):
-    #             # Record position and action for trajectory
-    #             agent_pos = tuple(env.agent_pos)
-    #             trajectory.append((agent_pos[0], agent_pos[1], current_action))
+            for step in range(max_steps):
+                # Record position and action for trajectory
+                agent_pos = tuple(env.agent_pos)
+                trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
-    #             obs, reward, done, _, _ = env.step(current_action)
-    #             next_state_idx = agent.get_state_index(obs)
+                obs, reward, done, _, _ = env.step(current_action)
+                next_state_idx = agent.get_state_index(obs)
 
-    #             # Complete experience
-    #             current_exp[2] = next_state_idx
-    #             current_exp[3] = reward
-    #             current_exp[4] = done
+                # Complete experience
+                current_exp[2] = next_state_idx
+                current_exp[3] = reward
+                current_exp[4] = done
 
-    #             # Choose next action
-    #             if step == 0 or episode < 1:  # Warmup period
-    #                 next_action = agent.sample_random_action(obs, epsilon=epsilon)
-    #             else:
-    #                 next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                # Choose next action
+                if step == 0 or episode < 1:  # Warmup period
+                    next_action = agent.sample_random_action(obs, epsilon=epsilon)
+                else:
+                    next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
-    #             next_exp = [next_state_idx, next_action, None, None, None]
+                next_exp = [next_state_idx, next_action, None, None, None]
 
-    #             # Update agent
-    #             agent.update(current_exp, None if done else next_exp)
+                # Update agent
+                agent.update(current_exp, None if done else next_exp)
 
-    #             # Vision Model
-    #             # Update the agent's true_reward_map based on current observation
-    #             agent_position = tuple(env.agent_pos)
+                # Vision Model
+                # Update the agent's true_reward_map based on current observation
+                agent_position = tuple(env.agent_pos)
 
-    #             # Get the current environment grids reward map
-    #             grid = env.grid.encode()
-    #             object_layer = grid[..., 0]
-    #             predicted_reward_map_2d = grid[..., 0]
-    #             predicted_reward_map_2d[object_layer == 2] = 0.0   
-    #             predicted_reward_map_2d[object_layer == 1] = 0.0   
-    #             predicted_reward_map_2d[object_layer == 8] = 1.0
+                # Get the current environment grids reward map
+                grid = env.grid.encode()
+                object_layer = grid[..., 0]
+                predicted_reward_map_2d = grid[..., 0]
+                predicted_reward_map_2d[object_layer == 2] = 0.0   
+                predicted_reward_map_2d[object_layer == 1] = 0.0   
+                predicted_reward_map_2d[object_layer == 8] = 1.0
 
-    #             # Mark position as visited
-    #             agent.visited_positions[agent_position[0], agent_position[1]] = True
+                # Mark position as visited
+                agent.visited_positions[agent_position[0], agent_position[1]] = True
 
-    #             agent.reward_maps.fill(0)  # Reset all maps to zero
-    #             for y in range(agent.grid_size):
-    #                 for x in range(agent.grid_size):
-    #                     curr_reward = predicted_reward_map_2d[y, x]
-    #                     idx = y * agent.grid_size + x
-    #                     reward_threshold = 0.5
-    #                     if curr_reward > reward_threshold:
-    #                         # changed from = reward to 1
-    #                         agent.reward_maps[idx, y, x] = 1
-    #                     else:
-    #                         agent.reward_maps[idx, y, x] = 0
+                agent.reward_maps.fill(0)  # Reset all maps to zero
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        curr_reward = predicted_reward_map_2d[y, x]
+                        idx = y * agent.grid_size + x
+                        reward_threshold = 0.5
+                        if curr_reward > reward_threshold:
+                            # changed from = reward to 1
+                            agent.reward_maps[idx, y, x] = 1
+                        else:
+                            agent.reward_maps[idx, y, x] = 0
 
-    #             M_flat = np.mean(agent.M, axis=0)
-    #             R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-    #             V_all = M_flat @ R_flat_all.T
-    #             agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+                M_flat = np.mean(agent.M, axis=0)
+                R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                V_all = M_flat @ R_flat_all.T
+                agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
-    #             total_reward += reward
-    #             steps += 1
-    #             current_exp = next_exp
-    #             current_action = next_action
+                total_reward += reward
+                steps += 1
+                current_exp = next_exp
+                current_action = next_action
 
-    #             if done:
-    #                 break
+                if done:
+                    break
 
-    #         # Check for failure in last 100 episodes and save trajectory plot
-    #         if episode >= episodes - 100 and not done:
-    #             self.plot_and_save_trajectory("Honours Successor", episode, trajectory, env.size, seed)
+            # Check for failure in last 100 episodes and save trajectory plot
+            if episode >= episodes - 100 and not done:
+                self.plot_and_save_trajectory("Honours Successor", episode, trajectory, env.size, seed)
 
-    #         epsilon = max(epsilon_end, epsilon * epsilon_decay)
-    #         episode_rewards.append(total_reward)
-    #         episode_lengths.append(steps)
+            epsilon = max(epsilon_end, epsilon * epsilon_decay)
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
 
-    #     return {
-    #         "rewards": episode_rewards,
-    #         "lengths": episode_lengths,
-    #         "final_epsilon": epsilon,
-    #         "algorithm": "Honours Successor",
-    #     }
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": epsilon,
+            "algorithm": "Honours Successor",
+        }
     
-    # def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
-    #     """Run Master agent experiment"""
-    #     np.random.seed(seed)
+    def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run Master agent experiment"""
+        
+        np.random.seed(seed)
 
-    #     env = SimpleEnv(size=self.env_size)
-    #     agent = SuccessorAgent(env)
+        env = SimpleEnv(size=self.env_size)
+        agent = SuccessorAgent(env)
 
-    #     # Setup vision model
-    #     input_shape = (env.size, env.size, 1)
-    #     ae_model = build_autoencoder(input_shape)
-    #     ae_model.compile(optimizer="adam", loss="mse")
+        # Setup torch
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        input_shape = (env.size, env.size, 1)
+        ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+        optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
+        loss_fn = nn.MSELoss()
 
-    #     episode_rewards = []
-    #     episode_lengths = []
-    #     epsilon = 1
-    #     epsilon_end = 0.05
-    #     epsilon_decay = 0.9995
 
-    #     for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
-    #         obs = env.reset()
-    #         total_reward = 0
-    #         steps = 0
-    #         trajectory = []  # Track trajectory for failure analysis
+        # Setup vision model
+        # input_shape = (env.size, env.size, 1)
+        # ae_model = build_autoencoder(input_shape)
+        # ae_model.compile(optimizer="adam", loss="mse")
 
-    #         # Reset for new episode (from your code)
-    #         agent.true_reward_map = np.zeros((env.size, env.size))
-    #         agent.wvf = np.zeros(
-    #             (agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32
-    #         )
-    #         agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
+        episode_rewards = []
+        episode_lengths = []
+        epsilon = 1
+        epsilon_end = 0.05
+        epsilon_decay = 0.9995
 
-    #         current_state_idx = agent.get_state_index(obs)
-    #         current_action = agent.sample_random_action(obs, epsilon=epsilon)
-    #         current_exp = [current_state_idx, current_action, None, None, None]
+        for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
+            trajectory = []  # Track trajectory for failure analysis
 
-    #         for step in range(max_steps):
-    #             # Record position and action for trajectory
-    #             agent_pos = tuple(env.agent_pos)
-    #             trajectory.append((agent_pos[0], agent_pos[1], current_action))
+            # Reset for new episode (from your code)
+            agent.true_reward_map = np.zeros((env.size, env.size))
+            agent.wvf = np.zeros(
+                (agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32
+            )
+            agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
+
+            current_state_idx = agent.get_state_index(obs)
+            current_action = agent.sample_random_action(obs, epsilon=epsilon)
+            current_exp = [current_state_idx, current_action, None, None, None]
+
+            for step in range(max_steps):
+                # Record position and action for trajectory
+                agent_pos = tuple(env.agent_pos)
+                trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
-    #             obs, reward, done, _, _ = env.step(current_action)
-    #             next_state_idx = agent.get_state_index(obs)
+                obs, reward, done, _, _ = env.step(current_action)
+                next_state_idx = agent.get_state_index(obs)
 
-    #             # Complete experience
-    #             current_exp[2] = next_state_idx
-    #             current_exp[3] = reward
-    #             current_exp[4] = done
+                # Complete experience
+                current_exp[2] = next_state_idx
+                current_exp[3] = reward
+                current_exp[4] = done
 
-    #             # Choose next action
-    #             if step == 0 or episode < 1:  # Warmup period
-    #                 next_action = agent.sample_random_action(obs, epsilon=epsilon)
-    #             else:
-    #                 next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                # Choose next action
+                if step == 0 or episode < 1:  # Warmup period
+                    next_action = agent.sample_random_action(obs, epsilon=epsilon)
+                else:
+                    next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
-    #             next_exp = [next_state_idx, next_action, None, None, None]
+                next_exp = [next_state_idx, next_action, None, None, None]
 
-    #             # Update agent
-    #             agent.update(current_exp, None if done else next_exp)
+                # Update agent
+                agent.update(current_exp, None if done else next_exp)
 
-    #             # Vision Model
-    #             # Update the agent's true_reward_map based on current observation
-    #             agent_position = tuple(env.agent_pos)
+                # Vision Model
+                # Update the agent's true_reward_map based on current observation
+                agent_position = tuple(env.agent_pos)
 
-    #             # Get the current environment grid
-    #             grid = env.grid.encode()
-    #             normalized_grid = np.zeros_like(
-    #                 grid[..., 0], dtype=np.float32
-    #             )  # Shape: (H, W)
+                # Get the current environment grid
+                grid = env.grid.encode()
+                normalized_grid = np.zeros_like(
+                    grid[..., 0], dtype=np.float32
+                )  # Shape: (H, W)
 
-    #             # Setting up input for the AE to obtain it's prediction of the space
-    #             object_layer = grid[..., 0]
-    #             normalized_grid[object_layer == 2] = 0.0  # Wall
-    #             normalized_grid[object_layer == 1] = 0.0  # Open space
-    #             normalized_grid[object_layer == 8] = 1.0  # Reward (e.g. goal object)
+                # Setting up input for the AE to obtain it's prediction of the space
+                object_layer = grid[..., 0]
+                normalized_grid[object_layer == 2] = 0.0  # Wall
+                normalized_grid[object_layer == 1] = 0.0  # Open space
+                normalized_grid[object_layer == 8] = 1.0  # Reward (e.g. goal object)
 
-    #             # Reshape for the autoencoder (add batch and channel dims)
-    #             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
+                # Reshape for the autoencoder (add batch and channel dims)
+                input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
 
-    #             # Get the predicted reward map from the AE
-    #             predicted_reward_map = ae_model.predict(input_grid, verbose=0)
-    #             predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
+                # Get the predicted reward map from the AE
+                with torch.no_grad():
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
+                    predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
 
-    #             # Mark position as visited
-    #             agent.visited_positions[agent_position[0], agent_position[1]] = True
+                # Mark position as visited
+                agent.visited_positions[agent_position[0], agent_position[1]] = True
 
-    #             # Learning Signal
-    #             if done and step < max_steps:
-    #                 agent.true_reward_map[agent_position[0], agent_position[1]] = 1
-    #             else:
-    #                 agent.true_reward_map[agent_position[0], agent_position[1]] = 0
+                # Learning Signal
+                if done and step < max_steps:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 1
+                else:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 0
 
-    #             # Update the rest of the true_reward_map with AE predictions
-    #             for y in range(agent.true_reward_map.shape[0]):
-    #                 for x in range(agent.true_reward_map.shape[1]):
-    #                     if not agent.visited_positions[y, x]:
-    #                         predicted_value = predicted_reward_map_2d[y, x]
-    #                         if predicted_value > 0.001:
-    #                             agent.true_reward_map[y, x] = predicted_value
-    #                         else:
-    #                             agent.true_reward_map[y, x] = 0
+                # Update the rest of the true_reward_map with AE predictions
+                for y in range(agent.true_reward_map.shape[0]):
+                    for x in range(agent.true_reward_map.shape[1]):
+                        if not agent.visited_positions[y, x]:
+                            predicted_value = predicted_reward_map_2d[y, x]
+                            if predicted_value > 0.001:
+                                agent.true_reward_map[y, x] = predicted_value
+                            else:
+                                agent.true_reward_map[y, x] = 0
 
-    #             # Train the vision model
-    #             trigger_ae_training = False
-    #             train_vision_threshold = 0.1
-    #             if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
-    #                 trigger_ae_training = True
+                # Train the vision model
+                trigger_ae_training = False
+                train_vision_threshold = 0.1
+                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
+                    trigger_ae_training = True
 
-    #             if trigger_ae_training:
+                if trigger_ae_training:
+                    target_tensor = torch.tensor(agent.true_reward_map[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
 
-    #                 target = agent.true_reward_map[np.newaxis, ..., np.newaxis]
+                    ae_model.train()
+                    optimizer.zero_grad()
+                    output = ae_model(ae_input_tensor)
+                    loss = loss_fn(output, target_tensor)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    step_loss = loss.item()
 
-    #                 # Train the model for a single step
-    #                 history = ae_model.fit(
-    #                     input_grid,  # Input: current environment grid
-    #                     target,  # Target: agent's true_reward_map
-    #                     epochs=1,  # Just one training step
-    #                     batch_size=1,  # Single sample
-    #                     verbose=0,  # Suppress output for cleaner logs
-    #                 )
-    #                 step_loss = history.history["loss"][0]
 
-    #             agent.reward_maps.fill(0)  # Reset all maps to zero
+                agent.reward_maps.fill(0)  # Reset all maps to zero
 
-    #             for y in range(agent.grid_size):
-    #                 for x in range(agent.grid_size):
-    #                     curr_reward = agent.true_reward_map[y, x]
-    #                     idx = y * agent.grid_size + x
-    #                     reward_threshold = 0.5
-    #                     if curr_reward > reward_threshold:
-    #                         agent.reward_maps[idx, y, x] = 1
-    #                     else:
-    #                         agent.reward_maps[idx, y, x] = 0
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        curr_reward = agent.true_reward_map[y, x]
+                        idx = y * agent.grid_size + x
+                        reward_threshold = 0.5
+                        if curr_reward > reward_threshold:
+                            agent.reward_maps[idx, y, x] = 1
+                        else:
+                            agent.reward_maps[idx, y, x] = 0
 
-    #             # Update agent WVF
-    #             M_flat = np.mean(agent.M, axis=0)
-    #             R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-    #             V_all = M_flat @ R_flat_all.T
-    #             agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+                # Update agent WVF
+                M_flat = np.mean(agent.M, axis=0)
+                R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                V_all = M_flat @ R_flat_all.T
+                agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
-    #             total_reward += reward
-    #             steps += 1
-    #             current_exp = next_exp
-    #             current_action = next_action
+                total_reward += reward
+                steps += 1
+                current_exp = next_exp
+                current_action = next_action
 
-    #             if done:
-    #                 break
+                if done:
+                    break
 
-    #         # Check for failure in last 100 episodes and save trajectory plot
-    #         if episode >= episodes - 100 and not done:
-    #             self.plot_and_save_trajectory("Masters Successor", episode, trajectory, env.size, seed)
+            # Check for failure in last 100 episodes and save trajectory plot
+            if episode >= episodes - 100 and not done:
+                self.plot_and_save_trajectory("Masters Successor", episode, trajectory, env.size, seed)
 
-    #         epsilon = max(epsilon_end, epsilon * epsilon_decay)
-    #         episode_rewards.append(total_reward)
-    #         episode_lengths.append(steps)
+            epsilon = max(epsilon_end, epsilon * epsilon_decay)
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
 
-    #     return {
-    #         "rewards": episode_rewards,
-    #         "lengths": episode_lengths,
-    #         "final_epsilon": epsilon,
-    #         "algorithm": "Masters Successor",
-    #     }
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": epsilon,
+            "algorithm": "Masters Successor",
+        }
     
-    # def run_sarsa_sr_experiment(self, episodes=5000, max_steps=200, seed=20):
-    #     """Run SARSA SR baseline experiment"""
-    #     np.random.seed(seed)
+    def run_sarsa_sr_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run SARSA SR baseline experiment"""
+        np.random.seed(seed)
         
-    #     # avoid circular imports
-    #     from agents import SARSASRAgent
+        # avoid circular imports
+        from agents import SARSASRAgent
         
-    #     env = SimpleEnv(size=self.env_size)
-    #     agent = SARSASRAgent(env)
+        env = SimpleEnv(size=self.env_size)
+        agent = SARSASRAgent(env)
         
-    #     episode_rewards = []
-    #     episode_lengths = []
+        episode_rewards = []
+        episode_lengths = []
         
-    #     for episode in tqdm(range(episodes), desc=f"SARSA SR (seed {seed})"):
-    #         obs = env.reset()
-    #         agent.reset_episode()
-    #         total_reward = 0
-    #         steps = 0
+        for episode in tqdm(range(episodes), desc=f"SARSA SR (seed {seed})"):
+            obs = env.reset()
+            agent.reset_episode()
+            total_reward = 0
+            steps = 0
             
-    #         state_idx = agent.get_state_index(obs)
-    #         action = agent.choose_action(state_idx)
+            state_idx = agent.get_state_index(obs)
+            action = agent.choose_action(state_idx)
             
-    #         for step in range(max_steps):
-    #             obs, reward, done, _, _ = env.step(action)
-    #             next_state_idx = agent.get_state_index(obs)
+            for step in range(max_steps):
+                obs, reward, done, _, _ = env.step(action)
+                next_state_idx = agent.get_state_index(obs)
                 
-    #             if done:
-    #                 # Terminal state update
-    #                 agent.update(state_idx, action, reward, next_state_idx, 0, done)
-    #                 total_reward += reward
-    #                 steps += 1
-    #                 break
-    #             else:
-    #                 # Choose next action for SARSA update
-    #                 next_action = agent.choose_action(next_state_idx)
+                if done:
+                    # Terminal state update
+                    agent.update(state_idx, action, reward, next_state_idx, 0, done)
+                    total_reward += reward
+                    steps += 1
+                    break
+                else:
+                    # Choose next action for SARSA update
+                    next_action = agent.choose_action(next_state_idx)
                     
-    #                 # SARSA update with actual next action
-    #                 agent.update(state_idx, action, reward, next_state_idx, next_action, done)
+                    # SARSA update with actual next action
+                    agent.update(state_idx, action, reward, next_state_idx, next_action, done)
                     
-    #                 # Move to next state-action pair
-    #                 state_idx = next_state_idx
-    #                 action = next_action
+                    # Move to next state-action pair
+                    state_idx = next_state_idx
+                    action = next_action
                 
-    #             total_reward += reward
-    #             steps += 1
+                total_reward += reward
+                steps += 1
             
-    #         agent.decay_epsilon()
-    #         episode_rewards.append(total_reward)
-    #         episode_lengths.append(steps)
+            agent.decay_epsilon()
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
         
-    #     return {
-    #         'rewards': episode_rewards,
-    #         'lengths': episode_lengths,
-    #         'final_epsilon': agent.epsilon,
-    #         'algorithm': 'SARSA SR'
-    #     }
+        return {
+            'rewards': episode_rewards,
+            'lengths': episode_lengths,
+            'final_epsilon': agent.epsilon,
+            'algorithm': 'SARSA SR'
+        }
 
-    # def run_vision_only_experiment(self, episodes=5000, max_steps=200, seed=20):
-    #     """Run Vision-Only baseline experiment"""
-    #     np.random.seed(seed)
-    #     np.random.seed(seed)
-    #     torch.manual_seed(seed)
-    #     if torch.cuda.is_available():
-    #         torch.cuda.manual_seed(seed)
-    #         torch.cuda.manual_seed_all(seed)
+    def run_vision_only_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run Vision-Only baseline experiment (PyTorch version)"""
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
 
-    #     torch.backends.cudnn.deterministic = True
-    #     torch.backends.cudnn.benchmark = False
-        
-    #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
-    #     env = SimpleEnv(size=self.env_size)
-    #     agent = ImprovedVisionOnlyAgent(env)
-      
-    #     # Setup autoencoder
-    #     input_shape = (1, env.size, env.size) 
-    #     ae_model = build_autoencoder(input_shape).to(device)
-   
-    #     optimizer = optim.Adam(ae_model.parameters(), lr=0.001),
-    #     loss_fn = nn.MSELoss()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    #     ae_model.compile(
-    #         optimizer = optimizer,
-    #         loss_fn = loss_fn
-    #     )
-        
-    #     episode_rewards = []
-    #     episode_lengths = []
-    #     epsilon = 1.0
-    #     epsilon_end = 0.05
-    #     epsilon_decay = 0.995
-    #     train_every = 10
-        
-    #     for episode in tqdm(range(episodes), desc=f"Vision-Only Agent (seed {seed})"):
-    #         obs = env.reset()
-    #         total_reward = 0
-    #         steps = 0
-            
-    #         prev_pos = tuple(env.agent_pos)
-            
-    #         for step in range(max_steps):
-    #             # Choose action
-    #             if episode < 50:  # Extended warm-up with random actions
-    #                 action = env.action_space.sample()
-    #             else:
-    #                 action = agent.sample_action_from_values(obs, epsilon=epsilon)
-                
-    #             # Take action
-    #             obs, reward, done, _, _ = env.step(action)
-    #             next_pos = tuple(env.agent_pos)
-                
-    #             # Update value map
-    #             agent.update_value_map(prev_pos, action, reward, next_pos, done)
-                
-    #             # Train autoencoder periodically
-    #             if step % train_every == 0 or done:
-    #                 input_data, target_data = agent.prepare_training_data()
+        env = SimpleEnv(size=self.env_size)
+        agent = ImprovedVisionOnlyAgent(env)
 
-    #                 if input_data is not None:
-    #                     # Convert to torch tensors
-    #                     input_tensor = torch.tensor(input_data, dtype=torch.float32).to(device)
-    #                     target_tensor = torch.tensor(target_data, dtype=torch.float32).to(device)
+        # Setup Vision
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        input_shape = (env.size, env.size, 1)
+        ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+        optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
+        loss_fn = nn.MSELoss()
+  
 
-    #                     ae_model.train()
-    #                     optimizer.zero_grad()
-    #                     output = ae_model(input_tensor)
-    #                     loss = loss_fn(output, target_tensor)
-    #                     loss.backward()
-    #                     optimizer.step()
+        episode_rewards = []
+        episode_lengths = []
+        epsilon = 1.0
+        epsilon_end = 0.05
+        epsilon_decay = 0.995
+        train_every = 10
 
-    #                     # Prediction for agent
-    #                     ae_model.eval()
-    #                     with torch.no_grad():
-    #                         pred = ae_model(input_tensor)
-    #                         pred = pred.detach().cpu().numpy()
-    #                         agent.predicted_value_map = pred[0, 0]  # shape: (1, 1, H, W)
-                
-    #             total_reward += reward
-    #             steps += 1
-    #             prev_pos = next_pos
-                
-    #             if done:
-    #                 break
-            
-    #         # Decay epsilon
-    #         epsilon = max(epsilon_end, epsilon * epsilon_decay)
-            
-    #         # Store statistics
-    #         episode_rewards.append(total_reward)
-    #         episode_lengths.append(steps)
-        
-    #     return {
-    #         "rewards": episode_rewards,
-    #         "lengths": episode_lengths,
-    #         "final_epsilon": epsilon,
-    #         "algorithm": "Vision-Only",
-    #     }
+        for episode in tqdm(range(episodes), desc=f"Vision-Only Agent (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
+
+            prev_pos = tuple(env.agent_pos)
+
+            for step in range(max_steps):
+                if episode < 50:
+                    action = env.action_space.sample()
+                else:
+                    action = agent.sample_action_from_values(obs, epsilon=epsilon)
+
+                obs, reward, done, _, _ = env.step(action)
+                next_pos = tuple(env.agent_pos)
+
+                agent.update_value_map(prev_pos, action, reward, next_pos, done)
+
+                if step % train_every == 0 or done:
+                    input_data, target_data = agent.prepare_training_data()
+
+                    if input_data is not None:
+                        # Convert to torch tensors
+                        input_tensor = torch.tensor(input_data, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                        target_tensor = torch.tensor(target_data, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+
+
+                        ae_model.train()
+                        optimizer.zero_grad()
+                        output = ae_model(input_tensor)
+                        loss = loss_fn(output, target_tensor)
+                        loss.backward()
+                        optimizer.step()
+
+                        # Prediction for agent
+                        ae_model.eval()
+                        with torch.no_grad():
+                            pred = ae_model(input_tensor)
+                            pred = pred.detach().cpu().numpy()
+                            agent.predicted_value_map = pred[0, 0]  # shape: (1, 1, H, W)
+
+                total_reward += reward
+                steps += 1
+                prev_pos = next_pos
+
+                if done:
+                    break
+
+            epsilon = max(epsilon_end, epsilon * epsilon_decay)
+
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": epsilon,
+            "algorithm": "Vision-Only",
+        }
+
 
     def run_comparison_experiment(self, episodes=5000):
         """Run comparison between all agents across multiple seeds"""
@@ -742,22 +745,22 @@ class ExperimentRunner:
         for seed in range(self.num_seeds):
             print(f"\n=== Running experiments with seed {seed} ===")
             
-            # Run Q-learning
+            # # Run Q-learning
             # qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
             
             # Run DQN
             dqn_results = self.run_vision_dqn_experiment(episodes=episodes, seed=seed)
             
-            # Run SARSA SR
+            # # Run SARSA SR
             # sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
 
-            # Run Honours successor
+            # # Run Honours successor
             # honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
             
-            # Run Masters successor
+            # # Run Masters successor
             # successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
             
-            # Run Vision-Only agent
+            # # Run Vision-Only agent
             # vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
             
             # Store results
@@ -937,10 +940,10 @@ def main():
     print("Starting baseline comparison experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=1)
+    runner = ExperimentRunner(env_size=10, num_seeds=2)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=10001)
+    results = runner.run_comparison_experiment(episodes=4001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

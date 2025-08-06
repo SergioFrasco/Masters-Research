@@ -4,3 +4,5 @@ from .FocalLossAutoencoder import run_autoencoder
 from .FocalLossAutoencoder import focal_mse_loss
 from .FocalLossAutoencoder import weighted_focal_mse_loss
 from .FocalLossAutoencoder import build_autoencoder
+from .TorchFocalLossAutoencoder import Autoencoder
+
