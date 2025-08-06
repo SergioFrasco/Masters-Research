@@ -745,29 +745,29 @@ class ExperimentRunner:
         for seed in range(self.num_seeds):
             print(f"\n=== Running experiments with seed {seed} ===")
             
-            # # Run Q-learning
-            # qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
+            # Run Q-learning
+            qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
             
             # Run DQN
             dqn_results = self.run_vision_dqn_experiment(episodes=episodes, seed=seed)
             
-            # # Run SARSA SR
-            # sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
+            # Run SARSA SR
+            sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
 
-            # # Run Honours successor
-            # honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
+            # Run Honours successor
+            honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
             
-            # # Run Masters successor
-            # successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
+            # Run Masters successor
+            successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
             
-            # # Run Vision-Only agent
-            # vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
+            # Run Vision-Only agent
+            vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
             
             # Store results
-            # algorithms = ['Q-Learning', 'DQN', 'SARSA SR', 'Masters Successor', 'Honours Successor', 'Vision-Only']
-            algorithms = ['DQN']  # For now, only DQN is run
-            # results_list = [qlearning_results, dqn_results, sarsa_sr_results, successor_results, honours_results, vision_results]
-            results_list = [dqn_results]  # For now, only DQN is run
+            algorithms = ['Q-Learning', 'DQN', 'SARSA SR', 'Masters Successor', 'Honours Successor', 'Vision-Only']
+            # algorithms = ['DQN']  # For now, only DQN is run
+            results_list = [qlearning_results, dqn_results, sarsa_sr_results, successor_results, honours_results, vision_results]
+            # results_list = [dqn_results]  # For now, only DQN is run
             
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
@@ -940,10 +940,10 @@ def main():
     print("Starting baseline comparison experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=2)
+    runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=4001)
+    results = runner.run_comparison_experiment(episodes=10001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
