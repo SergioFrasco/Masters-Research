@@ -1,322 +1,460 @@
 import numpy as np
-import tensorflow as tf
-from collections import deque
-import random
-
-import os
-import sys
-import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+import os
+from collections import deque
 from tqdm import tqdm
-from collections import defaultdict
-from agents import DQNAgent
 from env import SimpleEnv
+from agents import SuccessorAgent, ImprovedVisionOnlyAgent, VisualDQNAgent
+# from models import build_autoencoder
+from models import Autoencoder
 from utils.plotting import generate_save_path
-from utils import get_latest_run_dir, create_video_from_images
+import json
+import time
+import gc
+# import tensorflow as tf
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
-def evaluate_dqn_performance(agent, env, episode, log_file_path):
-    """
-    Evaluate DQN performance by checking Q-values at goal vs neighbors.
-    Similar to your evaluate_goal_state_values function but for DQN.
-    """
-    current_pos = env.agent_pos
-    x, y = current_pos
-    
-    # Get current state
-    current_state = agent.get_state_vector()
-    current_q_values = agent.get_q_values(current_state)
-    
-    # Get Q-value for staying (this is tricky since there's no "stay" action)
-    # We'll use the maximum Q-value as a proxy for the state's desirability
-    current_max_q = np.max(current_q_values)
-    
-    # Check neighboring positions by simulating what Q-values would be
-    neighbor_max_qs = []
-    neighbors = [(x-1, y), (x+1, y), (x, y-1), (x, y+1)]
-    
-    for nx, ny in neighbors:
-        if (0 <= nx < agent.grid_size and 0 <= ny < agent.grid_size):
-            # Check if it's a valid position
-            cell = env.grid.get(nx, ny)
-            if cell is None or not hasattr(cell, '__class__') or cell.__class__.__name__ != 'Wall':
-                # Simulate state at neighbor position
-                goal_x, goal_y = agent._find_goal_position()
-                neighbor_state = np.array([
-                    nx / (agent.grid_size - 1),
-                    ny / (agent.grid_size - 1),
-                    current_state[2],  # Same direction
-                    goal_x / (agent.grid_size - 1),
-                    goal_y / (agent.grid_size - 1)
-                ], dtype=np.float32)
-                
-                neighbor_q_values = agent.get_q_values(neighbor_state)
-                neighbor_max_qs.append(np.max(neighbor_q_values))
-    
-    # Determine if current state has highest Q-value
-    if len(neighbor_max_qs) == 0:
-        result = f"Episode {episode}: No valid neighbors to compare\n"
-    else:
-        max_neighbor_q = max(neighbor_max_qs)
-        if current_max_q >= max_neighbor_q:
-            result = f"Episode {episode}: Goal state has highest Q-value (goal: {current_max_q:.3f}, max neighbor: {max_neighbor_q:.3f})\n"
-        else:
-            result = f"Episode {episode}: Goal state does not have highest Q-value (goal: {current_max_q:.3f}, max neighbor: {max_neighbor_q:.3f})\n"
-    
-    # Write to log file
-    with open(log_file_path, 'a') as f:
-        f.write(result)
-    
-    return result.strip()
 
-def train_dqn_agent(agent, env, episodes=20001, max_steps=200, save_interval=250):
-    """
-    Training loop for DQN agent in MiniGrid environment.
-    """
-    episode_rewards = []
-    step_counts = []
-    losses = []
-    epsilon_values = []
-    
-    # Tracking where the agent goes
-    state_occupancy = np.zeros((env.size, env.size), dtype=np.int32)
-    
-    # Create log file for performance evaluations
-    log_file_path = generate_save_path("dqn_performance_evaluations.txt")
-    with open(log_file_path, 'w') as f:
-        f.write("DQN Performance Evaluations\n")
-        f.write("="*50 + "\n")
-    
-    # Training statistics
-    q_value_stats = defaultdict(list)
-    
-    for episode in tqdm(range(episodes), "Training DQN Agent"):
-        obs = env.reset()
-        total_reward = 0
-        step_count = 0
-        episode_loss = []
-        
-        # Get initial state
-        current_state = agent.get_state_vector(obs)
+# Set environment variables to prevent memory issues
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
 
-        # For each time step:
-        # Choose an action with agent.get_action().
-        # Step in the environment.
-        # Track position, store transition in memory.
-        # Train network if enough data (agent.replay()).
-        # Log Q-values periodically.
-        
-        for step in range(max_steps):
-            # Choose action
-            action = agent.get_action(current_state)
-            
-            # Take action
-            obs, reward, done, _, _ = env.step(action)
-            next_state = agent.get_state_vector(obs)
-            
-            # Track agent position
-            agent_pos = tuple(env.agent_pos)
-            state_occupancy[agent_pos[0], agent_pos[1]] += 1
-            
-            # Store experience
-            agent.remember(current_state, action, reward, next_state, done)
-            
-            # Train the network
-            if len(agent.memory) >= agent.batch_size:
-                loss, _ = agent.replay()
-                if loss is not None:
-                    episode_loss.append(loss)
-            
-            total_reward += reward
-            step_count += 1
-            current_state = next_state
-            
-            # Track Q-values for analysis
-            if step % 10 == 0:  # Sample every 10 steps to avoid too much data
-                q_values = agent.get_q_values(current_state)
-                q_value_stats['max_q'].append(np.max(q_values))
-                q_value_stats['mean_q'].append(np.mean(q_values))
-                q_value_stats['std_q'].append(np.std(q_values))
-            
-            if done:
-                # Evaluate performance at goal
-                if episode % 100 == 0:
-                    evaluate_dqn_performance(agent, env, episode, log_file_path)
-                break
-        
-        # FIXED: Always append step count, use actual steps taken
-        step_counts.append(step_count)
-        
-        # Decay epsilon
-        agent.decay_epsilon()
-        
-        # Store episode statistics
-        episode_rewards.append(total_reward)
-        epsilon_values.append(agent.epsilon)
-        if episode_loss:
-            losses.append(np.mean(episode_loss))
-        else:
-            losses.append(0)
-        
-        # Save visualizations periodically
-        if episode % save_interval == 0 and episode > 0:
-            save_dqn_visualizations(agent, env, episode, q_value_stats)
-    
-    # Save final model
-    agent.save_model(generate_save_path('dqn_model.keras'))  # Using .keras format
-    
-    # Generate final plots
-    plot_training_results(episode_rewards, step_counts, losses, epsilon_values, q_value_stats)
-    
-    return episode_rewards, step_counts, losses
+class ExperimentRunner:
+    """Handles running experiments and collecting results for multiple agents"""
 
-def save_dqn_visualizations(agent, env, episode, q_value_stats):
-    """Save DQN-specific visualizations."""
-    
-    # Q-value heatmap for the current goal position
-    goal_x, goal_y = agent._find_goal_position()
-    q_value_grid = np.zeros((agent.grid_size, agent.grid_size))
-    
-    for y in range(agent.grid_size):
-        for x in range(agent.grid_size):
-            # Check if position is valid (not a wall)
-            cell = env.grid.get(x, y)
-            if cell is None or not hasattr(cell, '__class__') or cell.__class__.__name__ != 'Wall':
-                # Create state for this position
-                state = np.array([
-                    x / (agent.grid_size - 1),
-                    y / (agent.grid_size - 1),
-                    0.0,  # Facing north
-                    goal_x / (agent.grid_size - 1),
-                    goal_y / (agent.grid_size - 1)
-                ], dtype=np.float32)
-                
-                q_values = agent.get_q_values(state)
-                q_value_grid[y, x] = np.max(q_values)
+    def __init__(self, env_size=10, num_seeds=5):
+        self.env_size = env_size
+        self.num_seeds = num_seeds
+        self.results = {}
+
+    def plot_and_save_trajectory(self, agent_name, episode, trajectory, env_size, seed):
+        """Plot and save the agent's trajectory for failed episodes"""
+        print(f"Agent {agent_name} failed: plotting trajectory")
+        
+        # Create a grid to visualize the path
+        grid = np.zeros((env_size, env_size), dtype=str)
+        grid[:] = '.'  # Empty spaces
+        
+        # Mark the trajectory
+        for i, (x, y, action) in enumerate(trajectory):
+            if i == 0:
+                grid[x, y] = 'S'  # Start
+            elif i == len(trajectory) - 1:
+                grid[x, y] = 'E'  # End
             else:
-                q_value_grid[y, x] = np.nan  # Mark walls as NaN
-    
-    # Plot Q-value heatmap
-    plt.figure(figsize=(8, 6))
-    im = plt.imshow(q_value_grid, cmap='viridis', interpolation='nearest')
-    plt.colorbar(im, label='Max Q-value')
-    plt.title(f'Q-value Heatmap (Episode {episode})')
-    plt.xlabel('X Position')
-    plt.ylabel('Y Position')
-    
-    # Mark goal position
-    plt.scatter(goal_x, goal_y, c='red', s=100, marker='*', label='Goal')
-    plt.legend()
-    
-    plt.tight_layout()
-    plt.savefig(generate_save_path(f'q_values/q_heatmap_episode_{episode}.png'))
-    plt.close()
-
-def plot_training_results(episode_rewards, step_counts, losses, epsilon_values, q_value_stats):
-    """Plot comprehensive training results."""
-    
-    window = 100
-    
-    # FIXED: Ensure all arrays have the same length
-    min_length = min(len(episode_rewards), len(step_counts), len(losses), len(epsilon_values))
-    episode_rewards = episode_rewards[:min_length]
-    step_counts = step_counts[:min_length]
-    losses = losses[:min_length]
-    epsilon_values = epsilon_values[:min_length]
-    
-    # Create subplots
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    fig.suptitle('DQN Training Results', fontsize=16)
-    
-    # Episode rewards
-    rewards_series = pd.Series(episode_rewards)
-    rolling_rewards = rewards_series.rolling(window).mean()
-    
-    axes[0, 0].plot(episode_rewards, alpha=0.3, label='Episode Reward')
-    axes[0, 0].plot(rolling_rewards, label=f'Rolling Avg (window={window})', linewidth=2)
-    axes[0, 0].set_xlabel('Episode')
-    axes[0, 0].set_ylabel('Total Reward')
-    axes[0, 0].set_title('Reward per Episode')
-    axes[0, 0].legend()
-    axes[0, 0].grid(True)
-    
-    # Step counts
-    steps_series = pd.Series(step_counts)
-    rolling_steps = steps_series.rolling(window).mean()
-    
-    axes[0, 1].plot(step_counts, alpha=0.3, label='Steps per Episode')
-    axes[0, 1].plot(rolling_steps, label=f'Rolling Avg (window={window})', linewidth=2)
-    axes[0, 1].set_xlabel('Episode')
-    axes[0, 1].set_ylabel('Steps to Goal')
-    axes[0, 1].set_title('Steps per Episode')
-    axes[0, 1].legend()
-    axes[0, 1].grid(True)
-    
-    # Loss
-    loss_series = pd.Series(losses)
-    rolling_loss = loss_series.rolling(window).mean()
-    
-    axes[0, 2].plot(losses, alpha=0.3, label='Training Loss')
-    axes[0, 2].plot(rolling_loss, label=f'Rolling Avg (window={window})', linewidth=2)
-    axes[0, 2].set_xlabel('Episode')
-    axes[0, 2].set_ylabel('Loss')
-    axes[0, 2].set_title('Training Loss')
-    axes[0, 2].legend()
-    axes[0, 2].grid(True)
-    
-    # Epsilon decay
-    axes[1, 0].plot(epsilon_values)
-    axes[1, 0].set_xlabel('Episode')
-    axes[1, 0].set_ylabel('Epsilon')
-    axes[1, 0].set_title('Epsilon Decay')
-    axes[1, 0].grid(True)
-    
-    # Q-value statistics
-    if q_value_stats['max_q']:
-        max_q_series = pd.Series(q_value_stats['max_q'])
-        mean_q_series = pd.Series(q_value_stats['mean_q'])
+                # Use action arrows
+                action_symbols = {0: '↑', 1: '→', 2: '↓', 3: '←'}
+                grid[x, y] = action_symbols.get(action, str(i % 10))
         
-        axes[1, 1].plot(max_q_series.rolling(50).mean(), label='Max Q-value')
-        axes[1, 1].plot(mean_q_series.rolling(50).mean(), label='Mean Q-value')
-        axes[1, 1].set_xlabel('Training Steps (sampled)')
-        axes[1, 1].set_ylabel('Q-value')
-        axes[1, 1].set_title('Q-value Evolution')
-        axes[1, 1].legend()
-        axes[1, 1].grid(True)
-    
-    # Learning curve (reward vs steps) - FIXED: Now both arrays have same length
-    axes[1, 2].scatter(step_counts, episode_rewards, alpha=0.5)
-    axes[1, 2].set_xlabel('Steps to Goal')
-    axes[1, 2].set_ylabel('Episode Reward')
-    axes[1, 2].set_title('Learning Efficiency')
-    axes[1, 2].grid(True)
-    
-    plt.tight_layout()
-    plt.savefig(generate_save_path("dqn_training_results.png"), dpi=300, bbox_inches='tight')
-    plt.close()
+        # Create matplotlib figure
+        fig, ax = plt.subplots(figsize=(10, 10))
+        
+        # Create a numerical grid for visualization
+        visual_grid = np.zeros((env_size, env_size))
+        color_map = {'S': 1, 'E': 2, '↑': 3, '→': 4, '↓': 5, '←': 6, '.': 0}
+        
+        for i in range(env_size):
+            for j in range(env_size):
+                visual_grid[i, j] = color_map.get(grid[i, j], 0)
+        
+        # Plot the grid
+        im = ax.imshow(visual_grid, cmap='tab10', alpha=0.8)
+        
+        # Add text annotations
+        for i in range(env_size):
+            for j in range(env_size):
+                ax.text(j, i, grid[i, j], ha='center', va='center', 
+                       fontsize=12, fontweight='bold', color='white')
+        
+        # Customize the plot
+        ax.set_title(f'{agent_name} Trajectory - Episode {episode}\nPath length: {len(trajectory)} steps', 
+                     fontsize=14, fontweight='bold')
+        ax.set_xlabel('X Position', fontsize=12)
+        ax.set_ylabel('Y Position', fontsize=12)
+        
+        # Add grid lines
+        ax.set_xticks(np.arange(-0.5, env_size, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, env_size, 1), minor=True)
+        ax.grid(which='minor', color='gray', linestyle='-', linewidth=0.5)
+        
+        # Add legend
+        legend_elements = [
+            plt.Rectangle((0,0),1,1, facecolor='tab:blue', label='Start (S)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:orange', label='End (E)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:green', label='Up (↑)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:red', label='Right (→)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:purple', label='Down (↓)'),
+            plt.Rectangle((0,0),1,1, facecolor='tab:brown', label='Left (←)')
+        ]
+        ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5))
+        
+        plt.tight_layout()
+        
+        # Generate filename and save
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"trajectory_{agent_name.replace(' ', '_').lower()}_episode_{episode}_seed_{seed}_{timestamp}.png"
+        save_path = generate_save_path(filename)
+        
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()  # Close the figure to free memory
+        
+        print(f"Trajectory plot saved to: {save_path}")
+
+
+    def run_egocentric_visual_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """
+        Run experiment with Egocentric Visual DQN agent
+        """
+        # Set all random seeds
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+        
+        # Set deterministic behavior
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        
+        env = None
+        agent = None
+        
+        try:
+            # Create environment
+            from env import SimpleEnv  # Import your environment
+            env = SimpleEnv(size=self.env_size)
+            
+            # Create egocentric visual DQN agent
+            agent = VisualDQNAgent(
+                env,
+                view_size=10,          # 7x7 egocentric window
+                action_size=4,
+                learning_rate=0.0001,  # Lower learning rate for visual learning
+                gamma=0.99,
+                epsilon_start=1.0,
+                epsilon_end=0.01,
+                epsilon_decay=0.998,   # Slower decay for more exploration
+                memory_size=50000,     # Larger memory for visual learning
+                batch_size=32,
+                target_update_freq=1000
+            )
+            
+            episode_rewards = []
+            episode_lengths = []
+            training_stats = []
+            
+            print(f"Starting Egocentric Visual DQN with seed {seed}")
+            print(f"Using {agent.view_size}x{agent.view_size} egocentric view")
+            
+            for episode in range(episodes):
+                try:
+                    obs = env.reset()
+                    agent.reset_episode()
+                    total_reward = 0
+                    steps = 0
+                    trajectory = []
+                    
+                    for step in range(max_steps):
+                        # Record trajectory for potential debugging
+                        agent_pos = tuple(env.agent_pos)
+                        
+                        # Choose action based on egocentric view
+                        action = agent.get_action(obs)
+                        trajectory.append((agent_pos[0], agent_pos[1], action))
+                        
+                        # Take action
+                        next_obs, reward, done, _, _ = env.step(action)
+                        
+                        # Store experience with raw observations
+                        agent.remember(obs, action, reward, next_obs, done)
+                        
+                        # Train
+                        loss, avg_q = agent.train()
+                        
+                        # Update
+                        agent.step()
+                        total_reward += reward
+                        steps += 1
+                        obs = next_obs
+                        
+                        if done:
+                            break
+                    
+                    # Save failure trajectories for analysis (optional)
+                    if episode >= episodes - 100 and not done:
+                        self.plot_and_save_trajectory("Egocentric Visual DQN", episode, trajectory, env.size, seed)
+                    
+                    # Decay epsilon
+                    agent.decay_epsilon()
+                    episode_rewards.append(total_reward)
+                    episode_lengths.append(steps)
+                    
+                    # Collect training statistics
+                    if episode % 100 == 0:
+                        stats = agent.get_stats()
+                        training_stats.append({
+                            'episode': episode,
+                            **stats
+                        })
+                        
+                        recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
+                        recent_avg_reward = np.mean(episode_rewards[-100:])
+                        
+                        print(f"Episode {episode}: "
+                            f"Success Rate={recent_success_rate:.2f}, "
+                            f"Avg Reward={recent_avg_reward:.2f}, "
+                            f"Epsilon={stats['epsilon']:.3f}, "
+                            f"Loss={stats['avg_loss']:.4f}, "
+                            f"Avg Q={stats['avg_q_value']:.2f}")
+                    
+                    # Memory cleanup
+                    if episode % 500 == 0:
+                        import gc
+                        gc.collect()
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    
+                except Exception as e:
+                    print(f"Error in episode {episode}: {e}")
+                    continue
+            
+            return {
+                "rewards": episode_rewards,
+                "lengths": episode_lengths,
+                "final_epsilon": agent.epsilon,
+                "algorithm": "Egocentric Visual DQN",
+                "training_stats": training_stats
+            }
+        
+        except Exception as e:
+            print(f"Critical error in Egocentric Visual DQN experiment: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "rewards": [],
+                "lengths": [],
+                "final_epsilon": 0.0,
+                "algorithm": "Egocentric Visual DQN",
+                "error": str(e)
+            }
+        
+        finally:
+            # Cleanup
+            if agent is not None:
+                del agent.q_network
+                del agent.target_network
+                del agent.memory
+                del agent
+            
+            if env is not None:
+                del env
+            
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    # Updated ExperimentRunner class method
+    def run_comparison_experiment(self, episodes=5000):
+        """Run comparison between all agents across multiple seeds"""
+        all_results = {}
+        
+        for seed in range(self.num_seeds):
+            print(f"\n=== Running experiments with seed {seed} ===")
+
+            # Run Egocentric DQN
+            ego_dqn_results = self.run_egocentric_visual_dqn_experiment(episodes=episodes, seed=seed)
+
+            algorithms = ['Egocentric DQN']
+            results_list = [ego_dqn_results]
+            
+            for alg, result in zip(algorithms, results_list):
+                if alg not in all_results:
+                    all_results[alg] = []
+                all_results[alg].append(result)
+
+            # Force cleanup between seeds
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        self.results = all_results
+        return all_results
+        
+    def analyze_results(self, window=100):
+        """Analyze and plot comparison results"""
+        if not self.results:
+            print("No results to analyze. Run experiments first.")
+            return
+
+        # Create comparison plots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+        # Plot 1: Learning curves (rewards)
+        ax1 = axes[0, 0]
+        for alg_name, runs in self.results.items():
+            all_rewards = np.array([run["rewards"] for run in runs])
+            mean_rewards = np.mean(all_rewards, axis=0)
+            std_rewards = np.std(all_rewards, axis=0)
+
+            # Rolling average
+            mean_smooth = pd.Series(mean_rewards).rolling(window).mean()
+            std_smooth = pd.Series(std_rewards).rolling(window).mean()
+
+            x = range(len(mean_smooth))
+            ax1.plot(x, mean_smooth, label=f"{alg_name} (mean)", linewidth=2)
+            ax1.fill_between(
+                x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3
+            )
+
+        ax1.set_xlabel("Episode")
+        ax1.set_ylabel("Average Reward")
+        ax1.set_title("Learning Curves (Rewards)")
+        ax1.legend()
+        ax1.grid(True)
+
+        # Plot 2: Episode lengths
+        ax2 = axes[0, 1]
+        for alg_name, runs in self.results.items():
+            all_lengths = np.array([run["lengths"] for run in runs])
+            mean_lengths = np.mean(all_lengths, axis=0)
+            std_lengths = np.std(all_lengths, axis=0)
+
+            mean_smooth = pd.Series(mean_lengths).rolling(window).mean()
+            std_smooth = pd.Series(std_lengths).rolling(window).mean()
+
+            x = range(len(mean_smooth))
+            ax2.plot(x, mean_smooth, label=f"{alg_name} (mean)", linewidth=2)
+            ax2.fill_between(
+                x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3
+            )
+
+        ax2.set_xlabel("Episode")
+        ax2.set_ylabel("Episode Length (Steps)")
+        ax2.set_title("Learning Efficiency (Steps to Goal)")
+        ax2.legend()
+        ax2.grid(True)
+
+        # Plot 3: Final performance comparison (last 100 episodes)
+        ax3 = axes[1, 0]
+        final_rewards = {}
+        for alg_name, runs in self.results.items():
+            final_100 = []
+            for run in runs:
+                final_100.extend(run["rewards"][-100:])  # Last 100 episodes
+            final_rewards[alg_name] = final_100
+
+        ax3.boxplot(final_rewards.values(), labels=final_rewards.keys())
+        ax3.set_ylabel("Reward")
+        ax3.set_title("Final Performance (Last 100 Episodes)")
+        ax3.grid(True)
+
+        # Plot 4: Summary statistics
+        ax4 = axes[1, 1]
+        summary_data = []
+        for alg_name, runs in self.results.items():
+            all_rewards = np.array([run["rewards"] for run in runs])
+            final_performance = np.mean(
+                [np.mean(run["rewards"][-100:]) for run in runs]
+            )
+            convergence_episode = self._find_convergence_episode(all_rewards, window)
+
+            summary_data.append(
+                {
+                    "Algorithm": alg_name,
+                    "Final Performance": final_performance,
+                    "Convergence Episode": convergence_episode,
+                }
+            )
+
+        summary_df = pd.DataFrame(summary_data)
+        ax4.axis("tight")
+        ax4.axis("off")
+        table = ax4.table(
+            cellText=summary_df.values,
+            colLabels=summary_df.columns,
+            cellLoc="center",
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        ax4.set_title("Summary Statistics")
+
+        plt.tight_layout()
+        save_path = generate_save_path("experiment_comparison.png")
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"Comparison plot saved to: {save_path}")
+
+        # Save numerical results
+        self.save_results()
+
+        return summary_df
+
+    def _find_convergence_episode(self, all_rewards, window):
+        """Find approximate convergence episode"""
+        mean_rewards = np.mean(all_rewards, axis=0)
+        smoothed = pd.Series(mean_rewards).rolling(window).mean()
+
+        # Simple heuristic: convergence when slope becomes small
+        if len(smoothed) < window * 2:
+            return len(smoothed)
+
+        slopes = np.diff(smoothed[window:])
+        convergence_threshold = 0.001
+
+        for i, slope in enumerate(slopes):
+            if abs(slope) < convergence_threshold:
+                return i + window
+
+        return len(smoothed)
+
+    def save_results(self):
+        """Save experimental results to files"""
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+        # Save raw results as JSON
+        results_file = generate_save_path(f"experiment_results_{timestamp}.json")
+
+        # Convert numpy arrays to lists for JSON serialization
+        json_results = {}
+        for alg_name, runs in self.results.items():
+            json_results[alg_name] = []
+            for run in runs:
+                json_run = {
+                    "rewards": [float(r) for r in run["rewards"]],
+                    "lengths": [int(l) for l in run["lengths"]],
+                    "final_epsilon": float(run["final_epsilon"]),
+                    "algorithm": run["algorithm"],
+                }
+                json_results[alg_name].append(json_run)
+
+        with open(results_file, "w") as f:
+            json.dump(json_results, f, indent=2)
+
+        print(f"Results saved to: {results_file}")
+
 
 def main():
-    # Setup environment
-    env = SimpleEnv(size=10)
-    
-    # Setup DQN agent
-    agent = DQNAgent(env, 
-                     learning_rate=0.001,
-                     gamma=0.95,
-                     epsilon_start=1.0,
-                     epsilon_end=0.01,
-                     epsilon_decay=0.9995,
-                     memory_size=10000,
-                     batch_size=32,
-                     target_update_freq=100)
-    
-    # Train the agent
-    rewards, steps, losses = train_dqn_agent(agent, env, episodes=10001)
-    
-    print(f"Training completed!")
-    print(f"Final epsilon: {agent.epsilon:.4f}")
-    print(f"Average reward (last 100 episodes): {np.mean(rewards[-100:]):.2f}")
-    print(f"Average steps (last 100 episodes): {np.mean(steps[-100:]):.2f}")
+    """Run the experiment comparison"""
+    print("Starting baseline comparison experiment...")
+
+    # Initialize experiment runner
+    runner = ExperimentRunner(env_size=10, num_seeds=1)
+
+    # Run experiments
+    results = runner.run_comparison_experiment(episodes=1)
+
+    # Analyze and plot results
+    summary = runner.analyze_results(window=100)
+    print("\nExperiment Summary:")
+    print(summary)
+
+    print("\nExperiment completed! Check the results/ folder for plots and data.")
+
 
 if __name__ == "__main__":
     main()

@@ -6,65 +6,64 @@ import torch.nn.functional as F
 from collections import deque
 import random
 
-# Autoencoder for vision-based reward prediction
-class Autoencoder(nn.Module):
-    def __init__(self, input_channels=1):
-        super(Autoencoder, self).__init__()
-        
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Conv2d(input_channels, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 16, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 8, 3, padding=1),
-            nn.ReLU()
-        )
-        
-        # Decoder
-        self.decoder = nn.Sequential(
-            nn.Conv2d(8, 16, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 1, 3, padding=1),
-            nn.Sigmoid()  # Output between 0 and 1 for reward prediction
-        )
+class VisualDQN(nn.Module):
+    """CNN-based DQN that processes egocentric grid observations"""
     
-    def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
-
-# Simple DQN network for engineered features
-class FeatureDQN(nn.Module):
-    def __init__(self, input_size=5, action_size=4, hidden_size=128):
-        super(FeatureDQN, self).__init__()
+    def __init__(self, input_channels=2, view_size=10, action_size=4, hidden_size=512):
+        super(VisualDQN, self).__init__()
         
-        self.network = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
+        self.view_size = view_size
+        self.action_size = action_size
+        
+        # Convolutional layers for processing egocentric view
+        self.conv_layers = nn.Sequential(
+            # First conv block
+            nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
+            
+            # Second conv block  
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Linear(hidden_size, action_size)
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
         )
-    
+        
+        # Calculate flattened size after conv layers
+        conv_output_size = 64 * view_size * view_size
+        
+        # Fully connected layers
+        self.fc_layers = nn.Sequential(
+            nn.Linear(conv_output_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_size // 2, action_size)
+        )
+        
     def forward(self, x):
-        return self.network(x)
+        # x shape: (batch_size, channels, height, width)
+        conv_out = self.conv_layers(x)
+        flattened = conv_out.view(conv_out.size(0), -1)
+        q_values = self.fc_layers(flattened)
+        return q_values
 
-class VisionDQNAgent:
+class VisualDQNAgent:
     """
-    Agent that uses vision model to extract features for DQN
+    DQN Agent that uses egocentric visual observations
+    Agent is always centered in the observation window
     """
     
-    def __init__(self, env, action_size=4, learning_rate=0.001, 
+    def __init__(self, env, view_size=10, action_size=4, learning_rate=0.0001, 
                  gamma=0.99, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995,
                  memory_size=10000, batch_size=32, target_update_freq=1000):
         
         self.env = env
         self.grid_size = env.size
+        self.view_size = view_size  # Size of the egocentric view window
         self.action_size = action_size
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -82,101 +81,90 @@ class VisionDQNAgent:
         # Experience replay
         self.memory = deque(maxlen=memory_size)
         
-        # Vision Model (Autoencoder)
-        self.vision_model = Autoencoder(input_channels=1).to(self.device)
-        self.vision_optimizer = optim.Adam(self.vision_model.parameters(), lr=0.001)
-        self.vision_loss_fn = nn.MSELoss()
+        # Networks - input channels: walls/obstacles, goals/rewards (agent is implicitly at center)
+        self.q_network = VisualDQN(
+            input_channels=2,  # walls + goals (agent position is implicit)
+            view_size=self.view_size,
+            action_size=self.action_size
+        ).to(self.device)
         
-        # DQN Networks (for engineered features)
-        self.q_network = FeatureDQN(input_size=5, action_size=self.action_size).to(self.device)
-        self.target_network = FeatureDQN(input_size=5, action_size=self.action_size).to(self.device)
+        self.target_network = VisualDQN(
+            input_channels=2,
+            view_size=self.view_size,
+            action_size=self.action_size
+        ).to(self.device)
+        
         self.update_target_network()
         
-        self.dqn_optimizer = torch.optim.Adam(self.q_network.parameters(), lr=self.learning_rate)
-        self.dqn_loss_fn = nn.MSELoss()
+        self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=self.learning_rate)
+        self.loss_fn = nn.MSELoss()
         
         # Training tracking
         self.training_step = 0
         self.episode_step = 0
         
-        # Vision model training
-        self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
-        self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
-        self.train_vision_threshold = 0.1
-        
         # Performance tracking
         self.recent_losses = deque(maxlen=100)
         self.recent_q_values = deque(maxlen=100)
-        self.recent_vision_losses = deque(maxlen=100)
     
-    def get_visual_input(self, obs):
+    def get_egocentric_view(self, obs):
         """
-        Convert environment observation to visual input for autoencoder
+        Extract an egocentric view centered on the agent
+        Returns a window of size view_size x view_size with agent at center
         """
-        # Get the current environment grid
-        grid = self.env.grid.encode()
-        normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)
+        # Get the encoded grid from environment
+        grid = self.env.grid.encode()  # Shape: (H, W, 3)
+        agent_pos = self.env.agent_pos
         
-        # Map objects to visual representation
-        object_layer = grid[..., 0]
-        normalized_grid[object_layer == 2] = 0.0   # Wall
-        normalized_grid[object_layer == 1] = 0.0   # Open space  
-        normalized_grid[object_layer == 8] = 1.0   # Goal/Reward
+        # Calculate the bounds of the egocentric window
+        half_view = self.view_size // 2
         
-        # Add batch and channel dimensions: (H, W) -> (1, 1, H, W)
-        visual_input = normalized_grid[np.newaxis, np.newaxis, ...]
-        return torch.tensor(visual_input, dtype=torch.float32).to(self.device)
+        # Create padded version of the grid to handle edge cases
+        pad_size = half_view + 1
+        
+        # Initialize channels for the full padded grid
+        walls_channel_full = np.zeros((self.grid_size + 2*pad_size, self.grid_size + 2*pad_size), dtype=np.float32)
+        goals_channel_full = np.zeros((self.grid_size + 2*pad_size, self.grid_size + 2*pad_size), dtype=np.float32)
+        
+        # Fill the center with actual grid data
+        object_layer = grid[..., 0]  # Object types
+        
+        # Walls channel (including boundaries as walls)
+        walls_channel_full[:pad_size, :] = 1.0  # Top boundary
+        walls_channel_full[-pad_size:, :] = 1.0  # Bottom boundary  
+        walls_channel_full[:, :pad_size] = 1.0  # Left boundary
+        walls_channel_full[:, -pad_size:] = 1.0  # Right boundary
+        
+        # Fill actual walls in the center region
+        walls_channel_full[pad_size:pad_size+self.grid_size, pad_size:pad_size+self.grid_size][object_layer == 2] = 1.0
+        
+        # Goals channel (only in the valid grid area)
+        goals_channel_full[pad_size:pad_size+self.grid_size, pad_size:pad_size+self.grid_size][object_layer == 8] = 1.0
+        
+        # Extract egocentric window centered on agent
+        agent_x_padded = agent_pos[0] + pad_size
+        agent_y_padded = agent_pos[1] + pad_size
+        
+        x_start = agent_x_padded - half_view
+        x_end = agent_x_padded + half_view + 1
+        y_start = agent_y_padded - half_view  
+        y_end = agent_y_padded + half_view + 1
+        
+        walls_view = walls_channel_full[x_start:x_end, y_start:y_end]
+        goals_view = goals_channel_full[x_start:x_end, y_start:y_end]
+        
+        # Stack channels: (2, H, W) - No agent channel since agent is implicitly at center
+        egocentric_view = np.stack([walls_view, goals_view], axis=0)
+        
+        # Add batch dimension and convert to tensor: (1, 2, H, W)
+        view_tensor = torch.tensor(egocentric_view[np.newaxis, ...], 
+                                 dtype=torch.float32).to(self.device)
+        
+        return view_tensor
     
-    def predict_reward_locations(self, obs):
+    def get_action(self, obs, epsilon=None):
         """
-        Use vision model to predict reward locations
-        Returns: reward_map as numpy array (H, W)
-        """
-        visual_input = self.get_visual_input(obs)
-        
-        with torch.no_grad():
-            self.vision_model.eval()
-            predicted_reward_map = self.vision_model(visual_input)
-            return predicted_reward_map.squeeze().cpu().numpy()
-    
-    def extract_engineered_features(self, obs, predicted_reward_map):
-        """
-        Extract [agent_x, agent_y, goal_x, goal_y, distance_to_goal] from observation and predictions
-        """
-        # Get agent position from environment
-        agent_x, agent_y = self.env.agent_pos
-        
-        # Find goal position from predicted reward map
-        # Find the location with highest predicted reward
-        goal_positions = np.where(predicted_reward_map > 0.5)
-        
-        if len(goal_positions[0]) > 0:
-            # If multiple goals, take the one with highest prediction
-            max_idx = np.argmax(predicted_reward_map[goal_positions])
-            goal_x = goal_positions[1][max_idx]  # x is second dimension
-            goal_y = goal_positions[0][max_idx]  # y is first dimension
-        else:
-            # If no clear goal detected, use center as fallback
-            goal_x = self.grid_size // 2
-            goal_y = self.grid_size // 2
-        
-        # Calculate distance to goal
-        distance_to_goal = np.sqrt((agent_x - goal_x)**2 + (agent_y - goal_y)**2)
-        
-        # Normalize features to reasonable ranges
-        features = np.array([
-            agent_x / self.grid_size,           # Normalize to [0, 1]
-            agent_y / self.grid_size,           # Normalize to [0, 1]  
-            goal_x / self.grid_size,            # Normalize to [0, 1]
-            goal_y / self.grid_size,            # Normalize to [0, 1]
-            distance_to_goal / (self.grid_size * np.sqrt(2))  # Normalize by max possible distance
-        ], dtype=np.float32)
-        
-        return features
-    
-    def get_action(self, features, epsilon=None):
-        """
-        Choose action based on engineered features using DQN
+        Choose action based on egocentric visual observation
         """
         if epsilon is None:
             epsilon = self.epsilon
@@ -184,80 +172,26 @@ class VisionDQNAgent:
         if np.random.random() <= epsilon:
             return random.randrange(self.action_size)
         
-        # Convert features to tensor
-        feature_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
+        # Get egocentric view
+        egocentric_input = self.get_egocentric_view(obs)
         
         self.q_network.eval()
         with torch.no_grad():
-            q_values = self.q_network(feature_tensor)
+            q_values = self.q_network(egocentric_input)
             
         # Track Q-values for analysis
         self.recent_q_values.append(torch.max(q_values).item())
         
         return torch.argmax(q_values).item()
     
-    def remember(self, features, action, reward, next_features, done):
+    def remember(self, obs, action, reward, next_obs, done):
         """Store experience in replay buffer"""
-        self.memory.append((features, action, reward, next_features, done))
+        # Store raw observations - egocentric processing happens during training
+        self.memory.append((obs, action, reward, next_obs, done))
     
-    def train_vision_model(self, obs, agent_position, done, step, max_steps):
+    def train(self):
         """
-        Train the vision model using the same approach as in your successor agent
-        """
-        # Get visual input
-        visual_input = self.get_visual_input(obs)
-        
-        # Get current prediction
-        with torch.no_grad():
-            predicted_reward_map = self.vision_model(visual_input).squeeze().cpu().numpy()
-        
-        # Mark position as visited
-        self.visited_positions[agent_position[0], agent_position[1]] = True
-        
-        # Learning Signal: Update true reward map based on actual experience
-        if done and step < max_steps:
-            # Successful completion - mark current position as rewarding
-            self.true_reward_map[agent_position[0], agent_position[1]] = 1.0
-        else:
-            # No reward at this position
-            self.true_reward_map[agent_position[0], agent_position[1]] = 0.0
-        
-        # Update unvisited positions with model predictions
-        for y in range(self.true_reward_map.shape[0]):
-            for x in range(self.true_reward_map.shape[1]):
-                if not self.visited_positions[y, x]:
-                    predicted_value = predicted_reward_map[y, x]
-                    if predicted_value > 0.001:
-                        self.true_reward_map[y, x] = predicted_value
-                    else:
-                        self.true_reward_map[y, x] = 0.0
-        
-        # Check if we should trigger training
-        prediction_error = abs(predicted_reward_map[agent_position[0], agent_position[1]] - 
-                             self.true_reward_map[agent_position[0], agent_position[1]])
-        
-        if prediction_error > self.train_vision_threshold:
-            # Train the vision model
-            target_tensor = torch.tensor(
-                self.true_reward_map[np.newaxis, np.newaxis, ...], 
-                dtype=torch.float32
-            ).to(self.device)
-            
-            self.vision_model.train()
-            self.vision_optimizer.zero_grad()
-            output = self.vision_model(visual_input)
-            loss = self.vision_loss_fn(output, target_tensor)
-            loss.backward()
-            self.vision_optimizer.step()
-            
-            self.recent_vision_losses.append(loss.item())
-            return loss.item()
-        
-        return None
-    
-    def train_dqn(self):
-        """
-        Train the DQN using engineered features
+        Train the DQN using egocentric visual observations
         """
         if len(self.memory) < self.batch_size:
             return None, None
@@ -266,31 +200,46 @@ class VisionDQNAgent:
         batch = random.sample(self.memory, self.batch_size)
         
         # Prepare batch data
-        features = torch.tensor([b[0] for b in batch], dtype=torch.float32).to(self.device)
-        actions = torch.tensor([b[1] for b in batch], dtype=torch.int64).to(self.device)
-        rewards = torch.tensor([b[2] for b in batch], dtype=torch.float32).to(self.device)
-        next_features = torch.tensor([b[3] for b in batch], dtype=torch.float32).to(self.device)
-        dones = torch.tensor([b[4] for b in batch], dtype=torch.float32).to(self.device)
+        current_obs_batch = []
+        next_obs_batch = []
+        actions = []
+        rewards = []
+        dones = []
+        
+        for obs, action, reward, next_obs, done in batch:
+            current_obs_batch.append(obs)
+            next_obs_batch.append(next_obs)
+            actions.append(action)
+            rewards.append(reward)
+            dones.append(done)
+        
+        # Process egocentric views for entire batch
+        current_states = torch.cat([self.get_egocentric_view(obs) for obs in current_obs_batch], dim=0)
+        next_states = torch.cat([self.get_egocentric_view(obs) for obs in next_obs_batch], dim=0)
+        
+        actions_tensor = torch.tensor(actions, dtype=torch.int64).to(self.device)
+        rewards_tensor = torch.tensor(rewards, dtype=torch.float32).to(self.device)
+        dones_tensor = torch.tensor(dones, dtype=torch.float32).to(self.device)
         
         # Current Q-values
         self.q_network.train()
-        current_q_values = self.q_network(features)
-        current_q = current_q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+        current_q_values = self.q_network(current_states)
+        current_q = current_q_values.gather(1, actions_tensor.unsqueeze(1)).squeeze(1)
         
         # Target Q-values
         with torch.no_grad():
-            target_q_values = self.target_network(next_features)
+            target_q_values = self.target_network(next_states)
             max_next_q = torch.max(target_q_values, dim=1)[0]
-            target_q = rewards + (self.gamma * max_next_q * (1 - dones))
+            target_q = rewards_tensor + (self.gamma * max_next_q * (1 - dones_tensor))
         
         # Compute loss
-        loss = self.dqn_loss_fn(current_q, target_q)
+        loss = self.loss_fn(current_q, target_q)
         
         # Optimize
-        self.dqn_optimizer.zero_grad()
+        self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
-        self.dqn_optimizer.step()
+        self.optimizer.step()
         
         # Update target network
         self.training_step += 1
@@ -312,8 +261,6 @@ class VisionDQNAgent:
     def reset_episode(self):
         """Reset for new episode"""
         self.episode_step = 0
-        self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
-        self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
     
     def step(self):
         """Call this at each environment step"""
@@ -324,157 +271,7 @@ class VisionDQNAgent:
         return {
             'epsilon': self.epsilon,
             'training_steps': self.training_step,
-            'avg_dqn_loss': np.mean(self.recent_losses) if self.recent_losses else 0,
-            'avg_vision_loss': np.mean(self.recent_vision_losses) if self.recent_vision_losses else 0,
+            'avg_loss': np.mean(self.recent_losses) if self.recent_losses else 0,
             'avg_q_value': np.mean(self.recent_q_values) if self.recent_q_values else 0,
             'memory_size': len(self.memory)
         }
-
-
-def run_hybrid_vision_dqn_experiment(env_class, env_size=10, episodes=5000, max_steps=200, seed=20):
-    """
-    Run experiment with Hybrid Vision-DQN agent
-    """
-    # Set all random seeds
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-    
-    # Set deterministic behavior
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    
-    env = None
-    agent = None
-    
-    try:
-        # Create environment
-        env = env_class(size=env_size)
-        
-        # Create hybrid agent
-        agent = HybridVisionDQNAgent(
-            env,
-            action_size=4,  # Adjust based on your environment
-            learning_rate=0.001,
-            gamma=0.99,
-            epsilon_start=1.0,
-            epsilon_end=0.01,
-            epsilon_decay=0.995,
-            memory_size=10000,
-            batch_size=32,
-            target_update_freq=1000
-        )
-        
-        episode_rewards = []
-        episode_lengths = []
-        training_stats = []
-        
-        print(f"Starting Hybrid Vision-DQN with seed {seed}")
-        print("Vision model learns reward locations, DQN uses extracted features")
-        
-        for episode in range(episodes):
-            try:
-                obs = env.reset()
-                agent.reset_episode()
-                total_reward = 0
-                steps = 0
-                
-                # Get initial features
-                predicted_reward_map = agent.predict_reward_locations(obs)
-                current_features = agent.extract_engineered_features(obs, predicted_reward_map)
-                
-                for step in range(max_steps):
-                    # Choose action based on engineered features
-                    action = agent.get_action(current_features)
-                    
-                    # Take action
-                    obs, reward, done, _, _ = env.step(action)
-                    agent_position = tuple(env.agent_pos)
-                    
-                    # Train vision model
-                    vision_loss = agent.train_vision_model(obs, agent_position, done, step, max_steps)
-                    
-                    # Get next features
-                    predicted_reward_map = agent.predict_reward_locations(obs)
-                    next_features = agent.extract_engineered_features(obs, predicted_reward_map)
-                    
-                    # Store experience
-                    agent.remember(current_features, action, reward, next_features, done)
-                    
-                    # Train DQN
-                    dqn_loss, avg_q = agent.train_dqn()
-                    
-                    # Update
-                    agent.step()
-                    total_reward += reward
-                    steps += 1
-                    current_features = next_features
-                    
-                    if done:
-                        break
-                
-                # Decay epsilon
-                agent.decay_epsilon()
-                episode_rewards.append(total_reward)
-                episode_lengths.append(steps)
-                
-                # Collect training statistics
-                if episode % 500 == 0:
-                    stats = agent.get_stats()
-                    training_stats.append({
-                        'episode': episode,
-                        **stats
-                    })
-                    
-                    recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
-                    recent_avg_reward = np.mean(episode_rewards[-100:])
-                    
-                    print(f"Episode {episode}: "
-                          f"Success Rate={recent_success_rate:.2f}, "
-                          f"Avg Reward={recent_avg_reward:.2f}, "
-                          f"Epsilon={stats['epsilon']:.3f}, "
-                          f"DQN Loss={stats['avg_dqn_loss']:.4f}, "
-                          f"Vision Loss={stats['avg_vision_loss']:.4f}")
-                
-            except Exception as e:
-                print(f"Error in episode {episode}: {e}")
-                continue
-        
-        return {
-            "rewards": episode_rewards,
-            "lengths": episode_lengths,
-            "final_epsilon": agent.epsilon,
-            "algorithm": "Hybrid Vision-DQN",
-            "training_stats": training_stats
-        }
-    
-    except Exception as e:
-        print(f"Critical error in Hybrid Vision-DQN experiment: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "rewards": [],
-            "lengths": [],
-            "final_epsilon": 0.0,
-            "algorithm": "Hybrid Vision-DQN",
-            "error": str(e)
-        }
-    
-    finally:
-        # Cleanup
-        if agent is not None:
-            del agent.vision_model
-            del agent.q_network
-            del agent.target_network
-            del agent.memory
-            del agent
-        
-        if env is not None:
-            del env
-        
-        import gc
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
