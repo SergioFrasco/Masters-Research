@@ -11,29 +11,28 @@ class VisualDQN(nn.Module):
     
     def __init__(self, input_channels=2, view_size=10, action_size=4, hidden_size=512):
         super(VisualDQN, self).__init__()
-        
+
         self.view_size = view_size
         self.action_size = action_size
-        
-        # Convolutional layers for processing egocentric view
+
+        # Convolutional layers
         self.conv_layers = nn.Sequential(
-            # First conv block
             nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(32, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            
-            # Second conv block  
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(),
         )
-        
-        # Calculate flattened size after conv layers
-        conv_output_size = 64 * view_size * view_size
-        
-        # Fully connected layers
+
+        # Dynamically compute the flattened size
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, input_channels, view_size, view_size)
+            conv_out = self.conv_layers(dummy_input)
+            conv_output_size = conv_out.view(1, -1).size(1)
+
         self.fc_layers = nn.Sequential(
             nn.Linear(conv_output_size, hidden_size),
             nn.ReLU(),
@@ -43,6 +42,7 @@ class VisualDQN(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(hidden_size // 2, action_size)
         )
+
         
     def forward(self, x):
         # x shape: (batch_size, channels, height, width)
