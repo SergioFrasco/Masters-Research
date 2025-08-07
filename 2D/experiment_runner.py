@@ -151,7 +151,7 @@ class ExperimentRunner:
 
     def run_vision_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
         """
-        Run experiment with improved Vision-based DQN agent
+        Method version - fits into your existing experimental framework
         """
         # Set all random seeds
         np.random.seed(seed)
@@ -164,8 +164,8 @@ class ExperimentRunner:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-        # Force CPU usage to avoid GPU memory issues
-        device = torch.device("cpu")
+        # Force CPU usage
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         env = None
         agent = None
@@ -174,23 +174,23 @@ class ExperimentRunner:
             # Create environment
             env = SimpleEnv(size=self.env_size)
             
-            # Create improved agent
+            # Create agent
             agent = VisionDQNAgent(
                 env, 
-                learning_rate=0.0005,
+                action_size=4,  
+                learning_rate=0.0001,
                 gamma=0.99,
                 epsilon_start=1.0,
-                epsilon_end=0.01,
-                epsilon_decay=0.9995,
+                epsilon_end=0.05,
+                epsilon_decay=0.999,
                 memory_size=50000,
                 batch_size=32,
-                target_update_freq=1000,
-                learning_starts=1000,
-                train_freq=4
+                target_update_freq=1000
             )
             
-            # Force agent to use CPU
+            # Force Cuda usage
             agent.device = device
+            agent.vision_model = agent.vision_model.to(device)
             agent.q_network = agent.q_network.to(device)
             agent.target_network = agent.target_network.to(device)
 
@@ -198,7 +198,7 @@ class ExperimentRunner:
             episode_lengths = []
             training_stats = []
 
-            for episode in tqdm(range(episodes), desc=f"Improved Vision DQN (seed {seed})"):
+            for episode in tqdm(range(episodes), desc=f"Hybrid Vision-DQN (seed {seed})"):
                 try:
                     obs = env.reset()
                     agent.reset_episode()
@@ -206,30 +206,37 @@ class ExperimentRunner:
                     steps = 0
                     trajectory = []
 
-                    # Get initial state using improved vision
-                    current_state = agent.get_vision_state(obs)
+                    # Get initial state - now it's engineered features!
+                    predicted_rewards = agent.predict_reward_locations(obs)
+                    current_state = agent.extract_engineered_features(obs, predicted_rewards)
 
                     for step in range(max_steps):
-                        # Record position and action for trajectory
+                        # Record trajectory
                         agent_pos = tuple(env.agent_pos)
                         
-                        # Choose action based on improved vision
+                        # Get action from features
                         action = agent.get_action(current_state)
                         trajectory.append((agent_pos[0], agent_pos[1], action))
                         
-                        # Take action
+                        # Environment step
                         obs, reward, done, _, _ = env.step(action)
-                        next_state = agent.get_vision_state(obs)
                         
-                        # Store experience
+                        # Train vision model (bootstrapped learning)
+                        agent_position = tuple(env.agent_pos)
+                        vision_loss = agent.train_vision_model(obs, agent_position, done, step, max_steps)
+                        
+                        # Get next state features
+                        predicted_rewards = agent.predict_reward_locations(obs)
+                        next_state = agent.extract_engineered_features(obs, predicted_rewards)
+                        
+                        # Store experience (features, not raw observation)
                         agent.remember(current_state, action, reward, next_state, done)
                         
-                        # Train the network
-                        loss, avg_q = agent.replay()
+                        # Train DQN
+                        loss, avg_q = agent.train_dqn()
                         
-                        # Step the agent
+                        # Update
                         agent.step()
-                        
                         total_reward += reward
                         steps += 1
                         current_state = next_state
@@ -237,16 +244,16 @@ class ExperimentRunner:
                         if done:
                             break
 
-                    # Check for failure in last 100 episodes and save trajectory plot
+                    # Save failure trajectories
                     if episode >= episodes - 100 and not done:
-                        self.plot_and_save_trajectory("Improved Vision DQN", episode, trajectory, env.size, seed)
+                        self.plot_and_save_trajectory("Hybrid Vision-DQN", episode, trajectory, env.size, seed)
 
-                    # Decay epsilon
+                    # Episode cleanup
                     agent.decay_epsilon()
                     episode_rewards.append(total_reward)
                     episode_lengths.append(steps)
                     
-                    # Collect training statistics
+                    # Statistics
                     if episode % 100 == 0:
                         stats = agent.get_stats()
                         training_stats.append({
@@ -258,9 +265,10 @@ class ExperimentRunner:
                             f"Reward={total_reward:.2f}, "
                             f"Steps={steps}, "
                             f"Epsilon={stats['epsilon']:.3f}, "
-                            f"Avg Loss={stats['avg_loss']:.4f}")
+                            f"DQN Loss={stats['avg_dqn_loss']:.4f}, "
+                            f"Vision Loss={stats['avg_vision_loss']:.4f}")
                     
-                    # Periodic cleanup
+                    # Memory cleanup
                     if episode % 500 == 0:
                         gc.collect()
                         if torch.cuda.is_available():
@@ -274,25 +282,26 @@ class ExperimentRunner:
                 "rewards": episode_rewards,
                 "lengths": episode_lengths,
                 "final_epsilon": agent.epsilon,
-                "algorithm": "Improved Vision DQN",
+                "algorithm": "Hybrid Vision-DQN",
                 "training_stats": training_stats
             }
 
         except Exception as e:
-            print(f"Critical error in Improved DQN experiment: {e}")
+            print(f"Critical error in Hybrid Vision-DQN experiment: {e}")
             import traceback
             traceback.print_exc()
             return {
                 "rewards": [],
                 "lengths": [],
                 "final_epsilon": 0.0,
-                "algorithm": "Improved Vision DQN",
+                "algorithm": "Hybrid Vision-DQN",
                 "error": str(e)
             }
             
         finally:
-            # Explicit cleanup
+            # Cleanup
             if agent is not None:
+                del agent.vision_model
                 del agent.q_network
                 del agent.target_network
                 del agent.memory
@@ -301,7 +310,6 @@ class ExperimentRunner:
             if env is not None:
                 del env
             
-            # Force garbage collection
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -745,29 +753,29 @@ class ExperimentRunner:
         for seed in range(self.num_seeds):
             print(f"\n=== Running experiments with seed {seed} ===")
             
-            # Run Q-learning
-            qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
+            # # Run Q-learning
+            # qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
             
             # Run DQN
             dqn_results = self.run_vision_dqn_experiment(episodes=episodes, seed=seed)
             
-            # Run SARSA SR
-            sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
+            # # Run SARSA SR
+            # sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
 
-            # Run Honours successor
-            honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
+            # # Run Honours successor
+            # honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
             
-            # Run Masters successor
-            successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
+            # # Run Masters successor
+            # successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
             
-            # Run Vision-Only agent
-            vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
+            # # Run Vision-Only agent
+            # vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
             
             # Store results
-            algorithms = ['Q-Learning', 'DQN', 'SARSA SR', 'Masters Successor', 'Honours Successor', 'Vision-Only']
-            # algorithms = ['DQN']  # For now, only DQN is run
-            results_list = [qlearning_results, dqn_results, sarsa_sr_results, successor_results, honours_results, vision_results]
-            # results_list = [dqn_results]  # For now, only DQN is run
+            # algorithms = ['Q-Learning', 'DQN', 'SARSA SR', 'Masters Successor', 'Honours Successor', 'Vision-Only']
+            algorithms = ['DQN']  # For now, only DQN is run
+            # results_list = [qlearning_results, dqn_results, sarsa_sr_results, successor_results, honours_results, vision_results]
+            results_list = [dqn_results]  # For now, only DQN is run
             
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
@@ -940,10 +948,10 @@ def main():
     print("Starting baseline comparison experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=3)
+    runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=10001)
+    results = runner.run_comparison_experiment(episodes=5001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
