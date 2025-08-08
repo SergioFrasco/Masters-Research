@@ -136,7 +136,7 @@ class ExperimentRunner:
                 gamma=0.99,
                 epsilon_start=1.0,
                 epsilon_end=0.01,
-                epsilon_decay=0.9995,   # Slower decay for more exploration
+                epsilon_decay=0.999,   # Slower decay for more exploration
                 memory_size=50000,     # Larger memory for visual learning
                 batch_size=32,
                 target_update_freq=1000
@@ -446,7 +446,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=20001)
+    results = runner.run_comparison_experiment(episodes=10001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
