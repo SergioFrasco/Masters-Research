@@ -154,10 +154,19 @@ class VisualDQNAgent:
             agent_x_padded = agent_pos[0] + pad_size
             agent_y_padded = agent_pos[1] + pad_size
             
-            x_start = agent_x_padded - half_view
-            x_end = agent_x_padded + half_view + 1
-            y_start = agent_y_padded - half_view  
-            y_end = agent_y_padded + half_view + 1
+            # For even view_size, we need to be careful about centering
+            if self.view_size % 2 == 0:
+                # For even view_size (like 10), agent is at center-left/center-top
+                x_start = agent_x_padded - half_view
+                x_end = agent_x_padded + half_view
+                y_start = agent_y_padded - half_view  
+                y_end = agent_y_padded + half_view
+            else:
+                # For odd view_size, agent is exactly at center
+                x_start = agent_x_padded - half_view
+                x_end = agent_x_padded + half_view + 1
+                y_start = agent_y_padded - half_view  
+                y_end = agent_y_padded + half_view + 1
             
             # Ensure we get exactly the right size
             walls_view = walls_channel_full[x_start:x_end, y_start:y_end]
