@@ -7,23 +7,23 @@ from collections import deque
 import random
 
 class VisualDQN(nn.Module):
-    """CNN-based DQN that processes egocentric grid observations"""
+    """CNN-based DQN that processes raw grid observations with integer object IDs"""
     
-    def __init__(self, input_channels=2, view_size=10, action_size=4, hidden_size=512):
+    def __init__(self, input_channels=1, view_size=10, action_size=4, hidden_size=512):
         super(VisualDQN, self).__init__()
 
         self.view_size = view_size
         self.action_size = action_size
 
-        # Convolutional layers
+        # Convolutional layers - now processing raw integer object IDs
         self.conv_layers = nn.Sequential(
             nn.Conv2d(input_channels, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.ReLU(),
         )
 
@@ -85,15 +85,15 @@ class VisualDQNAgent:
         # Experience replay
         self.memory = deque(maxlen=memory_size)
         
-        # Networks - input channels: walls/obstacles, goals/rewards (agent is implicitly at center)
+        # Networks - single channel input with raw object IDs
         self.q_network = VisualDQN(
-            input_channels=2,  # walls + goals (agent position is implicit)
+            input_channels=1,  # Single channel with raw object IDs
             view_size=self.view_size,
             action_size=self.action_size
         ).to(self.device)
         
         self.target_network = VisualDQN(
-            input_channels=2,
+            input_channels=1,
             view_size=self.view_size,
             action_size=self.action_size
         ).to(self.device)
@@ -117,44 +117,43 @@ class VisualDQNAgent:
     
     def get_egocentric_view(self, obs):
         """
-        Get fully observable egocentric view of the entire environment
-        Agent position is encoded implicitly by centering the coordinate system
+        Get raw grid observation with integer object IDs
+        Agent must learn object meanings through experience
         """
         try:
-            # Get the encoded grid from environment (should match view_size)
+            # Get the raw encoded grid from environment
             grid = self.env.grid.encode()  # Shape: (H, W, 3)
-            agent_pos = self.env.agent_pos
             
-            # Extract object layer
-            object_layer = grid[..., 0]  # Object types
+            # Extract the object type layer (first channel)
+            # This contains raw integer IDs: 0=empty, 2=wall, 8=goal, etc.
+            object_layer = grid[..., 0]  # Shape: (H, W)
             
-            # Create walls and goals channels
-            walls_channel = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
-            goals_channel = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
+            # Normalize the object IDs to help with CNN training
+            # Convert to float and scale to reasonable range for neural networks
+            normalized_grid = object_layer.astype(np.float32)
             
-            # Fill walls channel
-            walls_channel[object_layer == 2] = 1.0
+            # Optional: normalize to [0, 1] range if you know max object ID
+            # For now, we'll keep raw values and let the network learn
+            # You could add: normalized_grid = normalized_grid / max_object_id
             
-            # Fill goals channel  
-            goals_channel[object_layer == 8] = 1.0
+            # Add channel dimension: (1, H, W) 
+            raw_view = normalized_grid[np.newaxis, ...]
             
-            # Stack channels: (2, H, W) - Agent position is implicit from environment state
-            egocentric_view = np.stack([walls_channel, goals_channel], axis=0)
-            
-            # Convert to tensor: (2, H, W)
-            view_tensor = torch.tensor(egocentric_view, dtype=torch.float32).to(self.device)
+            # Convert to tensor: (1, H, W)
+            view_tensor = torch.tensor(raw_view, dtype=torch.float32).to(self.device)
             
             return view_tensor
             
         except Exception as e:
             print(f"Error in get_egocentric_view: {e}")
             # Return a default view in case of error
-            default_view = np.zeros((2, self.grid_size, self.grid_size), dtype=np.float32)
+            default_view = np.zeros((1, self.grid_size, self.grid_size), dtype=np.float32)
             return torch.tensor(default_view, dtype=torch.float32).to(self.device)
     
     def get_action(self, obs, epsilon=None):
         """
-        Choose action based on egocentric visual observation
+        Choose action based on raw grid observation
+        Agent must learn object meanings through trial and error
         """
         if epsilon is None:
             epsilon = self.epsilon
@@ -163,14 +162,14 @@ class VisualDQNAgent:
             return random.randrange(self.action_size)
         
         try:
-            # Get egocentric view
-            egocentric_input = self.get_egocentric_view(obs)
-            # Add batch dimension: (1, 2, H, W)
-            egocentric_input = egocentric_input.unsqueeze(0)
+            # Get raw grid view
+            raw_input = self.get_egocentric_view(obs)
+            # Add batch dimension: (1, 1, H, W)
+            raw_input = raw_input.unsqueeze(0)
             
             self.q_network.eval()
             with torch.no_grad():
-                q_values = self.q_network(egocentric_input)
+                q_values = self.q_network(raw_input)
                 
             # Track Q-values for analysis
             self.recent_q_values.append(torch.max(q_values).item())
@@ -188,7 +187,8 @@ class VisualDQNAgent:
     
     def train(self):
         """
-        Train the DQN using egocentric visual observations
+        Train the DQN using raw grid observations
+        Agent learns object meanings through reward signals
         """
         if len(self.memory) < self.batch_size:
             return None, None
@@ -197,7 +197,7 @@ class VisualDQNAgent:
             # Sample batch from memory
             batch = random.sample(self.memory, self.batch_size)
             
-            # Process egocentric views for entire batch
+            # Process raw grid views for entire batch
             current_states_list = []
             next_states_list = []
             actions = []
@@ -215,8 +215,8 @@ class VisualDQNAgent:
                 dones.append(done)
             
             # Stack tensors to create batch
-            current_states = torch.stack(current_states_list, dim=0)  # (batch_size, 2, H, W)
-            next_states = torch.stack(next_states_list, dim=0)       # (batch_size, 2, H, W)
+            current_states = torch.stack(current_states_list, dim=0)  # (batch_size, 1, H, W)
+            next_states = torch.stack(next_states_list, dim=0)       # (batch_size, 1, H, W)
             
             actions_tensor = torch.tensor(actions, dtype=torch.int64).to(self.device)
             rewards_tensor = torch.tensor(rewards, dtype=torch.float32).to(self.device)
