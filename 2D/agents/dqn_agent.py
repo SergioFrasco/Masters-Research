@@ -117,70 +117,29 @@ class VisualDQNAgent:
     
     def get_egocentric_view(self, obs):
         """
-        Extract an egocentric view centered on the agent
-        Returns a window of size view_size x view_size with agent at center
+        Get fully observable egocentric view of the entire environment
+        Agent position is encoded implicitly by centering the coordinate system
         """
         try:
-            # Get the encoded grid from environment
+            # Get the encoded grid from environment (should match view_size)
             grid = self.env.grid.encode()  # Shape: (H, W, 3)
             agent_pos = self.env.agent_pos
             
-            # Calculate the bounds of the egocentric window
-            half_view = self.view_size // 2
-            
-            # Create padded version of the grid to handle edge cases
-            pad_size = half_view + 1
-            
-            # Initialize channels for the full padded grid
-            walls_channel_full = np.zeros((self.grid_size + 2*pad_size, self.grid_size + 2*pad_size), dtype=np.float32)
-            goals_channel_full = np.zeros((self.grid_size + 2*pad_size, self.grid_size + 2*pad_size), dtype=np.float32)
-            
-            # Fill the center with actual grid data
+            # Extract object layer
             object_layer = grid[..., 0]  # Object types
             
-            # Walls channel (including boundaries as walls)
-            walls_channel_full[:pad_size, :] = 1.0  # Top boundary
-            walls_channel_full[-pad_size:, :] = 1.0  # Bottom boundary  
-            walls_channel_full[:, :pad_size] = 1.0  # Left boundary
-            walls_channel_full[:, -pad_size:] = 1.0  # Right boundary
+            # Create walls and goals channels
+            walls_channel = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
+            goals_channel = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
             
-            # Fill actual walls in the center region
-            walls_channel_full[pad_size:pad_size+self.grid_size, pad_size:pad_size+self.grid_size][object_layer == 2] = 1.0
+            # Fill walls channel
+            walls_channel[object_layer == 2] = 1.0
             
-            # Goals channel (only in the valid grid area)
-            goals_channel_full[pad_size:pad_size+self.grid_size, pad_size:pad_size+self.grid_size][object_layer == 8] = 1.0
+            # Fill goals channel  
+            goals_channel[object_layer == 8] = 1.0
             
-            # Extract egocentric window centered on agent
-            agent_x_padded = agent_pos[0] + pad_size
-            agent_y_padded = agent_pos[1] + pad_size
-            
-            # For even view_size, we need to be careful about centering
-            if self.view_size % 2 == 0:
-                # For even view_size (like 10), agent is at center-left/center-top
-                x_start = agent_x_padded - half_view
-                x_end = agent_x_padded + half_view
-                y_start = agent_y_padded - half_view  
-                y_end = agent_y_padded + half_view
-            else:
-                # For odd view_size, agent is exactly at center
-                x_start = agent_x_padded - half_view
-                x_end = agent_x_padded + half_view + 1
-                y_start = agent_y_padded - half_view  
-                y_end = agent_y_padded + half_view + 1
-            
-            # Ensure we get exactly the right size
-            walls_view = walls_channel_full[x_start:x_end, y_start:y_end]
-            goals_view = goals_channel_full[x_start:x_end, y_start:y_end]
-            
-            # Verify dimensions
-            if walls_view.shape != (self.view_size, self.view_size) or goals_view.shape != (self.view_size, self.view_size):
-                print(f"Warning: View shape mismatch. Expected ({self.view_size}, {self.view_size}), got walls: {walls_view.shape}, goals: {goals_view.shape}")
-                # Resize if necessary
-                walls_view = np.resize(walls_view, (self.view_size, self.view_size))
-                goals_view = np.resize(goals_view, (self.view_size, self.view_size))
-            
-            # Stack channels: (2, H, W) - No agent channel since agent is implicitly at center
-            egocentric_view = np.stack([walls_view, goals_view], axis=0)
+            # Stack channels: (2, H, W) - Agent position is implicit from environment state
+            egocentric_view = np.stack([walls_channel, goals_channel], axis=0)
             
             # Convert to tensor: (2, H, W)
             view_tensor = torch.tensor(egocentric_view, dtype=torch.float32).to(self.device)
@@ -190,7 +149,7 @@ class VisualDQNAgent:
         except Exception as e:
             print(f"Error in get_egocentric_view: {e}")
             # Return a default view in case of error
-            default_view = np.zeros((2, self.view_size, self.view_size), dtype=np.float32)
+            default_view = np.zeros((2, self.grid_size, self.grid_size), dtype=np.float32)
             return torch.tensor(default_view, dtype=torch.float32).to(self.device)
     
     def get_action(self, obs, epsilon=None):
