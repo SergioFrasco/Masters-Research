@@ -5,27 +5,22 @@ import os
 from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
-from agents import SuccessorAgent, ImprovedVisionOnlyAgent, VisualDQNAgent
-# from models import build_autoencoder
-from models import Autoencoder
+# Import the improved agent
+from improved_visual_dqn import ImprovedVisualDQNAgent
 from utils.plotting import generate_save_path
 import json
 import time
 import gc
-# import tensorflow as tf
 import torch
-import torch.nn as nn
-import torch.optim as optim
-
 
 # Set environment variables to prevent memory issues
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 
-class ExperimentRunner:
-    """Handles running experiments and collecting results for multiple agents"""
+class UpdatedExperimentRunner:
+    """Updated experiment runner using the improved Visual DQN agent"""
 
-    def __init__(self, env_size=10, num_seeds=5):
+    def __init__(self, env_size=10, num_seeds=3):
         self.env_size = env_size
         self.num_seeds = num_seeds
         self.results = {}
@@ -46,7 +41,7 @@ class ExperimentRunner:
                 grid[x, y] = 'E'  # End
             else:
                 # Use action arrows
-                action_symbols = {0: '↑', 1: '→', 2: '↓', 3: '←'}
+                action_symbols = {0: '.', 1: '.', 2: '.', 3: '.'}
                 grid[x, y] = action_symbols.get(action, str(i % 10))
         
         # Create matplotlib figure
@@ -75,22 +70,6 @@ class ExperimentRunner:
         ax.set_xlabel('X Position', fontsize=12)
         ax.set_ylabel('Y Position', fontsize=12)
         
-        # Add grid lines
-        ax.set_xticks(np.arange(-0.5, env_size, 1), minor=True)
-        ax.set_yticks(np.arange(-0.5, env_size, 1), minor=True)
-        ax.grid(which='minor', color='gray', linestyle='-', linewidth=0.5)
-        
-        # Add legend
-        legend_elements = [
-            plt.Rectangle((0,0),1,1, facecolor='tab:blue', label='Start (S)'),
-            plt.Rectangle((0,0),1,1, facecolor='tab:orange', label='End (E)'),
-            plt.Rectangle((0,0),1,1, facecolor='tab:green', label='Up (↑)'),
-            plt.Rectangle((0,0),1,1, facecolor='tab:red', label='Right (→)'),
-            plt.Rectangle((0,0),1,1, facecolor='tab:purple', label='Down (↓)'),
-            plt.Rectangle((0,0),1,1, facecolor='tab:brown', label='Left (←)')
-        ]
-        ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5))
-        
         plt.tight_layout()
         
         # Generate filename and save
@@ -103,10 +82,9 @@ class ExperimentRunner:
         
         print(f"Trajectory plot saved to: {save_path}")
 
-
-    def run_egocentric_visual_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
+    def run_improved_visual_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
         """
-        Run experiment with Egocentric Visual DQN agent
+        Run experiment with Improved Visual DQN agent
         """
         # Set all random seeds
         np.random.seed(seed)
@@ -124,30 +102,30 @@ class ExperimentRunner:
         
         try:
             # Create environment
-            from env import SimpleEnv  # Import your environment
             env = SimpleEnv(size=self.env_size)
             
-            # Create egocentric visual DQN agent
-            agent = VisualDQNAgent(
+            # Create improved visual DQN agent
+            agent = ImprovedVisualDQNAgent(
                 env,
-                view_size=10,          # 7x7 egocentric window
+                view_size=self.env_size,    # Full grid view
                 action_size=4,
-                learning_rate=0.0001,  # Lower learning rate for visual learning
+                learning_rate=0.0005,      # Slightly higher learning rate
                 gamma=0.99,
                 epsilon_start=1.0,
-                epsilon_end=0.01,
-                epsilon_decay=0.999,   # Slower decay for more exploration
-                memory_size=50000,     # Larger memory for visual learning
-                batch_size=32,
-                target_update_freq=1000
+                epsilon_end=0.02,          # Slightly higher minimum exploration
+                epsilon_decay=0.9995,      # Slower decay for more exploration
+                memory_size=100000,        # Larger memory
+                batch_size=64,             # Larger batch size
+                target_update_freq=500     # More frequent target updates
             )
             
             episode_rewards = []
             episode_lengths = []
             training_stats = []
+            success_rate_history = []
             
-            print(f"Starting Egocentric Visual DQN with seed {seed}")
-            print(f"Using {agent.view_size}x{agent.view_size} egocentric view")
+            print(f"Starting Improved Visual DQN with seed {seed}")
+            print(f"Enhanced features: Multi-channel input, position encoding, improved architecture")
             
             for episode in tqdm(range(episodes), desc="Training Episodes"):
                 try:
@@ -161,18 +139,19 @@ class ExperimentRunner:
                         # Record trajectory for potential debugging
                         agent_pos = tuple(env.agent_pos)
                         
-                        # Choose action based on egocentric view
+                        # Choose action
                         action = agent.get_action(obs)
                         trajectory.append((agent_pos[0], agent_pos[1], action))
                         
                         # Take action
                         next_obs, reward, done, _, _ = env.step(action)
                         
-                        # Store experience with raw observations
+                        # Store experience
                         agent.remember(obs, action, reward, next_obs, done)
                         
-                        # Train
-                        loss, avg_q = agent.train()
+                        # Train more frequently
+                        if len(agent.memory) >= agent.batch_size and episode % 1 == 0:
+                            loss, avg_q = agent.train()
                         
                         # Update
                         agent.step()
@@ -183,14 +162,19 @@ class ExperimentRunner:
                         if done:
                             break
                     
-                    # Save failure trajectories for analysis (optional)
-                    if episode >= episodes - 100 and not done:
-                        self.plot_and_save_trajectory("Egocentric Visual DQN", episode, trajectory, env.size, seed)
+                    # Save failure trajectories for analysis
+                    if episode >= episodes - 50 and not done and episode % 10 == 0:
+                        self.plot_and_save_trajectory("Improved Visual DQN", episode, trajectory, env.size, seed)
                     
                     # Decay epsilon
                     agent.decay_epsilon()
                     episode_rewards.append(total_reward)
                     episode_lengths.append(steps)
+                    
+                    # Calculate success rate
+                    if episode >= 100:
+                        recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
+                        success_rate_history.append(recent_success_rate)
                     
                     # Collect training statistics
                     if episode % 100 == 0:
@@ -200,19 +184,21 @@ class ExperimentRunner:
                             **stats
                         })
                         
-                        recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
-                        recent_avg_reward = np.mean(episode_rewards[-100:])
-                        
-                        print(f"Episode {episode}: "
-                            f"Success Rate={recent_success_rate:.2f}, "
-                            f"Avg Reward={recent_avg_reward:.2f}, "
-                            f"Epsilon={stats['epsilon']:.3f}, "
-                            f"Loss={stats['avg_loss']:.4f}, "
-                            f"Avg Q={stats['avg_q_value']:.2f}")
+                        if episode >= 100:
+                            recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
+                            recent_avg_reward = np.mean(episode_rewards[-100:])
+                            recent_avg_length = np.mean(episode_lengths[-100:])
+                            
+                            print(f"Episode {episode}: "
+                                f"Success Rate={recent_success_rate:.3f}, "
+                                f"Avg Reward={recent_avg_reward:.3f}, "
+                                f"Avg Length={recent_avg_length:.1f}, "
+                                f"Epsilon={stats['epsilon']:.4f}, "
+                                f"Loss={stats['avg_loss']:.4f}, "
+                                f"LR={stats['learning_rate']:.6f}")
                     
                     # Memory cleanup
-                    if episode % 500 == 0:
-                        import gc
+                    if episode % 1000 == 0:
                         gc.collect()
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
@@ -224,52 +210,57 @@ class ExperimentRunner:
             return {
                 "rewards": episode_rewards,
                 "lengths": episode_lengths,
+                "success_rates": success_rate_history,
                 "final_epsilon": agent.epsilon,
-                "algorithm": "Egocentric Visual DQN",
-                "training_stats": training_stats
+                "algorithm": "Improved Visual DQN",
+                "training_stats": training_stats,
+                "final_success_rate": np.mean([r > 0 for r in episode_rewards[-100:]]) if len(episode_rewards) >= 100 else 0.0
             }
         
         except Exception as e:
-            print(f"Critical error in Egocentric Visual DQN experiment: {e}")
+            print(f"Critical error in Improved Visual DQN experiment: {e}")
             import traceback
             traceback.print_exc()
             return {
                 "rewards": [],
                 "lengths": [],
+                "success_rates": [],
                 "final_epsilon": 0.0,
-                "algorithm": "Egocentric Visual DQN",
-                "error": str(e)
+                "algorithm": "Improved Visual DQN",
+                "error": str(e),
+                "final_success_rate": 0.0
             }
         
         finally:
             # Cleanup
             if agent is not None:
-                del agent.q_network
-                del agent.target_network
-                del agent.memory
-                del agent
+                try:
+                    del agent.q_network
+                    del agent.target_network
+                    del agent.memory
+                    del agent
+                except:
+                    pass
             
             if env is not None:
                 del env
             
-            import gc
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    # Updated ExperimentRunner class method
     def run_comparison_experiment(self, episodes=5000):
-        """Run comparison between all agents across multiple seeds"""
+        """Run improved agent across multiple seeds"""
         all_results = {}
         
         for seed in range(self.num_seeds):
-            print(f"\n=== Running experiments with seed {seed} ===")
+            print(f"\n=== Running improved experiments with seed {seed} ===")
 
-            # Run Egocentric DQN
-            ego_dqn_results = self.run_egocentric_visual_dqn_experiment(episodes=episodes, seed=seed)
+            # Run Improved Visual DQN
+            improved_results = self.run_improved_visual_dqn_experiment(episodes=episodes, seed=seed)
 
-            algorithms = ['Egocentric DQN']
-            results_list = [ego_dqn_results]
+            algorithms = ['Improved Visual DQN']
+            results_list = [improved_results]
             
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
@@ -277,7 +268,6 @@ class ExperimentRunner:
                 all_results[alg].append(result)
 
             # Force cleanup between seeds
-            import gc
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -286,13 +276,13 @@ class ExperimentRunner:
         return all_results
         
     def analyze_results(self, window=100):
-        """Analyze and plot comparison results"""
+        """Enhanced analysis of results"""
         if not self.results:
             print("No results to analyze. Run experiments first.")
             return
 
-        # Create comparison plots
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        # Create enhanced comparison plots
+        fig, axes = plt.subplots(2, 3, figsize=(18, 12))
 
         # Plot 1: Learning curves (rewards)
         ax1 = axes[0, 0]
@@ -339,8 +329,27 @@ class ExperimentRunner:
         ax2.legend()
         ax2.grid(True)
 
-        # Plot 3: Final performance comparison (last 100 episodes)
-        ax3 = axes[1, 0]
+        # Plot 3: Success rates over time
+        ax3 = axes[0, 2]
+        for alg_name, runs in self.results.items():
+            if 'success_rates' in runs[0]:
+                all_success_rates = np.array([run.get("success_rates", []) for run in runs])
+                if all_success_rates.size > 0:
+                    mean_success = np.mean(all_success_rates, axis=0)
+                    std_success = np.std(all_success_rates, axis=0)
+
+                    x = range(100, 100 + len(mean_success))
+                    ax3.plot(x, mean_success, label=f"{alg_name}", linewidth=2)
+                    ax3.fill_between(x, mean_success - std_success, mean_success + std_success, alpha=0.3)
+
+        ax3.set_xlabel("Episode")
+        ax3.set_ylabel("Success Rate (Last 100 episodes)")
+        ax3.set_title("Success Rate Over Time")
+        ax3.legend()
+        ax3.grid(True)
+
+        # Plot 4: Final performance comparison
+        ax4 = axes[1, 0]
         final_rewards = {}
         for alg_name, runs in self.results.items():
             final_100 = []
@@ -348,44 +357,60 @@ class ExperimentRunner:
                 final_100.extend(run["rewards"][-100:])  # Last 100 episodes
             final_rewards[alg_name] = final_100
 
-        ax3.boxplot(final_rewards.values(), labels=final_rewards.keys())
-        ax3.set_ylabel("Reward")
-        ax3.set_title("Final Performance (Last 100 Episodes)")
-        ax3.grid(True)
+        ax4.boxplot(final_rewards.values(), labels=final_rewards.keys())
+        ax4.set_ylabel("Reward")
+        ax4.set_title("Final Performance (Last 100 Episodes)")
+        ax4.grid(True)
 
-        # Plot 4: Summary statistics
-        ax4 = axes[1, 1]
+        # Plot 5: Success rate comparison
+        ax5 = axes[1, 1]
+        final_success_rates = []
+        algorithm_names = []
+        for alg_name, runs in self.results.items():
+            success_rates = [run.get("final_success_rate", 0.0) for run in runs]
+            final_success_rates.append(success_rates)
+            algorithm_names.append(alg_name)
+
+        ax5.boxplot(final_success_rates, labels=algorithm_names)
+        ax5.set_ylabel("Final Success Rate")
+        ax5.set_title("Final Success Rate Comparison")
+        ax5.grid(True)
+
+        # Plot 6: Summary statistics table
+        ax6 = axes[1, 2]
         summary_data = []
         for alg_name, runs in self.results.items():
             all_rewards = np.array([run["rewards"] for run in runs])
-            final_performance = np.mean(
-                [np.mean(run["rewards"][-100:]) for run in runs]
-            )
+            final_performance = np.mean([np.mean(run["rewards"][-100:]) for run in runs])
+            final_success_rate = np.mean([run.get("final_success_rate", 0.0) for run in runs])
             convergence_episode = self._find_convergence_episode(all_rewards, window)
+            
+            # Calculate average episode length in final 100 episodes
+            final_lengths = np.mean([np.mean(run["lengths"][-100:]) for run in runs])
 
-            summary_data.append(
-                {
-                    "Algorithm": alg_name,
-                    "Final Performance": final_performance,
-                    "Convergence Episode": convergence_episode,
-                }
-            )
+            summary_data.append({
+                "Algorithm": alg_name,
+                "Final Reward": f"{final_performance:.3f}",
+                "Success Rate": f"{final_success_rate:.3f}",
+                "Avg Length": f"{final_lengths:.1f}",
+                "Convergence": f"{convergence_episode}"
+            })
 
         summary_df = pd.DataFrame(summary_data)
-        ax4.axis("tight")
-        ax4.axis("off")
-        table = ax4.table(
+        ax6.axis("tight")
+        ax6.axis("off")
+        table = ax6.table(
             cellText=summary_df.values,
             colLabels=summary_df.columns,
             cellLoc="center",
             loc="center",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(10)
-        ax4.set_title("Summary Statistics")
+        table.set_fontsize(9)
+        ax6.set_title("Summary Statistics")
 
         plt.tight_layout()
-        save_path = generate_save_path("experiment_comparison.png")
+        save_path = generate_save_path("improved_experiment_comparison.png")
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"Comparison plot saved to: {save_path}")
 
@@ -417,7 +442,7 @@ class ExperimentRunner:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
         # Save raw results as JSON
-        results_file = generate_save_path(f"experiment_results_{timestamp}.json")
+        results_file = generate_save_path(f"improved_experiment_results_{timestamp}.json")
 
         # Convert numpy arrays to lists for JSON serialization
         json_results = {}
@@ -427,9 +452,13 @@ class ExperimentRunner:
                 json_run = {
                     "rewards": [float(r) for r in run["rewards"]],
                     "lengths": [int(l) for l in run["lengths"]],
+                    "success_rates": [float(s) for s in run.get("success_rates", [])],
                     "final_epsilon": float(run["final_epsilon"]),
+                    "final_success_rate": float(run.get("final_success_rate", 0.0)),
                     "algorithm": run["algorithm"],
                 }
+                if "training_stats" in run:
+                    json_run["training_stats"] = run["training_stats"]
                 json_results[alg_name].append(json_run)
 
         with open(results_file, "w") as f:
@@ -437,23 +466,80 @@ class ExperimentRunner:
 
         print(f"Results saved to: {results_file}")
 
+    def compare_with_baseline(self, baseline_results, window=100):
+        """Compare improved agent with baseline results"""
+        if not self.results:
+            print("No results to compare. Run experiments first.")
+            return
+            
+        # Create comparison plot
+        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        
+        # Combine baseline and improved results
+        all_results = {**baseline_results, **self.results}
+        
+        # Plot 1: Learning curves comparison
+        ax1 = axes[0]
+        colors = ['red', 'blue', 'green', 'orange']
+        for i, (alg_name, runs) in enumerate(all_results.items()):
+            all_rewards = np.array([run["rewards"] for run in runs])
+            mean_rewards = np.mean(all_rewards, axis=0)
+            std_rewards = np.std(all_rewards, axis=0)
+
+            # Rolling average
+            mean_smooth = pd.Series(mean_rewards).rolling(window).mean()
+            std_smooth = pd.Series(std_rewards).rolling(window).mean()
+
+            x = range(len(mean_smooth))
+            color = colors[i % len(colors)]
+            ax1.plot(x, mean_smooth, label=f"{alg_name}", linewidth=2, color=color)
+            ax1.fill_between(
+                x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3, color=color
+            )
+
+        ax1.set_xlabel("Episode")
+        ax1.set_ylabel("Average Reward")
+        ax1.set_title("Baseline vs Improved Agent Comparison")
+        ax1.legend()
+        ax1.grid(True)
+        
+        # Plot 2: Final success rate comparison
+        ax2 = axes[1]
+        final_success_rates = []
+        algorithm_names = []
+        for alg_name, runs in all_results.items():
+            success_rates = [run.get("final_success_rate", np.mean([r > 0 for r in run["rewards"][-100:]])) for run in runs]
+            final_success_rates.append(success_rates)
+            algorithm_names.append(alg_name)
+
+        ax2.boxplot(final_success_rates, labels=algorithm_names)
+        ax2.set_ylabel("Final Success Rate")
+        ax2.set_title("Final Success Rate Comparison")
+        ax2.grid(True)
+        plt.xticks(rotation=45)
+        
+        plt.tight_layout()
+        save_path = generate_save_path("baseline_vs_improved_comparison.png")
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        print(f"Baseline vs Improved comparison saved to: {save_path}")
+
 
 def main():
-    """Run the experiment comparison"""
-    print("Starting baseline comparison experiment...")
+    """Run the improved experiment"""
+    print("Starting improved Visual DQN experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=1)
+    runner = UpdatedExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=10001)
+    results = runner.run_comparison_experiment(episodes=7001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
-    print("\nExperiment Summary:")
+    print("\nImproved Experiment Summary:")
     print(summary)
 
-    print("\nExperiment completed! Check the results/ folder for plots and data.")
+    print("\nImproved experiment completed! Check the results/ folder for plots and data.")
 
 
 if __name__ == "__main__":
