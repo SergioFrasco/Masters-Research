@@ -6,7 +6,7 @@ from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
 # Import the improved agent
-from improved_visual_dqn import ImprovedVisualDQNAgent
+from agents import ImprovedVisualDQNAgent
 from utils.plotting import generate_save_path
 import json
 import time
