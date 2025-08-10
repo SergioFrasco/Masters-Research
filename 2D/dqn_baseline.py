@@ -529,7 +529,7 @@ def main():
     print("Starting improved Visual DQN experiment...")
 
     # Initialize experiment runner
-    runner = UpdatedExperimentRunner(env_size=10, num_seeds=3)
+    runner = UpdatedExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
     results = runner.run_comparison_experiment(episodes=7001)
