@@ -1,0 +1,14 @@
+{
+  "Egocentric DQN": [
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.998,
+      "algorithm": "Egocentric Visual DQN"
+    }
+  ]
+}

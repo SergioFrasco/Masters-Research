@@ -1,0 +1,194 @@
+{
+  "Q-Learning": [
+    {
+      "rewards": [
+        0.96625
+      ],
+      "lengths": [
+        15
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Q-Learning"
+    },
+    {
+      "rewards": [
+        0.93475
+      ],
+      "lengths": [
+        29
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Q-Learning"
+    },
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Q-Learning"
+    }
+  ],
+  "DQN": [
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "DQN"
+    },
+    {
+      "rewards": [
+        0.739
+      ],
+      "lengths": [
+        116
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "DQN"
+    },
+    {
+      "rewards": [
+        0.92125
+      ],
+      "lengths": [
+        35
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "DQN"
+    }
+  ],
+  "SARSA SR": [
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "SARSA SR"
+    },
+    {
+      "rewards": [
+        0.973
+      ],
+      "lengths": [
+        12
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "SARSA SR"
+    },
+    {
+      "rewards": [
+        0.92125
+      ],
+      "lengths": [
+        35
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "SARSA SR"
+    }
+  ],
+  "Masters Successor": [
+    {
+      "rewards": [
+        0.93475
+      ],
+      "lengths": [
+        29
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Masters Successor"
+    },
+    {
+      "rewards": [
+        0.874
+      ],
+      "lengths": [
+        56
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Masters Successor"
+    },
+    {
+      "rewards": [
+        0.748
+      ],
+      "lengths": [
+        112
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Masters Successor"
+    }
+  ],
+  "Honours Successor": [
+    {
+      "rewards": [
+        0.75025
+      ],
+      "lengths": [
+        111
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Honours Successor"
+    },
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Honours Successor"
+    },
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Honours Successor"
+    }
+  ],
+  "Vision-Only": [
+    {
+      "rewards": [
+        0.8155
+      ],
+      "lengths": [
+        82
+      ],
+      "final_epsilon": 0.995,
+      "algorithm": "Vision-Only"
+    },
+    {
+      "rewards": [
+        0.9077500000000001
+      ],
+      "lengths": [
+        41
+      ],
+      "final_epsilon": 0.995,
+      "algorithm": "Vision-Only"
+    },
+    {
+      "rewards": [
+        0.6805
+      ],
+      "lengths": [
+        142
+      ],
+      "final_epsilon": 0.995,
+      "algorithm": "Vision-Only"
+    }
+  ]
+}
