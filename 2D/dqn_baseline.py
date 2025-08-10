@@ -6,7 +6,7 @@ from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
 # Import the improved agent
-from agents import ImprovedVisualDQNAgent
+from agents import DQNAgent
 from utils.plotting import generate_save_path
 import json
 import time
@@ -82,172 +82,62 @@ class UpdatedExperimentRunner:
         
         print(f"Trajectory plot saved to: {save_path}")
 
-    def run_improved_visual_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
-        """
-        Run experiment with Improved Visual DQN agent
-        """
-        # Set all random seeds
+
+    def run_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run DQN baseline experiment using PyTorch"""
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
-        
-        # Set deterministic behavior
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-        
-        env = None
-        agent = None
-        
-        try:
-            # Create environment
-            env = SimpleEnv(size=self.env_size)
-            
-            # Create improved visual DQN agent
-            agent = ImprovedVisualDQNAgent(
-                env,
-                view_size=self.env_size,    # Full grid view
-                action_size=4,
-                learning_rate=0.0005,      # Slightly higher learning rate
-                gamma=0.99,
-                epsilon_start=1.0,
-                epsilon_end=0.02,          # Slightly higher minimum exploration
-                epsilon_decay=0.9995,      # Slower decay for more exploration
-                memory_size=100000,        # Larger memory
-                batch_size=64,             # Larger batch size
-                target_update_freq=500     # More frequent target updates
-            )
-            
-            episode_rewards = []
-            episode_lengths = []
-            training_stats = []
-            success_rate_history = []
-            
-            print(f"Starting Improved Visual DQN with seed {seed}")
-            print(f"Enhanced features: Multi-channel input, position encoding, improved architecture")
-            
-            for episode in tqdm(range(episodes), desc="Training Episodes"):
-                try:
-                    obs = env.reset()
-                    agent.reset_episode()
-                    total_reward = 0
-                    steps = 0
-                    trajectory = []
-                    
-                    for step in range(max_steps):
-                        # Record trajectory for potential debugging
-                        agent_pos = tuple(env.agent_pos)
-                        
-                        # Choose action
-                        action = agent.get_action(obs)
-                        trajectory.append((agent_pos[0], agent_pos[1], action))
-                        
-                        # Take action
-                        next_obs, reward, done, _, _ = env.step(action)
-                        
-                        # Store experience
-                        agent.remember(obs, action, reward, next_obs, done)
-                        
-                        # Train more frequently
-                        if len(agent.memory) >= agent.batch_size and episode % 1 == 0:
-                            loss, avg_q = agent.train()
-                        
-                        # Update
-                        agent.step()
-                        total_reward += reward
-                        steps += 1
-                        obs = next_obs
-                        
-                        if done:
-                            break
-                    
-                    # Save failure trajectories for analysis
-                    if episode >= episodes - 50 and not done and episode % 10 == 0:
-                        self.plot_and_save_trajectory("Improved Visual DQN", episode, trajectory, env.size, seed)
-                    
-                    # Decay epsilon
-                    agent.decay_epsilon()
-                    episode_rewards.append(total_reward)
-                    episode_lengths.append(steps)
-                    
-                    # Calculate success rate
-                    if episode >= 100:
-                        recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
-                        success_rate_history.append(recent_success_rate)
-                    
-                    # Collect training statistics
-                    if episode % 100 == 0:
-                        stats = agent.get_stats()
-                        training_stats.append({
-                            'episode': episode,
-                            **stats
-                        })
-                        
-                        if episode >= 100:
-                            recent_success_rate = np.mean([r > 0 for r in episode_rewards[-100:]])
-                            recent_avg_reward = np.mean(episode_rewards[-100:])
-                            recent_avg_length = np.mean(episode_lengths[-100:])
-                            
-                            print(f"Episode {episode}: "
-                                f"Success Rate={recent_success_rate:.3f}, "
-                                f"Avg Reward={recent_avg_reward:.3f}, "
-                                f"Avg Length={recent_avg_length:.1f}, "
-                                f"Epsilon={stats['epsilon']:.4f}, "
-                                f"Loss={stats['avg_loss']:.4f}, "
-                                f"LR={stats['learning_rate']:.6f}")
-                    
-                    # Memory cleanup
-                    if episode % 1000 == 0:
-                        gc.collect()
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                    
-                except Exception as e:
-                    print(f"Error in episode {episode}: {e}")
-                    continue
-            
-            return {
-                "rewards": episode_rewards,
-                "lengths": episode_lengths,
-                "success_rates": success_rate_history,
-                "final_epsilon": agent.epsilon,
-                "algorithm": "Improved Visual DQN",
-                "training_stats": training_stats,
-                "final_success_rate": np.mean([r > 0 for r in episode_rewards[-100:]]) if len(episode_rewards) >= 100 else 0.0
-            }
-        
-        except Exception as e:
-            print(f"Critical error in Improved Visual DQN experiment: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "rewards": [],
-                "lengths": [],
-                "success_rates": [],
-                "final_epsilon": 0.0,
-                "algorithm": "Improved Visual DQN",
-                "error": str(e),
-                "final_success_rate": 0.0
-            }
-        
-        finally:
-            # Cleanup
-            if agent is not None:
-                try:
-                    del agent.q_network
-                    del agent.target_network
-                    del agent.memory
-                    del agent
-                except:
-                    pass
-            
-            if env is not None:
-                del env
-            
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+
+        env = SimpleEnv(size=self.env_size)
+        agent = DQNAgent(env, 
+                        learning_rate=0.001,
+                        gamma=0.95,
+                        epsilon_start=1.0,
+                        epsilon_end=0.01,
+                        epsilon_decay=0.9995,
+                        memory_size=10000,
+                        batch_size=32,
+                        target_update_freq=100)
+
+        episode_rewards = []
+        episode_lengths = []
+
+        for episode in tqdm(range(episodes), desc=f"DQN (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
+
+            current_state = agent.get_state_vector(obs)
+
+            for step in range(max_steps):
+                action = agent.get_action(current_state)
+                obs, reward, done, _, _ = env.step(action)
+                next_state = agent.get_state_vector(obs)
+
+                agent.remember(current_state, action, reward, next_state, done)
+
+                if len(agent.memory) >= agent.batch_size:
+                    agent.replay()
+
+                total_reward += reward
+                steps += 1
+                current_state = next_state
+
+                if done:
+                    break
+
+            agent.decay_epsilon()
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": agent.epsilon,
+            "algorithm": "DQN",
+        }
 
     def run_comparison_experiment(self, episodes=5000):
         """Run improved agent across multiple seeds"""
@@ -257,7 +147,7 @@ class UpdatedExperimentRunner:
             print(f"\n=== Running improved experiments with seed {seed} ===")
 
             # Run Improved Visual DQN
-            improved_results = self.run_improved_visual_dqn_experiment(episodes=episodes, seed=seed)
+            improved_results = self.run_dqn_experiment(episodes=episodes, seed=seed)
 
             algorithms = ['Improved Visual DQN']
             results_list = [improved_results]
@@ -532,7 +422,7 @@ def main():
     runner = UpdatedExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=7001)
+    results = runner.run_comparison_experiment(episodes=1)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
