@@ -5,7 +5,7 @@ import os
 from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
-from agents import SuccessorAgent, ImprovedVisionOnlyAgent, VisionDQNAgent
+from agents import SuccessorAgent, ImprovedVisionOnlyAgent, DQNAgent
 # from models import build_autoencoder
 from models import Autoencoder
 from utils.plotting import generate_save_path
@@ -149,170 +149,174 @@ class ExperimentRunner:
             "algorithm": "Q-Learning",
         }
 
-    def run_vision_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
-        """
-        Method version - fits into your existing experimental framework
-        """
-        # Set all random seeds
+    def run_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
+        """Run DQN baseline experiment using PyTorch with vision model reward map integration"""
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
 
-        # Set deterministic behavior
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        env = SimpleEnv(size=self.env_size)
+        agent = DQNAgent(env, 
+                        learning_rate=0.001,
+                        gamma=0.95,
+                        epsilon_start=1.0,
+                        epsilon_end=0.01,
+                        epsilon_decay=0.9995,
+                        memory_size=10000,
+                        batch_size=32,
+                        target_update_freq=100)
 
-        # Force CPU usage
+        # Setup the vision model
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        env = None
-        agent = None
-        
-        try:
-            # Create environment
-            env = SimpleEnv(size=self.env_size)
-            
-            # Create agent
-            agent = VisionDQNAgent(
-                env, 
-                action_size=4,  
-                learning_rate=0.0001,
-                gamma=0.99,
-                epsilon_start=1.0,
-                epsilon_end=0.05,
-                epsilon_decay=0.999,
-                memory_size=50000,
-                batch_size=32,
-                target_update_freq=1000
-            )
-            
-            # Force Cuda usage
-            agent.device = device
-            agent.vision_model = agent.vision_model.to(device)
-            agent.q_network = agent.q_network.to(device)
-            agent.target_network = agent.target_network.to(device)
+        input_shape = (env.size, env.size, 1)
+        ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+        optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
+        loss_fn = nn.MSELoss()
 
-            episode_rewards = []
-            episode_lengths = []
-            training_stats = []
+        episode_rewards = []
+        episode_lengths = []
 
-            for episode in tqdm(range(episodes), desc=f"Hybrid Vision-DQN (seed {seed})"):
-                try:
-                    obs = env.reset()
-                    agent.reset_episode()
-                    total_reward = 0
-                    steps = 0
-                    trajectory = []
 
-                    # Get initial state - now it's engineered features!
-                    predicted_rewards = agent.predict_reward_locations(obs)
-                    current_state = agent.extract_engineered_features(obs, predicted_rewards)
+        for episode in tqdm(range(episodes), desc=f"DQN (seed {seed})"):
+            obs = env.reset()
+            total_reward = 0
+            steps = 0
 
-                    for step in range(max_steps):
-                        # Record trajectory
-                        agent_pos = tuple(env.agent_pos)
-                        
-                        # Get action from features
-                        action = agent.get_action(current_state)
-                        trajectory.append((agent_pos[0], agent_pos[1], action))
-                        
-                        # Environment step
-                        obs, reward, done, _, _ = env.step(action)
-                        
-                        # Train vision model (bootstrapped learning)
-                        agent_position = tuple(env.agent_pos)
-                        vision_loss = agent.train_vision_model(obs, agent_position, done, step, max_steps)
-                        
-                        # Get next state features
-                        predicted_rewards = agent.predict_reward_locations(obs)
-                        next_state = agent.extract_engineered_features(obs, predicted_rewards)
-                        
-                        # Store experience (features, not raw observation)
-                        agent.remember(current_state, action, reward, next_state, done)
-                        
-                        # Train DQN
-                        loss, avg_q = agent.train_dqn()
-                        
-                        # Update
-                        agent.step()
-                        total_reward += reward
-                        steps += 1
-                        current_state = next_state
-                        
-                        if done:
-                            break
+            # Reset for new episode - reset
+            agent.true_reward_map = np.zeros((env.size, env.size))
+            agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
 
-                    # Save failure trajectories
-                    if episode >= episodes - 100 and not done:
-                        self.plot_and_save_trajectory("Hybrid Vision-DQN", episode, trajectory, env.size, seed)
+            # Encode initial observation grid for vision model input
+            grid = env.grid.encode()
+            normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)
+            object_layer = grid[..., 0]
+            normalized_grid[object_layer == 2] = 0.0  # Wall
+            normalized_grid[object_layer == 1] = 0.0  # Open space
+            normalized_grid[object_layer == 8] = 1.0  # Reward / Goal
+            input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # Add batch & channel dims
 
-                    # Episode cleanup
-                    agent.decay_epsilon()
-                    episode_rewards.append(total_reward)
-                    episode_lengths.append(steps)
+            # Initial predicted reward map from AE (no grad)
+            with torch.no_grad():
+                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                predicted_reward_map_tensor = ae_model(ae_input_tensor)
+                predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
+
+            # Get initial state vector using predicted reward map
+            current_state = agent.get_state_vector(obs, predicted_reward_map=predicted_reward_map_2d)
+
+            for step in range(max_steps):
+                # Select action from DQN using predicted reward info
+                action = agent.get_action(current_state)
+
+                # Take action in environment
+                obs, reward, done, _, _ = env.step(action)
+
+                # Encode new observation for vision model input
+                grid = env.grid.encode()
+                normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)
+                object_layer = grid[..., 0]
+                normalized_grid[object_layer == 2] = 0.0
+                normalized_grid[object_layer == 1] = 0.0
+                normalized_grid[object_layer == 8] = 1.0
+                input_grid = normalized_grid[np.newaxis, ..., np.newaxis]
+
+                # Predict reward map for next observation
+                with torch.no_grad():
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)
+                    predicted_reward_map_2d_next = predicted_reward_map_tensor.squeeze().cpu().numpy()
+
+                # Get next state vector using predicted reward map
+                next_state = agent.get_state_vector(obs, predicted_reward_map=predicted_reward_map_2d_next)
+
+                # ----------Vision Model Training -----------------
+                # Update the agent's true_reward_map based on current observation
+                agent_position = tuple(env.agent_pos)
+
+                # Get the current environment grid
+                grid = env.grid.encode()
+                normalized_grid = np.zeros_like(
+                    grid[..., 0], dtype=np.float32
+                )  # Shape: (H, W)
+
+                # Setting up input for the AE to obtain it's prediction of the space
+                object_layer = grid[..., 0]
+                normalized_grid[object_layer == 2] = 0.0  # Wall
+                normalized_grid[object_layer == 1] = 0.0  # Open space
+                normalized_grid[object_layer == 8] = 1.0  # Reward (e.g. goal object)
+
+                # Reshape for the autoencoder (add batch and channel dims)
+                input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
+
+                # Get the predicted reward map from the AE
+                with torch.no_grad():
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
+                    predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
+
+                # Mark position as visited
+                agent.visited_positions[agent_position[0], agent_position[1]] = True
+
+                # Learning Signal
+                if done and step < max_steps:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 1
+                else:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 0
+
+                # Update the rest of the true_reward_map with AE predictions
+                for y in range(agent.true_reward_map.shape[0]):
+                    for x in range(agent.true_reward_map.shape[1]):
+                        if not agent.visited_positions[y, x]:
+                            predicted_value = predicted_reward_map_2d[y, x]
+                            if predicted_value > 0.001:
+                                agent.true_reward_map[y, x] = predicted_value
+                            else:
+                                agent.true_reward_map[y, x] = 0
+
+                # Train the vision model
+                trigger_ae_training = False
+                train_vision_threshold = 0.1
+                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
+                    trigger_ae_training = True
+
+                if trigger_ae_training:
+                    target_tensor = torch.tensor(agent.true_reward_map[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+
+                    ae_model.train()
+                    optimizer.zero_grad()
+                    output = ae_model(ae_input_tensor)
+                    loss = loss_fn(output, target_tensor)
+                    loss.backward()
+                    optimizer.step()
                     
-                    # Statistics
-                    if episode % 100 == 0:
-                        stats = agent.get_stats()
-                        training_stats.append({
-                            'episode': episode,
-                            **stats
-                        })
-                        
-                        print(f"Episode {episode}: "
-                            f"Reward={total_reward:.2f}, "
-                            f"Steps={steps}, "
-                            f"Epsilon={stats['epsilon']:.3f}, "
-                            f"DQN Loss={stats['avg_dqn_loss']:.4f}, "
-                            f"Vision Loss={stats['avg_vision_loss']:.4f}")
-                    
-                    # Memory cleanup
-                    if episode % 500 == 0:
-                        gc.collect()
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
+                    step_loss = loss.item()
 
-                except Exception as e:
-                    print(f"Error in episode {episode}: {e}")
-                    continue
+                # Store experience and train DQN
+                agent.remember(current_state, action, reward, next_state, done)
 
-            return {
-                "rewards": episode_rewards,
-                "lengths": episode_lengths,
-                "final_epsilon": agent.epsilon,
-                "algorithm": "Hybrid Vision-DQN",
-                "training_stats": training_stats
-            }
+                if len(agent.memory) >= agent.batch_size:
+                    agent.replay()
 
-        except Exception as e:
-            print(f"Critical error in Hybrid Vision-DQN experiment: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                "rewards": [],
-                "lengths": [],
-                "final_epsilon": 0.0,
-                "algorithm": "Hybrid Vision-DQN",
-                "error": str(e)
-            }
-            
-        finally:
-            # Cleanup
-            if agent is not None:
-                del agent.vision_model
-                del agent.q_network
-                del agent.target_network
-                del agent.memory
-                del agent
-            
-            if env is not None:
-                del env
-            
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                total_reward += reward
+                steps += 1
+                current_state = next_state
+                predicted_reward_map_2d = predicted_reward_map_2d_next  # Update current prediction
+
+                if done:
+                    break
+
+            agent.decay_epsilon()
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": agent.epsilon,
+            "algorithm": "DQN",
+        }
 
 
     def run_honours_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
@@ -753,29 +757,29 @@ class ExperimentRunner:
         for seed in range(self.num_seeds):
             print(f"\n=== Running experiments with seed {seed} ===")
             
-            # # Run Q-learning
-            # qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
+            # Run Q-learning
+            qlearning_results = self.run_qlearning_experiment(episodes=episodes, seed=seed)
             
             # Run DQN
-            dqn_results = self.run_vision_dqn_experiment(episodes=episodes, seed=seed)
+            dqn_results = self.run_dqn_experiment(episodes=episodes, seed=seed)
             
-            # # Run SARSA SR
-            # sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
+            # Run SARSA SR
+            sarsa_sr_results = self.run_sarsa_sr_experiment(episodes=episodes, seed=seed)
 
-            # # Run Honours successor
-            # honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
+            # Run Honours successor
+            honours_results = self.run_honours_successor_experiment(episodes=episodes, seed=seed)
             
-            # # Run Masters successor
-            # successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
+            # Run Masters successor
+            successor_results = self.run_successor_experiment(episodes=episodes, seed=seed)
             
-            # # Run Vision-Only agent
-            # vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
+            # Run Vision-Only agent
+            vision_results = self.run_vision_only_experiment(episodes=episodes, seed=seed)
             
             # Store results
-            # algorithms = ['Q-Learning', 'DQN', 'SARSA SR', 'Masters Successor', 'Honours Successor', 'Vision-Only']
-            algorithms = ['DQN']  # For now, only DQN is run
-            # results_list = [qlearning_results, dqn_results, sarsa_sr_results, successor_results, honours_results, vision_results]
-            results_list = [dqn_results]  # For now, only DQN is run
+            algorithms = ['Q-Learning', 'DQN', 'SARSA SR', 'Masters Successor', 'Honours Successor', 'Vision-Only']
+            # algorithms = ['DQN']  # For now, only DQN is run
+            results_list = [qlearning_results, dqn_results, sarsa_sr_results, successor_results, honours_results, vision_results]
+            # results_list = [dqn_results]  # For now, only DQN is run
             
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
@@ -948,10 +952,10 @@ def main():
     print("Starting baseline comparison experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=1)
+    runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5001)
+    results = runner.run_comparison_experiment(episodes=1)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
