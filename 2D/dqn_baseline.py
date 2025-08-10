@@ -7,11 +7,14 @@ from tqdm import tqdm
 from env import SimpleEnv
 # Import the improved agent
 from agents import DQNAgent
+from models import Autoencoder
 from utils.plotting import generate_save_path
 import json
 import time
 import gc
 import torch
+import torch.nn as nn
+import torch.optim as optim
 
 # Set environment variables to prevent memory issues
 os.environ['OMP_NUM_THREADS'] = '1'
@@ -84,7 +87,7 @@ class UpdatedExperimentRunner:
 
 
     def run_dqn_experiment(self, episodes=5000, max_steps=200, seed=20):
-        """Run DQN baseline experiment using PyTorch"""
+        """Run DQN baseline experiment using PyTorch with vision model reward map integration"""
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
@@ -101,21 +104,146 @@ class UpdatedExperimentRunner:
                         batch_size=32,
                         target_update_freq=100)
 
+        # Setup the vision model
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        input_shape = (env.size, env.size, 1)
+        ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+        optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
+        loss_fn = nn.MSELoss()
+
         episode_rewards = []
         episode_lengths = []
+
 
         for episode in tqdm(range(episodes), desc=f"DQN (seed {seed})"):
             obs = env.reset()
             total_reward = 0
             steps = 0
 
-            current_state = agent.get_state_vector(obs)
+            # Reset for new episode - reset
+            agent.true_reward_map = np.zeros((env.size, env.size))
+            agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
+
+            # Encode initial observation grid for vision model input
+            grid = env.grid.encode()
+            normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)
+            object_layer = grid[..., 0]
+            normalized_grid[object_layer == 2] = 0.0  # Wall
+            normalized_grid[object_layer == 1] = 0.0  # Open space
+            normalized_grid[object_layer == 8] = 1.0  # Reward / Goal
+            input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # Add batch & channel dims
+
+            # Initial predicted reward map from AE (no grad)
+            with torch.no_grad():
+                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                predicted_reward_map_tensor = ae_model(ae_input_tensor)
+                predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
+
+            # Get initial state vector using predicted reward map
+            current_state = agent.get_state_vector(obs, predicted_reward_map=predicted_reward_map_2d)
 
             for step in range(max_steps):
+                # Select action from DQN using predicted reward info
                 action = agent.get_action(current_state)
-                obs, reward, done, _, _ = env.step(action)
-                next_state = agent.get_state_vector(obs)
 
+                # Take action in environment
+                obs, reward, done, _, _ = env.step(action)
+
+                # Encode new observation for vision model input
+                grid = env.grid.encode()
+                normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)
+                object_layer = grid[..., 0]
+                normalized_grid[object_layer == 2] = 0.0
+                normalized_grid[object_layer == 1] = 0.0
+                normalized_grid[object_layer == 8] = 1.0
+                input_grid = normalized_grid[np.newaxis, ..., np.newaxis]
+
+                # Predict reward map for next observation
+                with torch.no_grad():
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)
+                    predicted_reward_map_2d_next = predicted_reward_map_tensor.squeeze().cpu().numpy()
+
+                # Get next state vector using predicted reward map
+                next_state = agent.get_state_vector(obs, predicted_reward_map=predicted_reward_map_2d_next)
+
+                # ----------Vision Model Training -----------------
+                # Update the agent's true_reward_map based on current observation
+                agent_position = tuple(env.agent_pos)
+
+                # Get the current environment grid
+                grid = env.grid.encode()
+                normalized_grid = np.zeros_like(
+                    grid[..., 0], dtype=np.float32
+                )  # Shape: (H, W)
+
+                # Setting up input for the AE to obtain it's prediction of the space
+                object_layer = grid[..., 0]
+                normalized_grid[object_layer == 2] = 0.0  # Wall
+                normalized_grid[object_layer == 1] = 0.0  # Open space
+                normalized_grid[object_layer == 8] = 1.0  # Reward (e.g. goal object)
+
+                # Reshape for the autoencoder (add batch and channel dims)
+                input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
+
+                # Get the predicted reward map from the AE
+                with torch.no_grad():
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
+                    predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
+
+                # Mark position as visited
+                agent.visited_positions[agent_position[0], agent_position[1]] = True
+
+                # Learning Signal
+                if done and step < max_steps:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 1
+                else:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 0
+
+                # Update the rest of the true_reward_map with AE predictions
+                for y in range(agent.true_reward_map.shape[0]):
+                    for x in range(agent.true_reward_map.shape[1]):
+                        if not agent.visited_positions[y, x]:
+                            predicted_value = predicted_reward_map_2d[y, x]
+                            if predicted_value > 0.001:
+                                agent.true_reward_map[y, x] = predicted_value
+                            else:
+                                agent.true_reward_map[y, x] = 0
+
+                # Train the vision model
+                trigger_ae_training = False
+                train_vision_threshold = 0.1
+                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
+                    trigger_ae_training = True
+
+                if trigger_ae_training:
+                    target_tensor = torch.tensor(agent.true_reward_map[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+
+                    ae_model.train()
+                    optimizer.zero_grad()
+                    output = ae_model(ae_input_tensor)
+                    loss = loss_fn(output, target_tensor)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    step_loss = loss.item()
+
+
+                agent.reward_maps.fill(0)  # Reset all maps to zero
+
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        curr_reward = agent.true_reward_map[y, x]
+                        idx = y * agent.grid_size + x
+                        reward_threshold = 0.5
+                        if curr_reward > reward_threshold:
+                            agent.reward_maps[idx, y, x] = 1
+                        else:
+                            agent.reward_maps[idx, y, x] = 0
+
+                # Store experience and train DQN
                 agent.remember(current_state, action, reward, next_state, done)
 
                 if len(agent.memory) >= agent.batch_size:
@@ -124,6 +252,7 @@ class UpdatedExperimentRunner:
                 total_reward += reward
                 steps += 1
                 current_state = next_state
+                predicted_reward_map_2d = predicted_reward_map_2d_next  # Update current prediction
 
                 if done:
                     break
@@ -138,6 +267,7 @@ class UpdatedExperimentRunner:
             "final_epsilon": agent.epsilon,
             "algorithm": "DQN",
         }
+
 
     def run_comparison_experiment(self, episodes=5000):
         """Run improved agent across multiple seeds"""

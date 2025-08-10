@@ -457,7 +457,7 @@ class ExperimentRunner:
             steps = 0
             trajectory = []  # Track trajectory for failure analysis
 
-            # Reset for new episode (from your code)
+            # Reset for new episode 
             agent.true_reward_map = np.zeros((env.size, env.size))
             agent.wvf = np.zeros(
                 (agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32

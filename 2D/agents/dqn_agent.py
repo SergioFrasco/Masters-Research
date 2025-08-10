@@ -52,31 +52,78 @@ class DQNAgent:
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.learning_rate)
         self.loss_fn = nn.MSELoss()
 
+        # Extra ones added to train the vision model
+        # Initialize the true map to track discovered reward locations and predictions
+        self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
+        self.true_reward_map_explored = np.zeros((self.grid_size, self.grid_size), dtype=bool)
+
+        # Individual Reward maps that are composed with the SR
+        # Initialize individual reward maps: one per state
+        self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
+
+        # Track states we have visited to inform our map updates correctly
+        self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
+
         self.training_step = 0
 
-    # Keep get_state_vector, _find_goal_position, get_action, remember, decay_epsilon same (just make sure get_action uses torch below)
-    def get_state_vector(self, obs=None):
+    import numpy as np
+
+    def predicted_goal_from_reward_map(self, predicted_reward_map):
+        """
+        Given a 2D reward map (numpy array), returns the (goal_x, goal_y) coordinates
+        of the maximum predicted reward location.
+        """
+        max_idx = np.unravel_index(np.argmax(predicted_reward_map), predicted_reward_map.shape)
+        goal_y, goal_x = max_idx  # Usually numpy is (row, col) = (y, x)
+        return goal_x, goal_y
+
+    # Older, perfect knowledge
+    # def get_state_vector(self, obs=None):
+    #     """
+    #     Convert environment state to state vector.
+    #     Returns: [agent_x, agent_y, agent_direction, goal_x, goal_y]
+    #     """
+    #     # Get agent position and direction
+    #     agent_x, agent_y = self.env.agent_pos
+    #     agent_dir = self.env.agent_dir
+        
+    #     # Find goal position
+    #     goal_x, goal_y = self._find_goal_position()
+        
+    #     # Normalize positions to [0, 1] range
+    #     state = np.array([
+    #         agent_x / (self.grid_size - 1),
+    #         agent_y / (self.grid_size - 1),
+    #         agent_dir / 3.0,  # Direction is 0-3, normalize to [0, 1]
+    #         goal_x / (self.grid_size - 1),
+    #         goal_y / (self.grid_size - 1)
+    #     ], dtype=np.float32)
+        
+    #     return state
+    
+    def get_state_vector(self, obs=None, predicted_reward_map=None):
         """
         Convert environment state to state vector.
-        Returns: [agent_x, agent_y, agent_direction, goal_x, goal_y]
+        If predicted_reward_map is given, extract goal from it.
         """
-        # Get agent position and direction
         agent_x, agent_y = self.env.agent_pos
         agent_dir = self.env.agent_dir
-        
-        # Find goal position
-        goal_x, goal_y = self._find_goal_position()
-        
-        # Normalize positions to [0, 1] range
+
+        if predicted_reward_map is not None:
+            goal_x, goal_y = self.predicted_goal_from_reward_map(predicted_reward_map)
+        else:
+            goal_x, goal_y = self.grid_size // 2, self.grid_size // 2 #return center as fallback
+
         state = np.array([
             agent_x / (self.grid_size - 1),
             agent_y / (self.grid_size - 1),
-            agent_dir / 3.0,  # Direction is 0-3, normalize to [0, 1]
+            agent_dir / 3.0,
             goal_x / (self.grid_size - 1),
             goal_y / (self.grid_size - 1)
         ], dtype=np.float32)
-        
+
         return state
+
     
     def _find_goal_position(self):
         """Find the goal position in the current environment."""
