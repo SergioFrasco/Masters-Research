@@ -55,6 +55,41 @@ class DQNAgent:
         self.training_step = 0
 
     # Keep get_state_vector, _find_goal_position, get_action, remember, decay_epsilon same (just make sure get_action uses torch below)
+    def get_state_vector(self, obs=None):
+        """
+        Convert environment state to state vector.
+        Returns: [agent_x, agent_y, agent_direction, goal_x, goal_y]
+        """
+        # Get agent position and direction
+        agent_x, agent_y = self.env.agent_pos
+        agent_dir = self.env.agent_dir
+        
+        # Find goal position
+        goal_x, goal_y = self._find_goal_position()
+        
+        # Normalize positions to [0, 1] range
+        state = np.array([
+            agent_x / (self.grid_size - 1),
+            agent_y / (self.grid_size - 1),
+            agent_dir / 3.0,  # Direction is 0-3, normalize to [0, 1]
+            goal_x / (self.grid_size - 1),
+            goal_y / (self.grid_size - 1)
+        ], dtype=np.float32)
+        
+        return state
+    
+    def _find_goal_position(self):
+        """Find the goal position in the current environment."""
+        grid = self.env.grid.encode()
+        object_layer = grid[..., 0]
+        
+        # Find where goal (object type 8) is located
+        goal_positions = np.where(object_layer == 8)
+        if len(goal_positions[0]) > 0:
+            return goal_positions[1][0], goal_positions[0][0]  # x, y
+        else:
+            # If no goal found, return center as fallback
+            return self.grid_size // 2, self.grid_size // 2
 
     def get_action(self, state, epsilon=None):
         if epsilon is None:
@@ -68,6 +103,10 @@ class DQNAgent:
                 q_values = self.q_network(state_tensor)
             self.q_network.train()
             return q_values.argmax(dim=1).item()
+    
+    def remember(self, state, action, reward, next_state, done):
+        """Store experience in replay buffer."""
+        self.memory.append((state, action, reward, next_state, done))
 
     def replay(self):
         if len(self.memory) < self.batch_size:
@@ -100,6 +139,11 @@ class DQNAgent:
 
     def update_target_network(self):
         self.target_network.load_state_dict(self.q_network.state_dict())
+
+    def decay_epsilon(self):
+        """Decay epsilon for exploration."""
+        if self.epsilon > self.epsilon_end:
+            self.epsilon *= self.epsilon_decay
 
     def save_model(self, filepath):
         torch.save(self.q_network.state_dict(), filepath)
