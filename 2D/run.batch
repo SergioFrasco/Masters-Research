@@ -4,7 +4,7 @@
 #SBATCH --error=/home-mscluster/sfrasco/error_job1.txt
 #SBATCH --ntasks=1
 #SBATCH --time=72:00:00
-#SBATCH --partition=biggpu
+#SBATCH --partition=bigbatch
 
 source ~/.bashrc
 conda activate compneuro
