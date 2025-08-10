@@ -10,4 +10,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python dqn_baseline.py
+python experiment_runner.py
