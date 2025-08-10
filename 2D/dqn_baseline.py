@@ -230,19 +230,6 @@ class UpdatedExperimentRunner:
                     
                     step_loss = loss.item()
 
-
-                agent.reward_maps.fill(0)  # Reset all maps to zero
-
-                for y in range(agent.grid_size):
-                    for x in range(agent.grid_size):
-                        curr_reward = agent.true_reward_map[y, x]
-                        idx = y * agent.grid_size + x
-                        reward_threshold = 0.5
-                        if curr_reward > reward_threshold:
-                            agent.reward_maps[idx, y, x] = 1
-                        else:
-                            agent.reward_maps[idx, y, x] = 0
-
                 # Store experience and train DQN
                 agent.remember(current_state, action, reward, next_state, done)
 
