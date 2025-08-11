@@ -12,6 +12,7 @@ from utils.plotting import generate_save_path
 import json
 import time
 import gc
+from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path
 # import tensorflow as tf
 import torch
 import torch.nn as nn
@@ -590,6 +591,27 @@ class ExperimentRunner:
             if episode >= episodes - 100 and not done:
                 self.plot_and_save_trajectory("Masters Successor", episode, trajectory, env.size, seed)
 
+             # Generate visualizations occasionally
+            if episode % 1000 == 0:
+                # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
+                save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
+
+                # Saving the SR
+                # Averaged SR matrix: shape (state_size, state_size)
+                averaged_M = np.mean(agent.M, axis=0)
+
+                # Create a figure
+                plt.figure(figsize=(6, 5))
+                im = plt.imshow(averaged_M, cmap='hot')
+                plt.title(f"Averaged SR Matrix (Episode {episode})")
+                plt.colorbar(im, label="SR Value")  # Add colorbar
+                plt.tight_layout()
+                plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
+                plt.close()  # Close the figure to free memory
+
+                save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
+            
+
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
@@ -955,7 +977,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=25001)
+    results = runner.run_comparison_experiment(episodes=50001)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
