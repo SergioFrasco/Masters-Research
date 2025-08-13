@@ -6,7 +6,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import absl.logging
-import tensorflow as tf
+# import tensorflow as tf
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import math
 import pandas as pd
 import glob
@@ -19,13 +22,9 @@ from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder, 
 from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path
 from utils import create_video_from_images, get_latest_run_dir
 from agents import SuccessorAgent
+from models import Autoencoder
 
-# Suppress TensorFlow logging
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
-# Disable GPU if not needed
-tf.config.set_visible_devices([], "GPU")
 
 # Suppress absl warnings
 absl.logging.set_verbosity(absl.logging.ERROR)
@@ -83,7 +82,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, ):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -116,7 +115,6 @@ def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=2
         initial_agent_dir = info["agent_dir"]
         total_reward = 0
         step_count = 0
-
 
         plt.close('all')  # to close all open figures and save memory
         # obs, _ = env.reset()
@@ -158,6 +156,7 @@ def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=2
 
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
+            
 
             # Update agents position estimate for Partial Observability
             agent.update_position_estimate(current_action)
@@ -255,17 +254,18 @@ def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=2
             normalized_grid[object_layer == 1] = 0.0   # Open space
             normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
 
-            # Flip along main diagonal
-            # normalized_grid = normalized_grid.T 
-
             # Now instead of passing the whole map as input, we only pass what we have actually seen
-            # input_grid = agent.global_map.copy()  # Use the global map as input to the AE
+            # input_grid_global = agent.global_map.copy()  # Use the global map as input to the AE
             # Reshape for the autoencoder (add batch and channel dims)
             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
             
             # Get the predicted reward map from the AE
-            predicted_reward_map = ae_model.predict(input_grid, verbose=0)
-            predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
+            # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
+            # predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
+            with torch.no_grad():
+                input_tensor = torch.FloatTensor(input_grid).to(device)  # Now (1, 1, H, W)
+                predicted_reward_map = ae_model(input_tensor)
+                predicted_reward_map_2d = predicted_reward_map[0, 0].cpu().numpy()  # Extract (H, W)
 
             # Give the vision model output as a perfect reward map
             # predicted_reward_map_2d = grid[..., 0].copy()
@@ -307,21 +307,25 @@ def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=2
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
             if trigger_ae_training:
-                # print("AE Training Triggered")
-                target = agent.true_reward_map[np.newaxis, ..., np.newaxis]
-
-                # Train the model for a single step
-                history = ae_model.fit(
-                    input_grid,       # Input: current environment grid 
-                    target,           # Target: agent's true_reward_map
-                    epochs=1,         # Just one training step
-                    batch_size=1,     # Single sample
-                    verbose=0         # Suppress output for cleaner logs
-                )
+                ae_model.train()
                 
-                # Track training loss
-                step_loss = history.history['loss'][0]
-                # print(f"Vision model training loss: {step_loss:.4f}")
+                # Convert to tensors
+                input_tensor = torch.FloatTensor(input_grid).to(device)
+                # Fix: target needs to match input shape with batch and channel dims
+                target = agent.true_reward_map[np.newaxis, ..., np.newaxis]  # Add this line
+                target_tensor = torch.FloatTensor(target).to(device)  # Use target, not agent.true_reward_map directly
+                
+                # Forward pass
+                optimizer.zero_grad()
+                output = ae_model(input_tensor)
+                loss = nn.MSELoss()(output, target_tensor)
+                
+                # Backward pass
+                loss.backward()
+                optimizer.step()
+                
+                step_loss = loss.item()
+                ae_model.eval()
             
             # Update the agents WVF with the SR and predicted true reward map
             # Decompose the reward map into individual reward maps for each goal
@@ -388,7 +392,7 @@ def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=2
 
             save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
         
-    ae_model.save(generate_save_path('vision_model.h5'))
+    torch.save(ae_model.state_dict(), generate_save_path('vision_model.pth'))
     
     window = 20
     rolling = pd.Series(ae_triggers_per_episode).rolling(window).mean()
@@ -455,6 +459,10 @@ def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=2
 
 
 def main():
+
+    # Setup device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     # Setup partially observable image-based env
     env = RGBImgPartialObsWrapper(SimpleEnv(size=10, render_mode='human'))  
     env = ImgObsWrapper(env)  # Optional:if I want only the image in obs
@@ -465,11 +473,13 @@ def main():
 
     # Setup vision system
     input_shape = (env.unwrapped.size, env.unwrapped.size, 1)
-    ae_model = build_autoencoder(input_shape)
-    ae_model.compile(optimizer='adam', loss='mse')
+    ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+
+    optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
+    ae_model.eval()  # Set to evaluation mode initially
 
     # Train agent
-    rewards = train_successor_agent(agent, env, ae_model=ae_model)
+    rewards = train_successor_agent(agent, env, ae_model=ae_model, optimizer=optimizer, device=device)
 
     # Convert to pandas Series for rolling average
     rewards_series = pd.Series(rewards)
