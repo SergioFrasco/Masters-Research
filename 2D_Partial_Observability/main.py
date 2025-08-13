@@ -82,7 +82,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
+def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.9995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -291,7 +291,7 @@ def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=
             # Get positions in the agent's current view
             observed_positions, _ = agent.extract_local_observation_info(obs)
             # learning rate that the map gets updated by
-            true_map_learning_rate = 0.1  # Adjust as needed, this is the rate at which the AE updates the true_reward_map
+            true_map_learning_rate = 1  # Adjust as needed, this is the rate at which the AE updates the true_reward_map
             # Update the rest of the true_reward_map with AE predictions, but only where the agent can see and by some learning rate
             for gx, gy in observed_positions:
                 # Skip visited positions if you still want to keep ground truth priority
