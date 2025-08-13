@@ -118,7 +118,7 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=200
             # Fallback to getting directly from environment
             initial_agent_pos = env.unwrapped.agent_pos
             initial_agent_dir = env.unwrapped.agent_dir
-            
+
         total_reward = 0
         step_count = 0
 
@@ -263,7 +263,7 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=200
             # Now instead of passing the whole map as input, we only pass what we have actually seen
             # input_grid_global = agent.global_map.copy()  # Use the global map as input to the AE
             # Reshape for the autoencoder (add batch and channel dims)
-            input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
+            input_grid = normalized_grid[np.newaxis, np.newaxis, ...]  # (1, H, W, 1)
             
             # Get the predicted reward map from the AE
             # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
