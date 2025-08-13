@@ -111,8 +111,14 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=200
         plt.close('all')  # to close all open figures and save memory
         obs, info = env.reset()
 
-        initial_agent_pos = info["agent_pos"]
-        initial_agent_dir = info["agent_dir"]
+        try:
+            initial_agent_pos = info["agent_pos"]
+            initial_agent_dir = info["agent_dir"]
+        except KeyError:
+            # Fallback to getting directly from environment
+            initial_agent_pos = env.unwrapped.agent_pos
+            initial_agent_dir = env.unwrapped.agent_dir
+            
         total_reward = 0
         step_count = 0
 
