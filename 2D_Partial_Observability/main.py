@@ -470,7 +470,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Setup partially observable image-based env
-    env = RGBImgPartialObsWrapper(SimpleEnv(size=10, render_mode='human'))  
+    env = RGBImgPartialObsWrapper(SimpleEnv(size=10))  
     env = ImgObsWrapper(env)  # Optional:if I want only the image in obs
     # print(env)
 
