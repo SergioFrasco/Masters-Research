@@ -6,8 +6,6 @@
 #SBATCH --time=72:00:00
 #SBATCH --partition=bigbatch
 
-
-
 source ~/.bashrc
 conda activate compneuro
 python main.py
