@@ -197,7 +197,7 @@ def save_env_map_pred(agent, normalized_grid, predicted_reward_map_2d, episode, 
     
     # Agent's true reward map
     ax2.imshow(agent.true_reward_map, cmap='viridis')
-    ax2.set_title("Agent's Understanding of Reward")
+    ax2.set_title("Agent's True Reward Map - AE Target")
     
     # AE prediction
     ax3.imshow(predicted_reward_map_2d, cmap='viridis')

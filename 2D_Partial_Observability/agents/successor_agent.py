@@ -48,13 +48,83 @@ class SuccessorAgent:
         self.movement_history = []
         self.max_history = 100
 
+        # Adding this for partial observability
+        self.global_map = np.zeros((self.grid_size, self.grid_size))
 
-    def update_visit_counts(self, agent_pos):
-        """Update visit counts for exploration bonus"""
-        x, y = agent_pos
-        self.visit_counts[y, x] += 1
+    # Functions added or adapted for partial observability
+    def extract_local_observation_info(self, obs):
+        """Extract what the agent can see from its partial observation"""
+        agent_x, agent_y = self.estimated_pos
+        agent_dir = self.estimated_dir
+        
+        # Get all goal positions in local coordinates
+        local_goal_positions = self._extract_all_goals_from_obs(obs)
+        
+        observed_positions = []
+        observed_values = []
+        
+        # Convert all observed positions to global coordinates
+        for local_y in range(obs.shape[0]):
+            for local_x in range(obs.shape[1]):
+                global_x, global_y = self._local_to_global_coords(
+                    local_x, local_y, agent_x, agent_y, agent_dir, obs.shape[0]
+                )
+                
+                if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
+                    # Check if this position contains a goal
+                    obs_value = 1.0 if (local_x, local_y) in local_goal_positions else 0.0
+                    observed_positions.append((global_x, global_y))
+                    observed_values.append(obs_value)
+        
+        return observed_positions, observed_values
+        
+    def _extract_all_goals_from_obs(self, obs):
+        """Extract goals using MiniGrid's internal representation"""
+        goal_positions = []
+        
+        # If obs is the wrapped image observation, we need to check the actual grid
+        # Get the current grid state from environment
+        grid = self.env.grid.encode()
+        agent_x, agent_y = self.estimated_pos
+        agent_dir = self.estimated_dir
+        
+        # Check what the agent can actually see in the grid
+        view_size = obs.shape[0]
+        for local_y in range(view_size):
+            for local_x in range(view_size):
+                global_x, global_y = self._local_to_global_coords(
+                    local_x, local_y, agent_x, agent_y, agent_dir, view_size
+                )
+                
+                # Check if this global position contains a goal in the actual grid
+                if (0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size):
+                    cell = self.env.grid.get(global_x, global_y)
+                    if cell is not None and cell.type == 'goal':
+                        goal_positions.append((local_x, local_y))
+        
+        return goal_positions
 
-    # Updated get state index for Partial Observability
+    def _local_to_global_coords(self, local_x, local_y, agent_x, agent_y, agent_dir, view_size):
+        """Convert local observation coordinates to global coordinates"""
+        # This is specific to MiniGrid's observation format
+        # Agent is typically at position (view_size//2, view_size-1) looking up in local coords
+        
+        # Relative position in agent's coordinate frame
+        rel_x = local_x - view_size // 2
+        rel_y = view_size - 1 - local_y  # Flip Y axis
+        
+        # Rotate based on agent direction
+        if agent_dir == 0:  # facing right
+            global_offset_x, global_offset_y = rel_y, -rel_x
+        elif agent_dir == 1:  # facing down  
+            global_offset_x, global_offset_y = rel_x, rel_y
+        elif agent_dir == 2:  # facing left
+            global_offset_x, global_offset_y = -rel_y, rel_x
+        else:  # facing up
+            global_offset_x, global_offset_y = -rel_x, -rel_y
+        
+        return agent_x + global_offset_x, agent_y + global_offset_y
+       # Updated get state index for Partial Observability
     def get_state_index(self, obs):
         """Use estimated position instead of true position"""
         x, y = self.estimated_pos
@@ -87,6 +157,14 @@ class SuccessorAgent:
         self.movement_history.append((action, self.estimated_pos.copy(), self.estimated_dir))
         if len(self.movement_history) > self.max_history:
             self.movement_history.pop(0)
+
+    # Functions from full observaiblity
+    def update_visit_counts(self, agent_pos):
+        """Update visit counts for exploration bonus"""
+        x, y = agent_pos
+        self.visit_counts[y, x] += 1
+
+ 
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""

@@ -2,7 +2,9 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
+
 import matplotlib.pyplot as plt
+
 import absl.logging
 import tensorflow as tf
 import math
@@ -81,7 +83,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1):
+def train_successor_agent(agent, env, episodes = 100, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -115,11 +117,6 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
         total_reward = 0
         step_count = 0
 
-        # # Example at any step
-        # plt.imshow(obs)  # obs is the partial egocentric RGB image
-        # plt.title("Agent's Egocentric Observation")
-        # plt.axis('off')
-        # plt.show()
 
         plt.close('all')  # to close all open figures and save memory
         # obs, _ = env.reset()
@@ -135,8 +132,12 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
         # For every new episode, reset the reward map, and WVF, the SR stays consistent with the environment i.e doesn't reset
         agent.true_reward_map = np.zeros((env.unwrapped.size, env.unwrapped.size))
         agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
-        ae_trigger_count_this_episode = 0
+        # Reset the "Global map" becuase every episode will be a new input into the AE (different reward space)
+        agent.global_map = np.zeros((agent.grid_size, agent.grid_size))
 
+        # Counter
+        ae_trigger_count_this_episode = 0
+        
         # Reset visited positions for new episode
         agent.visited_positions = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=bool)
         
@@ -145,10 +146,15 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
         current_action = agent.sample_random_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
 
+        # Update global map  with very first look at the world
+        observed_positions, observed_values  = agent.extract_local_observation_info(obs)  # extract agent's local observation info
+        for (gx, gy), val in zip(observed_positions, observed_values):
+                agent.global_map[gy, gx] = val
+
         for step in range(max_steps):
             # Check if path integration works
-            print("Agents Position: ", agent.estimated_pos)
-            print("Agents Direction: ", agent.estimated_dir)
+            # print("Agents Position: ", agent.estimated_pos)
+            # print("Agents Direction: ", agent.estimated_dir)
 
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
@@ -158,12 +164,37 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
 
             next_state_idx = agent.get_state_index(obs)
 
-            # Example at any step
+            # This confirms what the agent sees is correct
+            # Egocentric view at every step
             # plt.imshow(obs)  # obs is now the partial egocentric RGB image
             # plt.title("Agent's Egocentric Observation")
             # plt.axis('off')
             # plt.show()
-            # plt.savefig("egocentric_observation.png")  # Save the image
+            # plt.savefig(generate_save_path(f"egocentric_view/step_{step}"))  
+
+            # This confirms the conversion from egocentric view to global is correct, however the agents vision can ONLY NOT see behind it, it sees everywhere else
+            observed_positions, observed_values  = agent.extract_local_observation_info(obs)  # extract agent's local observation info
+            # Plot
+            # plt.figure(figsize=(6, 6))
+            # plt.imshow(agent.global_map, cmap="gray")  # or your actual map array
+            # for gx, gy in observed_positions:
+            #     plt.scatter(gx, gy, c="red", s=100, edgecolors="black")
+            # plt.title(f"Episode {episode} - Agent View Overlay")
+            # plt.savefig(generate_save_path(f"global_map/step_{step}"))
+
+            # print(agent.global_map)
+
+            # This confirms both observations and rewards get converted to global correctly
+            # to use this plot uncomment the plt in the for loop as well
+            # Plot
+            # plt.figure(figsize=(6, 6))
+            # plt.imshow(agent.global_map, cmap="gray")  # or your actual map array
+            for (gx, gy), val in zip(observed_positions, observed_values):
+                agent.global_map[gy, gx] = val
+                # plt.scatter(gx, gy, c="red" if val > 0 else "blue", s=100, edgecolors="black")
+                
+            # plt.title(f"Episode {episode} - Agent View Overlay")
+            # plt.savefig(generate_save_path(f"global_map/step_{step}"))
 
             # Tracking where the agent is going
             agent_pos = tuple(env.unwrapped.agent_pos)  
@@ -211,8 +242,9 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
 
             # Update the agent's true_reward_map based on current observation
             agent_position = tuple(env.unwrapped.agent_pos)
+            
 
-            # Get the current environment grid
+             # Get the current environment grid
             grid = env.unwrapped.grid.encode()
             normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
@@ -222,7 +254,12 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
             normalized_grid[object_layer == 2] = 0.0   # Wall 
             normalized_grid[object_layer == 1] = 0.0   # Open space
             normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
-            
+
+            # Flip along main diagonal
+            # normalized_grid = normalized_grid.T 
+
+            # Now instead of passing the whole map as input, we only pass what we have actually seen
+            # input_grid = agent.global_map.copy()  # Use the global map as input to the AE
             # Reshape for the autoencoder (add batch and channel dims)
             input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
             
@@ -239,23 +276,28 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
             # Mark position as visited
             agent.visited_positions[agent_position[0], agent_position[1]] = True
 
-             # Learning Signal
+            # Learning Signal
             if done and step < max_steps:
                 agent.true_reward_map[agent_position[0], agent_position[1]] = 1
             else:
                 agent.true_reward_map[agent_position[0], agent_position[1]] = 0
 
-            # Update the rest of the true_reward_map with AE predictions
-            for y in range(agent.true_reward_map.shape[0]):
-                for x in range(agent.true_reward_map.shape[1]):
-                    # Skip visited positions - don't override ground truth
-                    if not agent.visited_positions[y, x]:
-                        # Get the predicted value for this position from the AE
-                        predicted_value = predicted_reward_map_2d[y, x]
-                        if predicted_value > 0.001:
-                            agent.true_reward_map[y, x] = predicted_value
-                        else:
-                            agent.true_reward_map[y, x] = 0
+            # Get positions in the agent's current view
+            observed_positions, _ = agent.extract_local_observation_info(obs)
+            # learning rate that the map gets updated by
+            true_map_learning_rate = 0.1  # Adjust as needed, this is the rate at which the AE updates the true_reward_map
+            # Update the rest of the true_reward_map with AE predictions, but only where the agent can see and by some learning rate
+            for gx, gy in observed_positions:
+                # Skip visited positions if you still want to keep ground truth priority
+                if not agent.visited_positions[gy, gx]:
+                    predicted_value = predicted_reward_map_2d[gy, gx]
+
+                    if predicted_value > 0.001:
+                        # Update using learning rate blend
+                        agent.true_reward_map[gy, gx] = ((1 - true_map_learning_rate) * agent.true_reward_map[gy, gx]+ true_map_learning_rate * predicted_value)
+                    else:
+                        # Optional: fade toward zero instead of hard overwrite
+                        agent.true_reward_map[gy, gx] = 0
 
             trigger_ae_training = False
             if abs(predicted_reward_map_2d[agent_position[0], agent_position[1]] - agent.true_reward_map[agent_position[0], agent_position[1]]) > train_vision_threshold:
@@ -327,7 +369,7 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
         # Generate visualizations occasionally
-        if episode % 250 == 0:
+        if episode % 1 == 0:
             # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
@@ -414,9 +456,9 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=5, 
 
 def main():
     # Setup partially observable image-based env
-    env = RGBImgPartialObsWrapper(SimpleEnv(size=10, render_mode = "human"))
-    env = ImgObsWrapper(env)  # Optional: if you want only the image in obs
-    print(env)
+    env = RGBImgPartialObsWrapper(SimpleEnv(size=10, render_mode='human'))  
+    env = ImgObsWrapper(env)  # Optional:if I want only the image in obs
+    # print(env)
 
     # Pass the true environment (not the wrapper) to agent
     agent = SuccessorAgent(env.unwrapped)
