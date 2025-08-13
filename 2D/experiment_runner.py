@@ -503,9 +503,7 @@ class ExperimentRunner:
 
                 # Get the current environment grid
                 grid = env.grid.encode()
-                normalized_grid = np.zeros_like(
-                    grid[..., 0], dtype=np.float32
-                )  # Shape: (H, W)
+                normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
                 # Setting up input for the AE to obtain it's prediction of the space
                 object_layer = grid[..., 0]

@@ -82,7 +82,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, ):
+def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -263,15 +263,15 @@ def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=
             # Now instead of passing the whole map as input, we only pass what we have actually seen
             # input_grid_global = agent.global_map.copy()  # Use the global map as input to the AE
             # Reshape for the autoencoder (add batch and channel dims)
-            input_grid = normalized_grid[np.newaxis, np.newaxis, ...]  # (1, H, W, 1)
+            input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
             
             # Get the predicted reward map from the AE
             # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
             # predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
             with torch.no_grad():
-                input_tensor = torch.FloatTensor(input_grid).to(device)  # Now (1, 1, H, W)
-                predicted_reward_map = ae_model(input_tensor)
-                predicted_reward_map_2d = predicted_reward_map[0, 0].cpu().numpy()  # Extract (H, W)
+                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
+                predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
 
             # Give the vision model output as a perfect reward map
             # predicted_reward_map_2d = grid[..., 0].copy()
@@ -313,25 +313,17 @@ def train_successor_agent(agent, env, episodes = 1001, ae_model=None, max_steps=
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
             if trigger_ae_training:
-                ae_model.train()
-                
-                # Convert to tensors
-                input_tensor = torch.FloatTensor(input_grid).to(device)
-                # Fix: target needs to match input shape with batch and channel dims
-                target = agent.true_reward_map[np.newaxis, ..., np.newaxis]  # Add this line
-                target_tensor = torch.FloatTensor(target).to(device)  # Use target, not agent.true_reward_map directly
-                
-                # Forward pass
-                optimizer.zero_grad()
-                output = ae_model(input_tensor)
-                loss = nn.MSELoss()(output, target_tensor)
-                
-                # Backward pass
-                loss.backward()
-                optimizer.step()
-                
-                step_loss = loss.item()
-                ae_model.eval()
+                    target_tensor = torch.tensor(agent.true_reward_map[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+
+                    ae_model.train()
+                    optimizer.zero_grad()
+                    output = ae_model(ae_input_tensor)
+                    loss = loss_fn(output, target_tensor)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    step_loss = loss.item()
             
             # Update the agents WVF with the SR and predicted true reward map
             # Decompose the reward map into individual reward maps for each goal
@@ -478,14 +470,15 @@ def main():
     agent = SuccessorAgent(env.unwrapped)
 
     # Setup vision system
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     input_shape = (env.unwrapped.size, env.unwrapped.size, 1)
     ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
 
     optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
-    ae_model.eval()  # Set to evaluation mode initially
+    loss_fn = nn.MSELoss()
 
     # Train agent
-    rewards = train_successor_agent(agent, env, ae_model=ae_model, optimizer=optimizer, device=device)
+    rewards = train_successor_agent(agent, env, ae_model=ae_model, optimizer=optimizer, device=device, loss_fn = loss_fn)
 
     # Convert to pandas Series for rolling average
     rewards_series = pd.Series(rewards)
