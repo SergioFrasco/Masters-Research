@@ -1,0 +1,5 @@
+Goal State Value Evaluations
+==================================================
+Episode 0: Agent chose to stay at goal.
+Episode 100: Agent chose to stay at goal.
+Episode 400: Agent did not choose to stay in the same position.
