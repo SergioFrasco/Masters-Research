@@ -24,14 +24,8 @@ from utils import create_video_from_images, get_latest_run_dir
 from agents import SuccessorAgent
 from models import Autoencoder
 
-COLOR_TO_OBJECT = {
-    (0, 255, 0): "goal",      # Green square
-    (0, 0, 0): "empty",       # Floor/black
-    (255, 0, 0): "lava",      # Red
-    (100, 100, 100): "wall",  # Gray
 
-}
-            
+
 # Suppress absl warnings
 absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
@@ -88,27 +82,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def extract_goal_map(obs):
-    """
-    Turn an RGB observation into a binary map:
-    1 if goal, 0 otherwise.
-    """
-    h, w, c = obs.shape
-    goal_map = np.zeros((h, w), dtype=np.float32)
-    
-    # Convert each pixel triplet into object type
-    for y in range(h):
-        for x in range(w):
-            rgb = tuple(obs[y, x, :3])  # take RGB triplet
-            obj = COLOR_TO_OBJECT.get(rgb, "other")
-            if obj == "goal":
-                goal_map[y, x] = 1.0  # goal = 1
-            else:
-                goal_map[y, x] = 0.0  # everything else = 0
-
-    return goal_map[..., np.newaxis]  # keep channel for AE input
-
-def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=1, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.9995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
+def train_successor_agent(agent, env, episodes = 15001, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.9995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
@@ -274,52 +248,36 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=1, 
             # Update the agent's true_reward_map based on current observation
             agent_position = tuple(env.unwrapped.agent_pos)
             
-            # Extract the agent's local observation window from the environment
-            observed_positions, observed_values = agent.extract_local_observation_info(obs)
 
-            # Create a local observation window 
-            # First, determine the observation window size from the agent's view
-            obs_window_size = 7  # Adjust based on my actual observation window size
+             # Get the current environment grid
+            grid = env.unwrapped.grid.encode()
+            normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
-            # Create the input for the AE using only the observed window
-            # Convert the RGB observation to a format suitable for the AE
-            input_grid = extract_goal_map(obs)[np.newaxis, ...]
+            # Setting up input for the AE to obtain it's prediction of the space
+            # Object types are in grid[..., 0]
+            object_layer = grid[..., 0]
+            normalized_grid[object_layer == 2] = 0.0   # Wall 
+            normalized_grid[object_layer == 1] = 0.0   # Open space
+            normalized_grid[object_layer == 8] = 1.0   # Reward (e.g. goal object)
+
+            # Now instead of passing the whole map as input, we only pass what we have actually seen
+            # input_grid_global = agent.global_map.copy()  # Use the global map as input to the AE
+            # Reshape for the autoencoder (add batch and channel dims)
+            input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
             
             # Get the predicted reward map from the AE
             # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
             # predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
-            # Get prediction for the observation window only
             with torch.no_grad():
-                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
-                predicted_window_tensor = ae_model(ae_input_tensor)  # Predicts the obs window
-                predicted_window_2d = predicted_window_tensor.squeeze().cpu().numpy()  # (obs_window_size, obs_window_size)
-
-            # Create target for the observation window from true_reward_map
-            # TODO Look to change this to agent estimated pos
-            agent_x, agent_y = env.unwrapped.agent_pos
-            half_window = obs_window_size // 2
-
-            start_x = max(0, agent_x - half_window)
-            end_x = min(agent.grid_size, agent_x + half_window + 1)
-            start_y = max(0, agent_y - half_window)
-            end_y = min(agent.grid_size, agent_y + half_window + 1)
-
-            # Extract the target window from true_reward_map
-            target_window = agent.true_reward_map[start_y:end_y, start_x:end_x]
-
-            # Pad target window to match input size if needed
-            padded_target = np.zeros((obs_window_size, obs_window_size))
-            actual_h, actual_w = target_window.shape
-            pad_h = (obs_window_size - actual_h) // 2
-            pad_w = (obs_window_size - actual_w) // 2
-            padded_target[pad_h:pad_h+actual_h, pad_w:pad_w+actual_w] = target_window
+                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
+                predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
 
             # Give the vision model output as a perfect reward map
             # predicted_reward_map_2d = grid[..., 0].copy()
             # predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
             # predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
             # predicted_reward_map_2d[object_layer == 8] = 1.0 
-
 
             # Mark position as visited
             agent.visited_positions[agent_position[0], agent_position[1]] = True
@@ -330,69 +288,42 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=1, 
             else:
                 agent.true_reward_map[agent_position[0], agent_position[1]] = 0
 
+            # Get positions in the agent's current view
+            observed_positions, _ = agent.extract_local_observation_info(obs)
+            # learning rate that the map gets updated by
+            true_map_learning_rate = 1  # Adjust as needed, this is the rate at which the AE updates the true_reward_map
+            # Update the rest of the true_reward_map with AE predictions, but only where the agent can see and by some learning rate
+            for gx, gy in observed_positions:
+                # Skip visited positions if you still want to keep ground truth priority
+                if not agent.visited_positions[gy, gx]:
+                    predicted_value = predicted_reward_map_2d[gy, gx]
 
-            # NEW CODE:
-            # Update true_reward_map only within the observation window
-            true_map_learning_rate = 1  
-
-            # Map the predicted window back to global coordinates
-            for local_y in range(obs_window_size):
-                for local_x in range(obs_window_size):
-                    # Convert local coordinates to global coordinates
-                    global_x = start_x + local_x - pad_w
-                    global_y = start_y + local_y - pad_h
-                    
-                    # Check if global coordinates are valid and within the actual observed area
-                    if (0 <= global_x < agent.grid_size and 
-                        0 <= global_y < agent.grid_size and
-                        local_y >= pad_h and local_y < pad_h + actual_h and
-                        local_x >= pad_w and local_x < pad_w + actual_w):
-                        
-                        predicted_value = predicted_window_2d[local_y, local_x]
-                        
-                        # Only update if agent hasn't been to this position (maintaining ground truth priority)
-                        if not agent.visited_positions[global_x, global_y]:
-                            if predicted_value > 0.001:
-                                # Blend prediction with current value
-                                agent.true_reward_map[global_y, global_x] = (
-                                    (1 - true_map_learning_rate) * agent.true_reward_map[global_y, global_x] + 
-                                    true_map_learning_rate * predicted_value
-                                )
-                            else:
-                                # Fade toward zero
-                                agent.true_reward_map[global_y, global_x] *= (1 - true_map_learning_rate)
+                    if predicted_value > 0.001:
+                        # Update using learning rate blend
+                        agent.true_reward_map[gy, gx] = ((1 - true_map_learning_rate) * agent.true_reward_map[gy, gx]+ true_map_learning_rate * predicted_value)
+                    else:
+                        # Optional: fade toward zero instead of hard overwrite
+                        agent.true_reward_map[gy, gx] = 0
 
             trigger_ae_training = False
-    
-            # Check if prediction error in the current agent position exceeds threshold
-            agent_local_x = pad_w + (agent_x - start_x)
-            agent_local_y = pad_h + (agent_y - start_y)
-
-            if (0 <= agent_local_x < obs_window_size and 0 <= agent_local_y < obs_window_size):
-                predicted_at_agent = predicted_window_2d[agent_local_y, agent_local_x]
-                true_at_agent = agent.true_reward_map[agent_y, agent_x]
-                
-                if abs(predicted_at_agent - true_at_agent) > train_vision_threshold:
-                    ae_trigger_count_this_episode += 1
-                    trigger_ae_training = True
+            if abs(predicted_reward_map_2d[agent_position[0], agent_position[1]] - agent.true_reward_map[agent_position[0], agent_position[1]]) > train_vision_threshold:
+                ae_trigger_count_this_episode += 1
+                trigger_ae_training = True
                 
             # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
             # is between this input image and the agents true_reward_map.
-            
-            # Train the AE
             if trigger_ae_training:
-                # Use only the observation window as target
-                target_tensor = torch.tensor(padded_target[np.newaxis, ..., np.newaxis], dtype=torch.float32)
-                target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, obs_window_size, obs_window_size)
+                    target_tensor = torch.tensor(agent.true_reward_map[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
 
-                ae_model.train()
-                optimizer.zero_grad()
-                output = ae_model(ae_input_tensor)
-                loss = loss_fn(output, target_tensor)
-                loss.backward()
-                optimizer.step()
-                
-                step_loss = loss.item()
+                    ae_model.train()
+                    optimizer.zero_grad()
+                    output = ae_model(ae_input_tensor)
+                    loss = loss_fn(output, target_tensor)
+                    loss.backward()
+                    optimizer.step()
+                    
+                    step_loss = loss.item()
             
             # Update the agents WVF with the SR and predicted true reward map
             # Decompose the reward map into individual reward maps for each goal
@@ -457,7 +388,7 @@ def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=1, 
             plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
             plt.close()  # Close the figure to free memory
 
-            save_env_map_pred(agent = agent, normalized_grid = agent.global_map, predicted_reward_map_2d = predicted_window_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
+            save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
         
     torch.save(ae_model.state_dict(), generate_save_path('vision_model.pth'))
     
