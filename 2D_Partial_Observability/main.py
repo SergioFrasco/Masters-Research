@@ -334,13 +334,6 @@ def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=
             pad_w = (obs_window_size - actual_w) // 2
             padded_target[pad_h:pad_h+actual_h, pad_w:pad_w+actual_w] = target_window
 
-            # Give the vision model output as a perfect reward map
-            # predicted_reward_map_2d = grid[..., 0].copy()
-            # predicted_reward_map_2d[object_layer == 2] = 0.0   # Wall 
-            # predicted_reward_map_2d[object_layer == 1] = 0.0   # Open space
-            # predicted_reward_map_2d[object_layer == 8] = 1.0 
-
-
             # Mark position as visited
             agent.visited_positions[agent_position[0], agent_position[1]] = True
 
@@ -349,7 +342,6 @@ def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=
                 agent.true_reward_map[agent_position[0], agent_position[1]] = 1
             else:
                 agent.true_reward_map[agent_position[0], agent_position[1]] = 0
-
 
             # NEW CODE:
             # Update true_reward_map only within the observation window
@@ -477,7 +469,7 @@ def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=
             plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
             plt.close()  # Close the figure to free memory
 
-            save_env_map_pred(agent = agent, normalized_grid = agent.global_map, predicted_reward_map_2d = predicted_window_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
+            save_env_map_pred(agent = agent, normalized_grid = padded_target, predicted_reward_map_2d = predicted_window_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
         
     torch.save(ae_model.state_dict(), generate_save_path('vision_model.pth'))
     
