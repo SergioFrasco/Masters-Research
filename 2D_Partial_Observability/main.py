@@ -18,7 +18,6 @@ from minigrid.core.world_object import Goal, Wall
 from minigrid.wrappers import RGBImgPartialObsWrapper, ImgObsWrapper
 from tqdm import tqdm
 from env import SimpleEnv
-from models import build_autoencoder, focal_mse_loss, load_trained_autoencoder, weighted_focal_mse_loss
 from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path
 from utils import create_video_from_images, get_latest_run_dir
 from agents import SuccessorAgent
