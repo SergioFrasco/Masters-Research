@@ -87,25 +87,46 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     
     return result.strip()  # Return without newline for potential printing
 
-def extract_goal_map(obs):
+def extract_goal_map(obs, tile_size=8):
     """
-    Turn an RGB observation into a binary map:
-    1 if goal, 0 otherwise.
+    Convert RGB observation back to grid representation for AE input
     """
-    h, w, c = obs.shape
-    goal_map = np.zeros((h, w), dtype=np.float32)
+    if isinstance(obs, dict) and 'image' in obs:
+        rgb_img = obs['image']
+    else:
+        rgb_img = obs
     
-    # Convert each pixel triplet into object type
-    for y in range(h):
-        for x in range(w):
-            rgb = tuple(obs[y, x, :3])  # take RGB triplet
-            obj = COLOR_TO_OBJECT.get(rgb, "other")
-            if obj == "goal":
-                goal_map[y, x] = 1.0  # goal = 1
+    # rgb_img shape should be (56, 56, 3) for 7x7 grid with tile_size=8
+    height, width, channels = rgb_img.shape
+    grid_height = height // tile_size  # Should be 7
+    grid_width = width // tile_size    # Should be 7
+    
+    # Convert back to grid representation by downsampling
+    goal_map = np.zeros((grid_height, grid_width), dtype=np.float32)
+    
+    for i in range(grid_height):
+        for j in range(grid_width):
+            # Extract the tile
+            tile = rgb_img[i*tile_size:(i+1)*tile_size, j*tile_size:(j+1)*tile_size]
+            
+            # Simple goal detection - you may need to adjust this based on your goal colors
+            # For example, if goals are green, check for high green values
+            if channels >= 3:
+                # Check if this tile contains a goal (adjust color thresholds as needed)
+                mean_colors = np.mean(tile, axis=(0, 1))
+                
+                # Example: goals might be bright green (high green, low red/blue)
+                if mean_colors[1] > 200 and mean_colors[0] < 100 and mean_colors[2] < 100:
+                    goal_map[i, j] = 1.0
+                else:
+                    goal_map[i, j] = 0.0
             else:
-                goal_map[y, x] = 0.0  # everything else = 0
+                # Grayscale case
+                mean_intensity = np.mean(tile)
+                goal_map[i, j] = 1.0 if mean_intensity > 200 else 0.0
+    
+    return goal_map[..., np.newaxis]  # Add channel dimension: (7, 7, 1)
 
-    return goal_map[..., np.newaxis]  # keep channel for AE input
 
 def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.9995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
     """
