@@ -107,7 +107,7 @@ def extract_goal_map(obs):
 
     return goal_map[..., np.newaxis]  # keep channel for AE input
 
-def train_successor_agent(agent, env, episodes = 1, ae_model=None, max_steps=1, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.9995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
+def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.9995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
     """
     Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
     """
