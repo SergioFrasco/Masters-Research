@@ -334,14 +334,14 @@ def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=
             pad_w = (obs_window_size - actual_w) // 2
             padded_target[pad_h:pad_h+actual_h, pad_w:pad_w+actual_w] = target_window
 
-            # Mark position as visited
-            agent.visited_positions[agent_position[0], agent_position[1]] = True
+           # Mark position as visited - FIXED: Use [y, x] indexing
+            agent.visited_positions[agent_position[1], agent_position[0]] = True
 
-            # Learning Signal
+            # Learning Signal - FIXED: Use [y, x] indexing  
             if done and step < max_steps:
-                agent.true_reward_map[agent_position[0], agent_position[1]] = 1
+                agent.true_reward_map[agent_position[1], agent_position[0]] = 1
             else:
-                agent.true_reward_map[agent_position[0], agent_position[1]] = 0
+                agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
             # NEW CODE:
             # Update true_reward_map only within the observation window
