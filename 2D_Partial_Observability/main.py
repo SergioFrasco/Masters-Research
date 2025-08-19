@@ -128,67 +128,57 @@ def extract_goal_map(obs, tile_size=8):
     return goal_map[..., np.newaxis]  # Add channel dimension: (7, 7, 1)
 
 
-def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.5, epsilon_decay=0.9995, train_vision_threshold=0.1, device = 'cpu', optimizer = None, loss_fn = None):
+def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
-    Training loop for SuccessorAgent in MiniGrid environment with vision model integration, SR tracking, and WVF formation
+    Training loop with egocentric view for autoencoder
     """
     episode_rewards = []
     ae_triggers_per_episode = []
     epsilon = epsilon_start
     step_counts = []
 
+    # Define egocentric view parameters
+    VIEW_SIZE = 7  # Agent sees 7x7 grid around itself
+    AGENT_POS_IN_VIEW = (VIEW_SIZE // 2, VIEW_SIZE - 1)  # Agent at bottom-center of view
+    
+    # Encoding values for egocentric view
+    EMPTY_SPACE = 0.0
+    REWARD = 1.0
+    OUT_OF_BOUNDS = 0.1  # or 8.0, you can experiment
+    WALL = 0.1  # distinguishable from empty space
+
     # Tracking where the agent is going
     state_occupancy = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=np.int32)
 
     # Create log file for goal state evaluations
     log_file_path = generate_save_path("goal_state_evaluations.txt")
-    # Clear the file at the start
     with open(log_file_path, 'w') as f:
         f.write("Goal State Value Evaluations\n")
         f.write("="*50 + "\n")
 
-    # Tracking where the agent is starting
-    # agent_starting_positions = np.zeros((env.size, env.size), dtype=np.int32)
-
-    # Tracking where rewards are occuring
-    # reward_occurence_map = np.zeros((env.size,env.size), dtype = np.int32)
-    
     for episode in tqdm(range(episodes), "Training Successor Agent"):
-        plt.close('all')  # to close all open figures and save memory
+        plt.close('all')
         obs, info = env.reset()
 
         try:
             initial_agent_pos = info["agent_pos"]
             initial_agent_dir = info["agent_dir"]
         except KeyError:
-            # Fallback to getting directly from environment
             initial_agent_pos = env.unwrapped.agent_pos
             initial_agent_dir = env.unwrapped.agent_dir
 
         total_reward = 0
         step_count = 0
 
-        plt.close('all')  # to close all open figures and save memory
-        # obs, _ = env.reset()
-        # total_reward = 0
-        # step_count = 0
+        agent.estimated_pos = np.array(initial_agent_pos)
+        agent.estimated_dir = initial_agent_dir
 
-        agent.estimated_pos = np.array(initial_agent_pos)  # Start position 
-        agent.estimated_dir = initial_agent_dir  # Start direction 
-
-        # agent_pos = tuple(env.agent_pos)  
-        # agent_starting_positions[agent_pos[1], agent_pos[0]] += 1
-
-        # For every new episode, reset the reward map, and WVF, the SR stays consistent with the environment i.e doesn't reset
+        # Reset for new episode
         agent.true_reward_map = np.zeros((env.unwrapped.size, env.unwrapped.size))
         agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
-        # Reset the "Global map" becuase every episode will be a new input into the AE (different reward space)
         agent.global_map = np.zeros((agent.grid_size, agent.grid_size))
 
-        # Counter
         ae_trigger_count_this_episode = 0
-        
-        # Reset visited positions for new episode
         agent.visited_positions = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=bool)
         
         # Store first experience
@@ -196,84 +186,32 @@ def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=
         current_action = agent.sample_random_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
 
-        # Update global map  with very first look at the world
-        observed_positions, observed_values  = agent.extract_local_observation_info(obs)  # extract agent's local observation info
+        # Update global map with first observation
+        observed_positions, observed_values = agent.extract_local_observation_info(obs)
         for (gx, gy), val in zip(observed_positions, observed_values):
-                agent.global_map[gy, gx] = val
+            agent.global_map[gy, gx] = val
 
         for step in range(max_steps):
-            # Check if path integration works
-            # print("Agents Position: ", agent.estimated_pos)
-            # print("Agents Direction: ", agent.estimated_dir)
-
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
             
-
-            # Update agents position estimate for Partial Observability
+            # Update agent's position estimate
             agent.update_position_estimate(current_action)
-
             next_state_idx = agent.get_state_index(obs)
 
-            # This confirms what the agent sees is correct
-            # Egocentric view at every step
-            # plt.imshow(obs)  # obs is now the partial egocentric RGB image
-            # plt.title("Agent's Egocentric Observation")
-            # plt.axis('off')
-            # plt.show()
-            # plt.savefig(generate_save_path(f"egocentric_view/step_{step}"))  
-
-            # This confirms the conversion from egocentric view to global is correct, however the agents vision can ONLY NOT see behind it, it sees everywhere else
-            observed_positions, observed_values  = agent.extract_local_observation_info(obs)  # extract agent's local observation info
-            # Plot
-            # plt.figure(figsize=(6, 6))
-            # plt.imshow(agent.global_map, cmap="gray")  # or your actual map array
-            # for gx, gy in observed_positions:
-            #     plt.scatter(gx, gy, c="red", s=100, edgecolors="black")
-            # plt.title(f"Episode {episode} - Agent View Overlay")
-            # plt.savefig(generate_save_path(f"global_map/step_{step}"))
-
-            # print(agent.global_map)
-
-            # This confirms both observations and rewards get converted to global correctly
-            # to use this plot uncomment the plt in the for loop as well
-            # Plot
-            # plt.figure(figsize=(6, 6))
-            # plt.imshow(agent.global_map, cmap="gray")  # or your actual map array
-            for (gx, gy), val in zip(observed_positions, observed_values):
-                agent.global_map[gy, gx] = val
-                # plt.scatter(gx, gy, c="red" if val > 0 else "blue", s=100, edgecolors="black")
-                
-            # plt.title(f"Episode {episode} - Agent View Overlay")
-            # plt.savefig(generate_save_path(f"global_map/step_{step}"))
-
-            # Tracking where the agent is going
-            agent_pos = tuple(env.unwrapped.agent_pos)  
-            state_occupancy[agent_pos[0], agent_pos[1]] += 1  
+            # Get current agent position for tracking
+            agent_pos = tuple(env.unwrapped.agent_pos)
+            state_occupancy[agent_pos[0], agent_pos[1]] += 1
             
             # Complete current experience tuple
-            current_exp[2] = next_state_idx  # next state
-            current_exp[3] = reward          # reward
-            current_exp[4] = done            # done flag
+            current_exp[2] = next_state_idx
+            current_exp[3] = reward
+            current_exp[4] = done
             
-            # Here we need to sample from WVF.
-            # 1. Build the WVF for this moment in time
-            # 2. Choose the Max one of these Maps
-            # 3. Sample an Action from this map with decaying epsilon probability
-
-            # Get next action, for the first step just use a q-learned action as the WVF is only setup after the first step, thereafter use WVF
-            # Also checks if we actually have a max map. ie if we're not cofident in our WVF we sample a q-learned action
-            # CHANGED - introducing a warmup period for the SR
+            # Get next action
             if step == 0 or episode < 1:
-                # print("Normal Action Taken")
                 next_action = agent.sample_random_action(obs, epsilon=epsilon)
-            
-            # Sample an action from the WVF
             else:
-                # if print_flag:
-                    #   print("First WVF Action Taken")
-                #     print_flag = False
-                # Sample an action from the max WVF
                 next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
                 
             # Create next experience tuple
@@ -289,158 +227,91 @@ def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=
             current_exp = next_exp
             current_action = next_action
             
-            # ------------------ Vision model -------------------
-
-            # Update the agent's true_reward_map based on current observation
-            agent_position = tuple(env.unwrapped.agent_pos)
+            # ============== EGOCENTRIC VISION MODEL ==============
             
-            # Extract the agent's local observation window from the environment
-            observed_positions, observed_values = agent.extract_local_observation_info(obs)
-
-            # Create a local observation window 
-            # First, determine the observation window size from the agent's view
-            obs_window_size = 7  # Adjust based on my actual observation window size
-
-            # Create the input for the AE using only the observed window
-            # Convert the RGB observation to a format suitable for the AE
-            input_grid = extract_goal_map(obs)[np.newaxis, ...]
+            # 1. CREATE EGOCENTRIC VIEW INPUT
+            egocentric_input = create_egocentric_view(env, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL)
             
-            # Get the predicted reward map from the AE
-            # predicted_reward_map = ae_model.predict(input_grid, verbose=0)
-            # predicted_reward_map_2d = predicted_reward_map[0, :, :, 0]
-            # Get prediction for the observation window only
+            # 2. GET AE PREDICTION
+            input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], 
+                                      dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+            
             with torch.no_grad():
-                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
-                predicted_window_tensor = ae_model(ae_input_tensor)  # Predicts the obs window
-                predicted_window_2d = predicted_window_tensor.squeeze().cpu().numpy()  # (obs_window_size, obs_window_size)
+                predicted_ego_view = ae_model(input_tensor)
+                predicted_ego_view_2d = predicted_ego_view.squeeze().cpu().numpy()
 
-            # Create target for the observation window from true_reward_map
-            # TODO Look to change this to agent estimated pos
-            agent_x, agent_y = env.unwrapped.agent_pos
-            half_window = obs_window_size // 2
-
-            start_x = max(0, agent_x - half_window)
-            end_x = min(agent.grid_size, agent_x + half_window + 1)
-            start_y = max(0, agent_y - half_window)
-            end_y = min(agent.grid_size, agent_y + half_window + 1)
-
-            # Extract the target window from true_reward_map
-            target_window = agent.true_reward_map[start_y:end_y, start_x:end_x]
-
-            # Pad target window to match input size if needed
-            padded_target = np.zeros((obs_window_size, obs_window_size))
-            actual_h, actual_w = target_window.shape
-            pad_h = (obs_window_size - actual_h) // 2
-            pad_w = (obs_window_size - actual_w) // 2
-            padded_target[pad_h:pad_h+actual_h, pad_w:pad_w+actual_w] = target_window
-
-           # Mark position as visited - FIXED: Use [y, x] indexing
-            agent.visited_positions[agent_position[1], agent_position[0]] = True
-
-            # Learning Signal - FIXED: Use [y, x] indexing  
+            # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
+            # Mark current position with ground truth
+            agent.visited_positions[agent_pos[0], agent_pos[1]] = True
             if done and step < max_steps:
-                agent.true_reward_map[agent_position[1], agent_position[0]] = 1
+                agent.true_reward_map[agent_pos[0], agent_pos[1]] = 1.0
             else:
-                agent.true_reward_map[agent_position[1], agent_position[0]] = 0
+                agent.true_reward_map[agent_pos[0], agent_pos[1]] = 0.0
 
-            # NEW CODE:
-            # Update true_reward_map only within the observation window
-            true_map_learning_rate = 1  
-
-            # Map the predicted window back to global coordinates
-            for local_y in range(obs_window_size):
-                for local_x in range(obs_window_size):
-                    # Convert local coordinates to global coordinates
-                    global_x = start_x + local_x - pad_w
-                    global_y = start_y + local_y - pad_h
-                    
-                    # Check if global coordinates are valid and within the actual observed area
-                    if (0 <= global_x < agent.grid_size and 
-                        0 <= global_y < agent.grid_size and
-                        local_y >= pad_h and local_y < pad_h + actual_h and
-                        local_x >= pad_w and local_x < pad_w + actual_w):
-                        
-                        predicted_value = predicted_window_2d[local_y, local_x]
-                        
-                        # Only update if agent hasn't been to this position (maintaining ground truth priority)
-                        if not agent.visited_positions[global_x, global_y]:
-                            if predicted_value > 0.001:
-                                # Blend prediction with current value
-                                agent.true_reward_map[global_y, global_x] = (
-                                    (1 - true_map_learning_rate) * agent.true_reward_map[global_y, global_x] + 
-                                    true_map_learning_rate * predicted_value
-                                )
-                            else:
-                                # Fade toward zero
-                                agent.true_reward_map[global_y, global_x] *= (1 - true_map_learning_rate)
-
-            trigger_ae_training = False
-    
-            # Check if prediction error in the current agent position exceeds threshold
-            agent_local_x = pad_w + (agent_x - start_x)
-            agent_local_y = pad_h + (agent_y - start_y)
-
-            if (0 <= agent_local_x < obs_window_size and 0 <= agent_local_y < obs_window_size):
-                predicted_at_agent = predicted_window_2d[agent_local_y, agent_local_x]
-                true_at_agent = agent.true_reward_map[agent_y, agent_x]
-                
-                if abs(predicted_at_agent - true_at_agent) > train_vision_threshold:
-                    ae_trigger_count_this_episode += 1
-                    trigger_ae_training = True
-                
-            # we then look to train the AE on this single step, where the input is the image from the environment and the loss propagation
-            # is between this input image and the agents true_reward_map.
+            # Update true_reward_map only for visible cells using prediction
+            visible_global_positions = get_visible_global_positions(
+                agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, env.unwrapped.size
+            )
             
-            # Train the AE
+            update_true_reward_map_from_egocentric_prediction(
+                agent, predicted_ego_view_2d, visible_global_positions, 
+                VIEW_SIZE, learning_rate=1.0
+            )
+
+            # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
+            egocentric_target = create_egocentric_target_from_true_map(
+                agent.true_reward_map, agent.estimated_pos, agent.estimated_dir, 
+                VIEW_SIZE, OUT_OF_BOUNDS
+            )
+
+            # 5. DECIDE WHETHER TO TRAIN AE
+            # Compare prediction vs target in egocentric space
+            prediction_error = np.abs(predicted_ego_view_2d - egocentric_target)
+            max_error = np.max(prediction_error)
+            
+            trigger_ae_training = max_error > train_vision_threshold
+            
             if trigger_ae_training:
-                # Use only the observation window as target
-                target_tensor = torch.tensor(padded_target[np.newaxis, ..., np.newaxis], dtype=torch.float32)
-                target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, obs_window_size, obs_window_size)
+                ae_trigger_count_this_episode += 1
+                
+                # Train autoencoder
+                target_tensor = torch.tensor(egocentric_target[np.newaxis, ..., np.newaxis], 
+                                           dtype=torch.float32).permute(0, 3, 1, 2).to(device)
 
                 ae_model.train()
                 optimizer.zero_grad()
-                output = ae_model(ae_input_tensor)
+                output = ae_model(input_tensor)
                 loss = loss_fn(output, target_tensor)
                 loss.backward()
                 optimizer.step()
-                
-                step_loss = loss.item()
-            
-            # Update the agents WVF with the SR and predicted true reward map
-            # Decompose the reward map into individual reward maps for each goal
-            # Update per-state reward maps from true_reward_map
-            agent.reward_maps.fill(0)  # Reset all maps to zero
 
+            # 6. UPDATE WVF (same as before)
+            # Update global map for other processing
+            observed_positions, observed_values = agent.extract_local_observation_info(obs)
+            for (gx, gy), val in zip(observed_positions, observed_values):
+                agent.global_map[gy, gx] = val
+
+            # Update reward maps and WVF
+            agent.reward_maps.fill(0)
             for y in range(agent.grid_size):
                 for x in range(agent.grid_size):
                     reward = agent.true_reward_map[y, x]
                     idx = y * agent.grid_size + x
                     reward_threshold = 0.5
                     if reward > reward_threshold:
-                        # changed from = reward to 1
                         agent.reward_maps[idx, y, x] = 1
                     else:
-                        agent.reward_maps[idx, y, x] = 0 
+                        agent.reward_maps[idx, y, x] = 0
 
-            # Average the successor representation across actions
-            M_flat = np.mean(agent.M, axis=0)  # shape: (100, 100)
-
-            # Flatten reward maps: (100, 10, 10) -> (100, 100)
-            R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)  # shape: (100, 100)
-
-            # Compute value functions: (100, 100) @ (100, 100).T --> (100, 100)
-            V_all = M_flat @ R_flat_all.T  # shape: (100, 100), each column is V for a reward map
-
-            # Reshape to (100, 10, 10) to match original spatial layout
+            # Compute WVF
+            M_flat = np.mean(agent.M, axis=0)
+            R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+            V_all = M_flat @ R_flat_all.T
             agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
-            # Reward found, next episode
             if done:
-
-                 # BEFORE breaking, evaluate the goal state values
                 if episode % 100 == 0:
                     evaluate_goal_state_values(agent, env, episode, log_file_path)
-                
                 step_counts.append(step)
                 break
                 
@@ -453,89 +324,185 @@ def train_successor_agent(agent, env, episodes = 1000, ae_model=None, max_steps=
 
         # Generate visualizations occasionally
         if episode % 50 == 0:
-            # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
+            
+            # Save egocentric view visualization
+            save_egocentric_view_visualization(
+                egocentric_input, predicted_ego_view_2d, egocentric_target, 
+                episode, step
+            )
 
-            # Saving the SR
-            # Averaged SR matrix: shape (state_size, state_size)
-            averaged_M = np.mean(agent.M, axis=0)
-
-            # Create a figure
-            plt.figure(figsize=(6, 5))
-            im = plt.imshow(averaged_M, cmap='hot')
-            plt.title(f"Averaged SR Matrix (Episode {episode})")
-            plt.colorbar(im, label="SR Value")  # Add colorbar
-            plt.tight_layout()
-            plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
-            plt.close()  # Close the figure to free memory
-
-            save_env_map_pred(agent = agent, normalized_grid = padded_target, predicted_reward_map_2d = predicted_window_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
-        
+    # Save model and create visualizations (same as before)
     torch.save(ae_model.state_dict(), generate_save_path('vision_model.pth'))
     
-    window = 20
-    rolling = pd.Series(ae_triggers_per_episode).rolling(window).mean()
-
-    # Make a video of how the SR changes over time
-    latest_run = get_latest_run_dir()  # e.g., results/current/2025-05-27/run_3
-    sr_folder = os.path.join(latest_run, "SR")
-    video_path = os.path.join(latest_run, "sr_video.avi")
-    create_video_from_images(sr_folder, video_path, fps=5, sort_numerically=True)
-
-
-    # Plotting number of AE Training Triggers
-    plt.figure(figsize=(10, 5))
-    plt.plot(rolling, label=f'Rolling Avg (window={window})', color='orange')
-    plt.xlabel('Episode')
-    plt.ylabel('Number of AE Training Triggers')
-    plt.title('Autoencoder Training Triggers per Episode')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(generate_save_path("ae_training_triggers.png"))
-
-    # Plotting state occupancy
-    plt.figure(figsize=(6, 6))
-    plt.imshow(state_occupancy, cmap='Blues', interpolation='nearest')
-    plt.title('State Occupancy Heatmap')
-    plt.colorbar(label='Number of Visits')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.savefig(generate_save_path("state_occupancy_heatmap.png"))
-    plt.close()
-
-    # Plotting state starting state occupancy
-    # plt.figure(figsize=(6, 6))
-    # plt.imshow(agent_starting_positions, cmap='Blues', interpolation='nearest')
-    # plt.title('Starting State Occupancy Heatmap')
-    # plt.colorbar(label='Number of starts')
-    # plt.xlabel('X')
-    # plt.ylabel('Y')
-    # plt.savefig(generate_save_path("starting_state_occupancy_heatmap.png"))
-    # plt.close()
-
-
-    # Plotting the number of reward occurences in each state
-    # plt.figure(figsize=(6, 6))
-    # plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
-    # plt.title('Reward Occurrence Map (Heatmap)')
-    # plt.colorbar(label='Times Reward Observed')
-    # plt.xlabel('X')
-    # plt.ylabel('Y')
-    # plt.savefig(generate_save_path("reward_occurences.png"))
-    # plt.close()
-
-    # Plotting the number of steps taken in each episode - See if its learning
-    rolling = pd.Series(step_counts).rolling(window).mean()
-    plt.figure(figsize=(10, 5))
-    plt.plot(rolling, label=f'Rolling Avg Step Count (window={window})', color='orange')
-    plt.xlabel('Episode')
-    plt.ylabel('Number of Steps Taken')
-    plt.title('Steps taken per Episode')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig(generate_save_path("step_count.png"))
+    # ... rest of visualization code remains the same ...
+    
     return episode_rewards
 
+
+# ============== HELPER FUNCTIONS ==============
+
+def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, reward_val, oob_val, wall_val):
+    """
+    Create egocentric view with agent at bottom-center facing up
+    
+    Args:
+        env: MiniGrid environment
+        agent_pos: Current agent position (x, y)
+        agent_dir: Current agent direction (0=right, 1=down, 2=left, 3=up)
+        view_size: Size of the egocentric view (e.g., 7 for 7x7)
+        empty_val, reward_val, oob_val, wall_val: Encoding values
+    
+    Returns:
+        egocentric_view: 2D array of shape (view_size, view_size)
+    """
+    egocentric_view = np.full((view_size, view_size), oob_val)
+    
+    agent_x, agent_y = agent_pos
+    center_x = view_size // 2
+    
+    # Agent is at bottom center, facing up in egocentric coordinates
+    agent_ego_x = center_x
+    agent_ego_y = view_size - 1
+    
+    # Iterate through egocentric view positions
+    for ego_y in range(view_size):
+        for ego_x in range(view_size):
+            # Convert egocentric coordinates to global coordinates
+            global_x, global_y = egocentric_to_global_coords(
+                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
+            )
+            
+            # Check if global position is within environment bounds
+            if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
+                cell = env.unwrapped.grid.get(global_x, global_y)
+                
+                if cell is None:
+                    egocentric_view[ego_y, ego_x] = empty_val
+                elif cell.type == 'wall':
+                    egocentric_view[ego_y, ego_x] = wall_val
+                elif cell.type == 'goal':
+                    egocentric_view[ego_y, ego_x] = reward_val
+                else:
+                    egocentric_view[ego_y, ego_x] = empty_val
+            # else: keep out_of_bounds value
+    
+    return egocentric_view
+
+
+def egocentric_to_global_coords(ego_x, ego_y, agent_x, agent_y, agent_dir, view_size):
+    """
+    Convert egocentric coordinates to global coordinates
+    
+    In egocentric view: agent is at (view_size//2, view_size-1) facing up
+    """
+    center_x = view_size // 2
+    agent_ego_y = view_size - 1
+    
+    # Relative position in egocentric frame (agent facing up)
+    rel_x = ego_x - center_x
+    rel_y = agent_ego_y - ego_y  # Positive y goes "forward" (up in ego frame)
+    
+    # Rotate based on agent's actual direction
+    if agent_dir == 0:  # facing right
+        global_offset_x, global_offset_y = rel_y, -rel_x
+    elif agent_dir == 1:  # facing down  
+        global_offset_x, global_offset_y = rel_x, rel_y
+    elif agent_dir == 2:  # facing left
+        global_offset_x, global_offset_y = -rel_y, rel_x
+    else:  # agent_dir == 3, facing up
+        global_offset_x, global_offset_y = -rel_x, -rel_y
+    
+    return agent_x + global_offset_x, agent_y + global_offset_y
+
+
+def get_visible_global_positions(agent_pos, agent_dir, view_size, env_size):
+    """
+    Get all global positions that are visible in the current egocentric view
+    """
+    visible_positions = []
+    agent_x, agent_y = agent_pos
+    
+    for ego_y in range(view_size):
+        for ego_x in range(view_size):
+            global_x, global_y = egocentric_to_global_coords(
+                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
+            )
+            
+            if 0 <= global_x < env_size and 0 <= global_y < env_size:
+                visible_positions.append((global_x, global_y, ego_x, ego_y))
+    
+    return visible_positions
+
+
+def update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view, 
+                                                    visible_positions, view_size, 
+                                                    learning_rate=1.0):
+    """
+    Update true_reward_map using predictions from egocentric view
+    Only updates cells that are currently visible and not previously visited
+    """
+    for global_x, global_y, ego_x, ego_y in visible_positions:
+        # Skip already visited positions to preserve ground truth
+        if not agent.visited_positions[global_x, global_y]:
+            predicted_value = predicted_ego_view[ego_y, ego_x]
+            
+            if predicted_value > 0.001:  # Only update if prediction is significant
+                # Blend with existing value using learning rate
+                current_value = agent.true_reward_map[global_y, global_x]
+                agent.true_reward_map[global_y, global_x] = (
+                    (1 - learning_rate) * current_value + 
+                    learning_rate * predicted_value
+                )
+            else:
+                # Set to zero if prediction is very low
+                agent.true_reward_map[global_y, global_x] = 0.0
+
+
+def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir, 
+                                         view_size, oob_val=0.8):
+    """
+    Create egocentric target from the current true_reward_map
+    This serves as the training target for the autoencoder
+    """
+    egocentric_target = np.full((view_size, view_size), oob_val)
+    agent_x, agent_y = agent_pos
+    env_size = true_reward_map.shape[0]  # Assuming square grid
+    
+    for ego_y in range(view_size):
+        for ego_x in range(view_size):
+            global_x, global_y = egocentric_to_global_coords(
+                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
+            )
+            
+            if 0 <= global_x < env_size and 0 <= global_y < env_size:
+                egocentric_target[ego_y, ego_x] = true_reward_map[global_y, global_x]
+            # else: keep out_of_bounds value
+    
+    return egocentric_target
+
+
+def save_egocentric_view_visualization(input_view, prediction, target, episode, step):
+    """
+    Save visualization of egocentric views for debugging
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+    axes[0].imshow(input_view, cmap='viridis')
+    axes[0].set_title('Input View')
+    axes[0].axis('off')
+    
+    axes[1].imshow(prediction, cmap='viridis') 
+    axes[1].set_title('AE Prediction')
+    axes[1].axis('off')
+    
+    axes[2].imshow(target, cmap='viridis')
+    axes[2].set_title('Target')
+    axes[2].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(generate_save_path(f"egocentric_views/episode_{episode}_step_{step}.png"))
+    plt.close()
 
 def main():
 

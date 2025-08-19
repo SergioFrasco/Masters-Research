@@ -52,6 +52,120 @@ class SuccessorAgent:
         self.global_map = np.zeros((self.grid_size, self.grid_size))
 
     # Functions added or adapted for partial observability
+    def update_position_estimate(self, action):
+        """
+        Update internal position and direction estimate given the action.
+        This is a *path integration* update – assumes actions succeed.
+        """
+        # Turn left
+        if action == 0:  
+            self.estimated_dir = (self.estimated_dir - 1) % 4
+
+        # Turn right
+        elif action == 1:  
+            self.estimated_dir = (self.estimated_dir + 1) % 4
+
+        # Move forward
+        elif action == 2:  
+            dx, dy = 0, 0
+            if self.estimated_dir == 0:   # facing right
+                dx = 1
+            elif self.estimated_dir == 1: # facing down
+                dy = 1
+            elif self.estimated_dir == 2: # facing left
+                dx = -1
+            elif self.estimated_dir == 3: # facing up
+                dy = -1
+
+            new_pos = self.estimated_pos + np.array([dx, dy])
+
+            # Clamp to within grid bounds
+            grid_size = self.grid_size if hasattr(self, "grid_size") else None
+            if grid_size is not None:
+                new_pos[0] = np.clip(new_pos[0], 0, grid_size - 1)
+                new_pos[1] = np.clip(new_pos[1], 0, grid_size - 1)
+
+            self.estimated_pos = new_pos
+            
+    def _obs_to_global_coords(self, obs_x, obs_y, agent_x, agent_y, agent_dir, obs_width, obs_height):
+        """
+        Version with bounds checking and error handling.
+        Recommended for production use.
+        """
+        
+        # Validate input coordinates
+        if not (0 <= obs_x < obs_width and 0 <= obs_y < obs_height):
+            raise ValueError(f"Observation coordinates ({obs_x}, {obs_y}) out of bounds for observation size ({obs_width}, {obs_height})")
+        
+        if not (0 <= agent_dir <= 3):
+            raise ValueError(f"Invalid agent direction: {agent_dir}. Must be 0-3.")
+        
+        # Agent position in observation (bottom-center)
+        agent_obs_x = obs_width // 2
+        agent_obs_y = obs_height - 1
+        
+        # Relative coordinates in observation frame
+        rel_obs_x = obs_x - agent_obs_x
+        rel_obs_y = agent_obs_y - obs_y
+        
+        # Rotation matrix application
+        rotation_matrices = {
+            0: (rel_obs_y, -rel_obs_x),    # Right: 90° CW
+            1: (rel_obs_x, rel_obs_y),     # Down: 180°  
+            2: (-rel_obs_y, rel_obs_x),    # Left: 90° CCW
+            3: (-rel_obs_x, -rel_obs_y)    # Up: 180°
+        }
+        
+        global_offset_x, global_offset_y = rotation_matrices[agent_dir]
+        
+        # Final global coordinates
+        global_x = agent_x + global_offset_x
+        global_y = agent_y + global_offset_y
+        
+        # Optional bounds checking for global coordinates
+        if hasattr(self, 'grid_size'):
+            global_x = max(0, min(self.grid_size - 1, global_x))
+            global_y = max(0, min(self.grid_size - 1, global_y))
+        
+        return global_x, global_y
+
+
+    def test_obs_to_global_coords(self):
+        """
+        Test function to verify coordinate transformation correctness.
+        Call this during debugging to validate your transformations.
+        """
+        print("Testing observation to global coordinate transformation...")
+        
+        # Test case 1: Agent facing right, looking at position directly ahead
+        agent_x, agent_y, agent_dir = 5, 5, 0  # Facing right
+        obs_width, obs_height = 7, 7
+        
+        # Position directly in front of agent in observation
+        obs_x, obs_y = 3, 5  # Center-x, one row above agent
+        
+        global_x, global_y = self._obs_to_global_coords(
+            obs_x, obs_y, agent_x, agent_y, agent_dir, obs_width, obs_height
+        )
+        
+        expected_x, expected_y = 6, 5  # Should be one step right of agent
+        print(f"Test 1 - Expected: ({expected_x}, {expected_y}), Got: ({global_x}, {global_y})")
+        assert (global_x, global_y) == (expected_x, expected_y), "Test 1 failed!"
+        
+        # Test case 2: Agent facing up, looking at position to the right in observation
+        agent_x, agent_y, agent_dir = 5, 5, 3  # Facing up
+        obs_x, obs_y = 4, 6  # One step right of center, same row as agent
+        
+        global_x, global_y = self._obs_to_global_coords(
+            obs_x, obs_y, agent_x, agent_y, agent_dir, obs_width, obs_height
+        )
+        
+        expected_x, expected_y = 4, 5  # Should be one step left of agent (obs right becomes global left)
+        print(f"Test 2 - Expected: ({expected_x}, {expected_y}), Got: ({global_x}, {global_y})")
+        assert (global_x, global_y) == (expected_x, expected_y), "Test 2 failed!"
+        
+        print("All coordinate transformation tests passed!")
+
     def extract_local_observation_info(self, obs):
         """Extract what the agent can see from its partial observation"""
         agent_x, agent_y = self.estimated_pos
@@ -133,37 +247,126 @@ class SuccessorAgent:
         y = int(np.clip(y, 0, self.grid_size - 1))
         return y * self.grid_size + x
 
-    def update_position_estimate(self, action):
-        """Update position estimate based on action taken"""
-        TURN_LEFT = 0
-        TURN_RIGHT = 1
-        MOVE_FORWARD = 2
+    def extract_local_observation_info(self, obs, view_size=7):
+        """
+        Extract what the agent can see from its partial observation and convert to global coordinates.
+        This function bridges between the MiniGrid observation format and our egocentric processing.
         
-        if action == TURN_LEFT:
-            self.estimated_dir = (self.estimated_dir - 1) % 4
-        elif action == TURN_RIGHT:
-            self.estimated_dir = (self.estimated_dir + 1) % 4
-        elif action == MOVE_FORWARD:
-            # Calculate forward direction
-            dx, dy = [(1, 0), (0, 1), (-1, 0), (0, -1)][self.estimated_dir]
-            new_pos = self.estimated_pos + np.array([dx, dy])
+        Args:
+            obs: MiniGrid observation (RGB image or encoded observation)
+            view_size: Size of the egocentric view window (default 7x7)
+        
+        Returns:
+            observed_positions: List of (global_x, global_y) tuples for visible positions
+            observed_values: List of values (0.0 for empty, 1.0 for goal) corresponding to positions
+        """
+        agent_x, agent_y = self.estimated_pos
+        agent_dir = self.estimated_dir
+        
+        observed_positions = []
+        observed_values = []
+        
+        # Method 1: If obs is the raw MiniGrid RGB observation
+        if hasattr(obs, 'shape') and len(obs.shape) == 3:
+            # obs is RGB image from partial observation
+            obs_height, obs_width = obs.shape[:2]
             
-            # Check if movement is valid (not into wall)
-            if self._is_valid_position(new_pos):
-                self.estimated_pos = new_pos
-            # If invalid, position stays the same (hit wall)
+            # Extract goal positions from the RGB observation
+            goal_positions_in_obs = self._extract_goals_from_rgb_obs(obs)
+            
+            # Convert each position in the observation to global coordinates
+            for obs_y in range(obs_height):
+                for obs_x in range(obs_width):
+                    # Convert observation coordinates to global coordinates
+                    global_x, global_y = self._obs_to_global_coords(
+                        obs_x, obs_y, agent_x, agent_y, agent_dir, obs_width, obs_height
+                    )
+                    
+                    # Check if this global position is within environment bounds
+                    if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
+                        # Determine the value at this position
+                        obs_value = 1.0 if (obs_x, obs_y) in goal_positions_in_obs else 0.0
+                        observed_positions.append((global_x, global_y))
+                        observed_values.append(obs_value)
         
-        # Store movement for potential correction
-        self.movement_history.append((action, self.estimated_pos.copy(), self.estimated_dir))
-        if len(self.movement_history) > self.max_history:
-            self.movement_history.pop(0)
+        # Method 2: Direct environment inspection (more reliable)
+        # We can also directly check what the agent should be able to see in the environment
+        else:
+            # Use egocentric view approach to determine what's visible
+            center_x = view_size // 2
+            agent_ego_y = view_size - 1
+            
+            for ego_y in range(view_size):
+                for ego_x in range(view_size):
+                    # Convert egocentric coordinates to global coordinates
+                    global_x, global_y = self._egocentric_to_global_coords(
+                        ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
+                    )
+                    
+                    # Check if global position is within environment bounds
+                    if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
+                        # Check what's actually at this position in the environment
+                        cell = self.env.grid.get(global_x, global_y)
+                        
+                        if cell is not None and cell.type == 'goal':
+                            obs_value = 1.0
+                        else:
+                            obs_value = 0.0
+                        
+                        observed_positions.append((global_x, global_y))
+                        observed_values.append(obs_value)
+        
+        return observed_positions, observed_values
 
-    # Functions from full observaiblity
-    def update_visit_counts(self, agent_pos):
-        """Update visit counts for exploration bonus"""
-        x, y = agent_pos
-        self.visit_counts[y, x] += 1
+    def _extract_goals_from_rgb_obs(self, obs):
+        """
+        Extract goal positions from RGB observation image.
+        This is tricky because we need to identify goals from pixel colors.
+        
+        Args:
+            obs: RGB observation array of shape (height, width, 3)
+        
+        Returns:
+            goal_positions: List of (x, y) tuples in observation coordinates
+        """
+        goal_positions = []
+        
+        # MiniGrid goal objects typically have a specific color
+        # Goals are usually green: RGB approximately (0, 255, 0) or similar
+        # You might need to adjust these values based on your specific MiniGrid setup
+        
+        height, width = obs.shape[:2]
+        
+        for y in range(height):
+            for x in range(width):
+                pixel = obs[y, x]
+                
+                # Check if this pixel represents a goal
+                # Goals in MiniGrid are typically bright green
+                if self._is_goal_pixel(pixel):
+                    goal_positions.append((x, y))
+        
+        return goal_positions
 
+    def _is_goal_pixel(self, pixel):
+        """
+        Determine if a pixel represents a goal object.
+        
+        Args:
+            pixel: RGB pixel values [r, g, b]
+        
+        Returns:
+            bool: True if pixel represents a goal
+        """
+        r, g, b = pixel
+        
+        # Goals are typically bright green in MiniGrid
+        # You may need to adjust these thresholds based on your environment
+        if g > 200 and r < 100 and b < 100:  # Bright green
+            return True
+        
+        # Alternative: Check for specific goal colors
+        # MiniGrid goals
  
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
