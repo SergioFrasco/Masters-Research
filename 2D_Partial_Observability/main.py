@@ -129,7 +129,7 @@ def extract_goal_map(obs, tile_size=8):
     return goal_map[..., np.newaxis]  # Add channel dimension: (7, 7, 1)
 
 
-def train_successor_agent(agent, env, episodes=5000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.999, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -272,11 +272,13 @@ def train_successor_agent(agent, env, episodes=5000, ae_model=None, max_steps=20
             )
 
             # 5. DECIDE WHETHER TO TRAIN AE
-            # Compare prediction vs target in egocentric space
-            prediction_error = np.abs(predicted_ego_view_2d - egocentric_target)
-            max_error = np.max(prediction_error)
-            
-            trigger_ae_training = max_error > train_vision_threshold
+            center_x = VIEW_SIZE // 2
+            agent_ego_x = center_x
+            agent_ego_y = VIEW_SIZE - 1
+            trigger_ae_training = False
+            if abs(predicted_ego_view_2d[agent_ego_y, agent_ego_x] - egocentric_target[agent_ego_y, agent_ego_x]) > train_vision_threshold:
+                ae_trigger_count_this_episode += 1
+                trigger_ae_training = True
             
             if trigger_ae_training:
                 ae_trigger_count_this_episode += 1
@@ -426,9 +428,9 @@ def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, rewa
     egocentric_view = np.full((view_size, view_size), oob_val)
     
     agent_x, agent_y = agent_pos
-    center_x = view_size // 2
-    
+
     # Agent is at bottom center, facing up in egocentric coordinates
+    center_x = view_size // 2
     agent_ego_x = center_x
     agent_ego_y = view_size - 1
     
