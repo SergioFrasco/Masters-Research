@@ -121,7 +121,7 @@ def extract_goal_map(obs, tile_size=8):
     return goal_map[..., np.newaxis]  # Add channel dimension: (7, 7, 1)
 
 
-def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.999, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -137,7 +137,7 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
     # Encoding values for egocentric view
     EMPTY_SPACE = 0.0
     REWARD = 10.0
-    OUT_OF_BOUNDS = 0.0  # or 8.0, you can experiment
+    OUT_OF_BOUNDS = 0.0  # or 8.0
     WALL = 0.0  # distinguishable from empty space
 
     # Tracking where the agent is going
@@ -242,26 +242,19 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
             # Mark current position with ground truth
             agent.visited_positions[agent_pos[0], agent_pos[1]] = True
+
+            # Update true_reward_map only for visible cells using prediction
+            visible_global_positions = get_visible_global_positions(agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, env.unwrapped.size)
+            
+            update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, learning_rate=1.0)
+
             if done and step < max_steps:
                 agent.true_reward_map[agent_pos[0], agent_pos[1]] = 1.0
             else:
                 agent.true_reward_map[agent_pos[0], agent_pos[1]] = 0.0
 
-            # Update true_reward_map only for visible cells using prediction
-            visible_global_positions = get_visible_global_positions(
-                agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, env.unwrapped.size
-            )
-            
-            update_true_reward_map_from_egocentric_prediction(
-                agent, predicted_ego_view_2d, visible_global_positions, 
-                VIEW_SIZE, learning_rate=1.0
-            )
-
             # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
-            egocentric_target = create_egocentric_target_from_true_map(
-                agent.true_reward_map, agent.estimated_pos, agent.estimated_dir, 
-                VIEW_SIZE, OUT_OF_BOUNDS
-            )
+            egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, OUT_OF_BOUNDS)
 
             # 5. DECIDE WHETHER TO TRAIN AE
             center_x = VIEW_SIZE // 2
@@ -273,8 +266,6 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
                 trigger_ae_training = True
             
             if trigger_ae_training:
-                ae_trigger_count_this_episode += 1
-                
                 # Train autoencoder
                 target_tensor = torch.tensor(egocentric_target[np.newaxis, ..., np.newaxis], 
                                            dtype=torch.float32).permute(0, 3, 1, 2).to(device)
