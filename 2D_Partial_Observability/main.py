@@ -121,7 +121,7 @@ def extract_goal_map(obs, tile_size=8):
     return goal_map[..., np.newaxis]  # Add channel dimension: (7, 7, 1)
 
 
-def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -132,7 +132,6 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
 
     # Define egocentric view parameters
     VIEW_SIZE = 7  # Agent sees 7x7 grid around itself
-    AGENT_POS_IN_VIEW = (VIEW_SIZE // 2, VIEW_SIZE - 1)  # Agent at bottom-center of view
     
     # Encoding values for egocentric view
     EMPTY_SPACE = 0.0
@@ -185,11 +184,19 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             agent.global_map[gy, gx] = val
 
         for step in range(max_steps):
-            # agent_pos = tuple(int(x) for x in env.unwrapped.agent_pos)
-            # agent_dir = env.unwrapped.agent_dir
-            # # Double checking estimated position
-            # print("Exact Pose: ", agent_pos, agent_dir)
-            # print("Estimates Pose: ", agent.estimated_pos, agent.estimated_dir)
+
+            # Check if Pose estimate matches
+            agent_pos = tuple(int(x) for x in env.unwrapped.agent_pos)
+            agent_dir = env.unwrapped.agent_dir
+
+            exact_pose = (agent_pos, agent_dir)
+            estimated_pose = (tuple(agent.estimated_pos), agent.estimated_dir)
+
+            if exact_pose != estimated_pose:
+                print("Mismatch detected!")
+                print("Exact Pose:     ", exact_pose)
+                print("Estimated Pose: ", estimated_pose)
+
 
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
@@ -246,12 +253,12 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             # Update true_reward_map only for visible cells using prediction
             visible_global_positions = get_visible_global_positions(agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, env.unwrapped.size)
             
-            update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, learning_rate=1.0)
-
             if done and step < max_steps:
                 agent.true_reward_map[agent_pos[0], agent_pos[1]] = 1.0
             else:
                 agent.true_reward_map[agent_pos[0], agent_pos[1]] = 0.0
+            
+            update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, learning_rate=1.0)
 
             # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
             egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, OUT_OF_BOUNDS)
@@ -323,6 +330,19 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
                 egocentric_input, predicted_ego_view_2d, egocentric_target, 
                 episode, step
             )
+
+                        # Averaged SR matrix: shape (state_size, state_size)
+            averaged_M = np.mean(agent.M, axis=0)
+
+            # Create a figure
+            plt.figure(figsize=(6, 5))
+            im = plt.imshow(averaged_M, cmap='hot')
+            plt.title(f"Averaged SR Matrix (Episode {episode})")
+            plt.colorbar(im, label="SR Value")  # Add colorbar
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
+            plt.close()  # Close the figure to free memory
+
 
     # Save model and create visualizations (same as before)
     torch.save(ae_model.state_dict(), generate_save_path('vision_model.pth'))

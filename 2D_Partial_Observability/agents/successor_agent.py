@@ -247,126 +247,126 @@ class SuccessorAgent:
         y = int(np.clip(y, 0, self.grid_size - 1))
         return y * self.grid_size + x
 
-    def extract_local_observation_info(self, obs, view_size=7):
-        """
-        Extract what the agent can see from its partial observation and convert to global coordinates.
-        This function bridges between the MiniGrid observation format and our egocentric processing.
+    # def extract_local_observation_info(self, obs, view_size=7):
+    #     """
+    #     Extract what the agent can see from its partial observation and convert to global coordinates.
+    #     This function bridges between the MiniGrid observation format and our egocentric processing.
         
-        Args:
-            obs: MiniGrid observation (RGB image or encoded observation)
-            view_size: Size of the egocentric view window (default 7x7)
+    #     Args:
+    #         obs: MiniGrid observation (RGB image or encoded observation)
+    #         view_size: Size of the egocentric view window (default 7x7)
         
-        Returns:
-            observed_positions: List of (global_x, global_y) tuples for visible positions
-            observed_values: List of values (0.0 for empty, 1.0 for goal) corresponding to positions
-        """
-        agent_x, agent_y = self.estimated_pos
-        agent_dir = self.estimated_dir
+    #     Returns:
+    #         observed_positions: List of (global_x, global_y) tuples for visible positions
+    #         observed_values: List of values (0.0 for empty, 1.0 for goal) corresponding to positions
+    #     """
+    #     agent_x, agent_y = self.estimated_pos
+    #     agent_dir = self.estimated_dir
         
-        observed_positions = []
-        observed_values = []
+    #     observed_positions = []
+    #     observed_values = []
         
-        # Method 1: If obs is the raw MiniGrid RGB observation
-        if hasattr(obs, 'shape') and len(obs.shape) == 3:
-            # obs is RGB image from partial observation
-            obs_height, obs_width = obs.shape[:2]
+    #     # Method 1: If obs is the raw MiniGrid RGB observation
+    #     if hasattr(obs, 'shape') and len(obs.shape) == 3:
+    #         # obs is RGB image from partial observation
+    #         obs_height, obs_width = obs.shape[:2]
             
-            # Extract goal positions from the RGB observation
-            goal_positions_in_obs = self._extract_goals_from_rgb_obs(obs)
+    #         # Extract goal positions from the RGB observation
+    #         goal_positions_in_obs = self._extract_goals_from_rgb_obs(obs)
             
-            # Convert each position in the observation to global coordinates
-            for obs_y in range(obs_height):
-                for obs_x in range(obs_width):
-                    # Convert observation coordinates to global coordinates
-                    global_x, global_y = self._obs_to_global_coords(
-                        obs_x, obs_y, agent_x, agent_y, agent_dir, obs_width, obs_height
-                    )
+    #         # Convert each position in the observation to global coordinates
+    #         for obs_y in range(obs_height):
+    #             for obs_x in range(obs_width):
+    #                 # Convert observation coordinates to global coordinates
+    #                 global_x, global_y = self._obs_to_global_coords(
+    #                     obs_x, obs_y, agent_x, agent_y, agent_dir, obs_width, obs_height
+    #                 )
                     
-                    # Check if this global position is within environment bounds
-                    if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
-                        # Determine the value at this position
-                        obs_value = 1.0 if (obs_x, obs_y) in goal_positions_in_obs else 0.0
-                        observed_positions.append((global_x, global_y))
-                        observed_values.append(obs_value)
+    #                 # Check if this global position is within environment bounds
+    #                 if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
+    #                     # Determine the value at this position
+    #                     obs_value = 1.0 if (obs_x, obs_y) in goal_positions_in_obs else 0.0
+    #                     observed_positions.append((global_x, global_y))
+    #                     observed_values.append(obs_value)
         
-        # Method 2: Direct environment inspection (more reliable)
-        # We can also directly check what the agent should be able to see in the environment
-        else:
-            # Use egocentric view approach to determine what's visible
-            center_x = view_size // 2
-            agent_ego_y = view_size - 1
+    #     # Method 2: Direct environment inspection (more reliable)
+    #     # We can also directly check what the agent should be able to see in the environment
+    #     else:
+    #         # Use egocentric view approach to determine what's visible
+    #         center_x = view_size // 2
+    #         agent_ego_y = view_size - 1
             
-            for ego_y in range(view_size):
-                for ego_x in range(view_size):
-                    # Convert egocentric coordinates to global coordinates
-                    global_x, global_y = self._egocentric_to_global_coords(
-                        ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
-                    )
+    #         for ego_y in range(view_size):
+    #             for ego_x in range(view_size):
+    #                 # Convert egocentric coordinates to global coordinates
+    #                 global_x, global_y = self._egocentric_to_global_coords(
+    #                     ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
+    #                 )
                     
-                    # Check if global position is within environment bounds
-                    if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
-                        # Check what's actually at this position in the environment
-                        cell = self.env.grid.get(global_x, global_y)
+    #                 # Check if global position is within environment bounds
+    #                 if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
+    #                     # Check what's actually at this position in the environment
+    #                     cell = self.env.grid.get(global_x, global_y)
                         
-                        if cell is not None and cell.type == 'goal':
-                            obs_value = 1.0
-                        else:
-                            obs_value = 0.0
+    #                     if cell is not None and cell.type == 'goal':
+    #                         obs_value = 1.0
+    #                     else:
+    #                         obs_value = 0.0
                         
-                        observed_positions.append((global_x, global_y))
-                        observed_values.append(obs_value)
+    #                     observed_positions.append((global_x, global_y))
+    #                     observed_values.append(obs_value)
         
-        return observed_positions, observed_values
+    #     return observed_positions, observed_values
 
-    def _extract_goals_from_rgb_obs(self, obs):
-        """
-        Extract goal positions from RGB observation image.
-        This is tricky because we need to identify goals from pixel colors.
+    # def _extract_goals_from_rgb_obs(self, obs):
+    #     """
+    #     Extract goal positions from RGB observation image.
+    #     This is tricky because we need to identify goals from pixel colors.
         
-        Args:
-            obs: RGB observation array of shape (height, width, 3)
+    #     Args:
+    #         obs: RGB observation array of shape (height, width, 3)
         
-        Returns:
-            goal_positions: List of (x, y) tuples in observation coordinates
-        """
-        goal_positions = []
+    #     Returns:
+    #         goal_positions: List of (x, y) tuples in observation coordinates
+    #     """
+    #     goal_positions = []
         
-        # MiniGrid goal objects typically have a specific color
-        # Goals are usually green: RGB approximately (0, 255, 0) or similar
-        # You might need to adjust these values based on your specific MiniGrid setup
+    #     # MiniGrid goal objects typically have a specific color
+    #     # Goals are usually green: RGB approximately (0, 255, 0) or similar
+    #     # You might need to adjust these values based on your specific MiniGrid setup
         
-        height, width = obs.shape[:2]
+    #     height, width = obs.shape[:2]
         
-        for y in range(height):
-            for x in range(width):
-                pixel = obs[y, x]
+    #     for y in range(height):
+    #         for x in range(width):
+    #             pixel = obs[y, x]
                 
-                # Check if this pixel represents a goal
-                # Goals in MiniGrid are typically bright green
-                if self._is_goal_pixel(pixel):
-                    goal_positions.append((x, y))
+    #             # Check if this pixel represents a goal
+    #             # Goals in MiniGrid are typically bright green
+    #             if self._is_goal_pixel(pixel):
+    #                 goal_positions.append((x, y))
         
-        return goal_positions
+    #     return goal_positions
 
-    def _is_goal_pixel(self, pixel):
-        """
-        Determine if a pixel represents a goal object.
+    # def _is_goal_pixel(self, pixel):
+    #     """
+    #     Determine if a pixel represents a goal object.
         
-        Args:
-            pixel: RGB pixel values [r, g, b]
+    #     Args:
+    #         pixel: RGB pixel values [r, g, b]
         
-        Returns:
-            bool: True if pixel represents a goal
-        """
-        r, g, b = pixel
+    #     Returns:
+    #         bool: True if pixel represents a goal
+    #     """
+    #     r, g, b = pixel
         
-        # Goals are typically bright green in MiniGrid
-        # You may need to adjust these thresholds based on your environment
-        if g > 200 and r < 100 and b < 100:  # Bright green
-            return True
+    #     # Goals are typically bright green in MiniGrid
+    #     # You may need to adjust these thresholds based on your environment
+    #     if g > 200 and r < 100 and b < 100:  # Bright green
+    #         return True
         
-        # Alternative: Check for specific goal colors
-        # MiniGrid goals
+    #     # Alternative: Check for specific goal colors
+    #     # MiniGrid goals
  
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
