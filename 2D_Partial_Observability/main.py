@@ -23,15 +23,7 @@ from utils import create_video_from_images, get_latest_run_dir
 from agents import SuccessorAgent
 from models import Autoencoder
 from models import Autoencoder2
-
-COLOR_TO_OBJECT = {
-    (0, 255, 0): "goal",      # Green square
-    (0, 0, 0): "empty",       # Floor/black
-    (255, 0, 0): "lava",      # Red
-    (100, 100, 100): "wall",  # Gray
-
-}
-            
+    
 # Suppress absl warnings
 absl.logging.set_verbosity(absl.logging.ERROR)
 sys.path.append(".")
@@ -144,7 +136,7 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
     
     # Encoding values for egocentric view
     EMPTY_SPACE = 0.0
-    REWARD = 1.0
+    REWARD = 10.0
     OUT_OF_BOUNDS = 0.0  # or 8.0, you can experiment
     WALL = 0.0  # distinguishable from empty space
 
