@@ -1,0 +1,6 @@
+Goal State Value Evaluations
+==================================================
+Episode 500: Agent chose to stay at goal.
+Episode 700: Agent did not choose to stay in the same position.
+Episode 800: Agent did not choose to stay in the same position.
+Episode 900: Agent did not choose to stay in the same position.
