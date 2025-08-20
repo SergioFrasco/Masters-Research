@@ -436,14 +436,21 @@ def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, rewa
     for ego_y in range(view_size):
         for ego_x in range(view_size):
             # Convert egocentric coordinates to global coordinates
-            global_x, global_y = egocentric_to_global_coords(
-                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
-            )
+            global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, agent_x, agent_y, agent_dir, view_size)
             
-            # Special case: if this is the agent's position, encode as empty
+            # # Special case: if this is the agent's position, encode as empty
+            # if global_x == agent_x and global_y == agent_y:
+            #     egocentric_view[ego_y, ego_x] = empty_val
+            #     continue
             if global_x == agent_x and global_y == agent_y:
-                egocentric_view[ego_y, ego_x] = empty_val
+                # Special handling for the agent's own tile
+                cell = env.unwrapped.grid.get(global_x, global_y)
+                if cell is not None and cell.type == 'goal':
+                    egocentric_view[ego_y, ego_x] = reward_val
+                else:
+                    egocentric_view[ego_y, ego_x] = empty_val
                 continue
+
             
             # Check if global position is within environment bounds
             if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
