@@ -237,7 +237,7 @@ def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=20
             # ============== EGOCENTRIC VISION MODEL ==============
             
             # 1. CREATE EGOCENTRIC VIEW INPUT
-            egocentric_input = create_egocentric_view(env, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL)
+            egocentric_input = create_egocentric_view(env, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL, done=done)
             
             # 2. GET AE PREDICTION
             input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], 
@@ -330,7 +330,7 @@ def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=20
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
         # Generate visualizations occasionally
-        if episode % 50 == 0:
+        if episode % 25 == 0:
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
             
             # Save egocentric view visualization
@@ -409,7 +409,7 @@ def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=20
 
 
 # ============== HELPER FUNCTIONS ==============
-def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, reward_val, oob_val, wall_val):
+def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, reward_val, oob_val, wall_val, done):
     """
     Create egocentric view with agent at bottom-center facing up
     
@@ -442,14 +442,15 @@ def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, rewa
             # if global_x == agent_x and global_y == agent_y:
             #     egocentric_view[ego_y, ego_x] = empty_val
             #     continue
+
+            # Specifically check agents position for reward
             if global_x == agent_x and global_y == agent_y:
-                # Special handling for the agent's own tile
-                cell = env.unwrapped.grid.get(global_x, global_y)
-                if cell is not None and cell.type == 'goal':
+                if done:
                     egocentric_view[ego_y, ego_x] = reward_val
+                    continue
                 else:
-                    egocentric_view[ego_y, ego_x] = empty_val
-                continue
+                    egocentric_view[ego_y, ego_x] = 0
+                    continue
 
             
             # Check if global position is within environment bounds
@@ -600,6 +601,7 @@ def save_egocentric_view_visualization(input_view, prediction, target, episode, 
     plt.tight_layout()
     plt.savefig(generate_save_path(f"egocentric_views/episode_{episode}_step_{step}.png"))
     plt.close()
+
 def main():
 
     # Setup device
