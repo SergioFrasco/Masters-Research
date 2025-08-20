@@ -22,6 +22,7 @@ from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward
 from utils import create_video_from_images, get_latest_run_dir
 from agents import SuccessorAgent
 from models import Autoencoder
+from models import Autoencoder2
 
 COLOR_TO_OBJECT = {
     (0, 255, 0): "goal",      # Green square
@@ -128,7 +129,7 @@ def extract_goal_map(obs, tile_size=8):
     return goal_map[..., np.newaxis]  # Add channel dimension: (7, 7, 1)
 
 
-def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -144,8 +145,8 @@ def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=2
     # Encoding values for egocentric view
     EMPTY_SPACE = 0.0
     REWARD = 1.0
-    OUT_OF_BOUNDS = 0.1  # or 8.0, you can experiment
-    WALL = 0.1  # distinguishable from empty space
+    OUT_OF_BOUNDS = 0.0  # or 8.0, you can experiment
+    WALL = 0.0  # distinguishable from empty space
 
     # Tracking where the agent is going
     state_occupancy = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=np.int32)
@@ -192,6 +193,12 @@ def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=2
             agent.global_map[gy, gx] = val
 
         for step in range(max_steps):
+            # agent_pos = tuple(int(x) for x in env.unwrapped.agent_pos)
+            # agent_dir = env.unwrapped.agent_dir
+            # # Double checking estimated position
+            # print("Exact Pose: ", agent_pos, agent_dir)
+            # print("Estimates Pose: ", agent.estimated_pos, agent.estimated_dir)
+
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
             
@@ -335,13 +342,73 @@ def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=2
     # Save model and create visualizations (same as before)
     torch.save(ae_model.state_dict(), generate_save_path('vision_model.pth'))
     
-    # ... rest of visualization code remains the same ...
+    window = 20
+    rolling = pd.Series(ae_triggers_per_episode).rolling(window).mean()
+
+    # Make a video of how the SR changes over time
+    latest_run = get_latest_run_dir()  # e.g., results/current/2025-05-27/run_3
+    sr_folder = os.path.join(latest_run, "SR")
+    video_path = os.path.join(latest_run, "sr_video.avi")
+    create_video_from_images(sr_folder, video_path, fps=5, sort_numerically=True)
+
+    # Plotting number of AE Training Triggers
+    plt.figure(figsize=(10, 5))
+    plt.plot(rolling, label=f'Rolling Avg (window={window})', color='orange')
+    plt.xlabel('Episode')
+    plt.ylabel('Number of AE Training Triggers')
+    plt.title('Autoencoder Training Triggers per Episode')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(generate_save_path("ae_training_triggers.png"))
+
+    # Plotting state occupancy
+    plt.figure(figsize=(6, 6))
+    plt.imshow(state_occupancy, cmap='Blues', interpolation='nearest')
+    plt.title('State Occupancy Heatmap')
+    plt.colorbar(label='Number of Visits')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.savefig(generate_save_path("state_occupancy_heatmap.png"))
+    plt.close()
+
+    # Plotting state starting state occupancy
+    # plt.figure(figsize=(6, 6))
+    # plt.imshow(agent_starting_positions, cmap='Blues', interpolation='nearest')
+    # plt.title('Starting State Occupancy Heatmap')
+    # plt.colorbar(label='Number of starts')
+    # plt.xlabel('X')
+    # plt.ylabel('Y')
+    # plt.savefig(generate_save_path("starting_state_occupancy_heatmap.png"))
+    # plt.close()
+
+
+    # Plotting the number of reward occurences in each state
+    # plt.figure(figsize=(6, 6))
+    # plt.imshow(reward_occurence_map, cmap='hot', interpolation='nearest')
+    # plt.title('Reward Occurrence Map (Heatmap)')
+    # plt.colorbar(label='Times Reward Observed')
+    # plt.xlabel('X')
+    # plt.ylabel('Y')
+    # plt.savefig(generate_save_path("reward_occurences.png"))
+    # plt.close()
+
+    # Plotting the number of steps taken in each episode - See if its learning
+    rolling = pd.Series(step_counts).rolling(window).mean()
+    plt.figure(figsize=(10, 5))
+    plt.plot(rolling, label=f'Rolling Avg Step Count (window={window})', color='orange')
+    plt.xlabel('Episode')
+    plt.ylabel('Number of Steps Taken')
+    plt.title('Steps taken per Episode')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(generate_save_path("step_count.png"))
+    return episode_rewards
+
     
     return episode_rewards
 
 
 # ============== HELPER FUNCTIONS ==============
-
 def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, reward_val, oob_val, wall_val):
     """
     Create egocentric view with agent at bottom-center facing up
@@ -372,6 +439,11 @@ def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, rewa
             global_x, global_y = egocentric_to_global_coords(
                 ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
             )
+            
+            # Special case: if this is the agent's position, encode as empty
+            if global_x == agent_x and global_y == agent_y:
+                egocentric_view[ego_y, ego_x] = empty_val
+                continue
             
             # Check if global position is within environment bounds
             if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
@@ -460,7 +532,7 @@ def update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view,
 
 
 def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir, 
-                                         view_size, oob_val=0.8):
+                                         view_size, oob_val=0.0):
     """
     Create egocentric target from the current true_reward_map
     This serves as the training target for the autoencoder
@@ -485,25 +557,42 @@ def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir
 def save_egocentric_view_visualization(input_view, prediction, target, episode, step):
     """
     Save visualization of egocentric views for debugging
+    Shows agent position as a red dot in the center bottom
     """
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
-    axes[0].imshow(input_view, cmap='viridis')
+    # Agent position in egocentric coordinates (bottom center)
+    view_size = input_view.shape[0]
+    agent_ego_x = view_size // 2
+    agent_ego_y = view_size - 1
+    
+    # Plot input view
+    im0 = axes[0].imshow(input_view, cmap='viridis', vmin=0, vmax=1)
     axes[0].set_title('Input View')
     axes[0].axis('off')
-    
-    axes[1].imshow(prediction, cmap='viridis') 
+    # Add red dot for agent position
+    axes[0].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
+    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+    # Plot prediction
+    im1 = axes[1].imshow(prediction, cmap='viridis', vmin=0, vmax=1)
     axes[1].set_title('AE Prediction')
     axes[1].axis('off')
-    
-    axes[2].imshow(target, cmap='viridis')
+    # Add red dot for agent position
+    axes[1].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
+    fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+    # Plot target
+    im2 = axes[2].imshow(target, cmap='viridis', vmin=0, vmax=1)
     axes[2].set_title('Target')
     axes[2].axis('off')
-    
+    # Add red dot for agent position
+    axes[2].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
+    fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+
     plt.tight_layout()
     plt.savefig(generate_save_path(f"egocentric_views/episode_{episode}_step_{step}.png"))
     plt.close()
-
 def main():
 
     # Setup device
@@ -520,7 +609,7 @@ def main():
     # Setup vision system
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     input_shape = (env.unwrapped.size, env.unwrapped.size, 1)
-    ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+    ae_model = Autoencoder2(input_channels=input_shape[-1]).to(device)
 
     optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
     loss_fn = nn.MSELoss()
