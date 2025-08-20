@@ -129,10 +129,11 @@ def extract_goal_map(obs, tile_size=8):
     return goal_map[..., np.newaxis]  # Add channel dimension: (7, 7, 1)
 
 
-def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=20, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
+    ever_done = False
     episode_rewards = []
     ae_triggers_per_episode = []
     epsilon = epsilon_start
@@ -310,6 +311,10 @@ def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=20
                     else:
                         agent.reward_maps[idx, y, x] = 0
 
+            save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_step_{step}"))
+            
+           
+
             # Compute WVF
             M_flat = np.mean(agent.M, axis=0)
             R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
@@ -317,11 +322,19 @@ def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=20
             agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
             if done:
+                ever_done = True
                 if episode % 100 == 0:
                     evaluate_goal_state_values(agent, env, episode, log_file_path)
                 step_counts.append(step)
                 break
-                
+
+        if ever_done == True:
+            # Save egocentric view visualization
+            save_egocentric_view_visualization(
+                egocentric_input, predicted_ego_view_2d, egocentric_target, 
+                episode, step
+            ) 
+
         # Decay epsilon
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
         
@@ -605,7 +618,7 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Setup partially observable image-based env
-    env = RGBImgPartialObsWrapper(SimpleEnv(size=10))  
+    env = RGBImgPartialObsWrapper(SimpleEnv(size=10))
     env = ImgObsWrapper(env)  # Optional:if I want only the image in obs
     # print(env)
 
