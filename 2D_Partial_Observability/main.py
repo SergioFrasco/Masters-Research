@@ -443,16 +443,6 @@ def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, rewa
             #     egocentric_view[ego_y, ego_x] = empty_val
             #     continue
 
-            # Specifically check agents position for reward
-            if global_x == agent_x and global_y == agent_y:
-                if done:
-                    egocentric_view[ego_y, ego_x] = reward_val
-                    continue
-                else:
-                    egocentric_view[ego_y, ego_x] = 0
-                    continue
-
-            
             # Check if global position is within environment bounds
             if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
                 cell = env.unwrapped.grid.get(global_x, global_y)
@@ -466,7 +456,14 @@ def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, rewa
                 else:
                     egocentric_view[ego_y, ego_x] = empty_val
             # else: keep out_of_bounds value
-    
+
+            # Specifically check agents position for reward
+            if ego_y == agent_ego_x and ego_x == agent_ego_y:
+                if done:
+                    egocentric_view[ego_y, ego_x] = reward_val
+                else:
+                    egocentric_view[ego_y, ego_x] = 0
+
     return egocentric_view
 
 
