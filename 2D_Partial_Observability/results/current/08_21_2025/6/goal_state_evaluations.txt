@@ -7,3 +7,7 @@ Episode 300: Agent chose to stay at goal.
 Episode 400: Agent chose to stay at goal.
 Episode 600: Agent chose to stay at goal.
 Episode 900: Agent did not choose to stay in the same position.
+Episode 1200: Agent chose to stay at goal.
+Episode 1400: Agent chose to stay at goal.
+Episode 2100: Agent chose to stay at goal.
+Episode 2300: Agent chose to stay at goal.
