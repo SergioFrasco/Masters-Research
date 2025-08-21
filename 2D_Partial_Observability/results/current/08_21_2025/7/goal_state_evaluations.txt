@@ -11,3 +11,19 @@ Episode 1000: Agent did not choose to stay in the same position.
 Episode 1300: Agent chose to stay at goal.
 Episode 1400: Agent did not choose to stay in the same position.
 Episode 1600: Agent chose to stay at goal.
+Episode 1900: Agent did not choose to stay in the same position.
+Episode 2000: Agent chose to stay at goal.
+Episode 2200: Agent chose to stay at goal.
+Episode 2300: Agent chose to stay at goal.
+Episode 2500: Agent chose to stay at goal.
+Episode 2700: Agent chose to stay at goal.
+Episode 2800: Agent chose to stay at goal.
+Episode 2900: Agent chose to stay at goal.
+Episode 3000: Agent chose to stay at goal.
+Episode 3100: Agent chose to stay at goal.
+Episode 3500: Agent chose to stay at goal.
+Episode 4200: Agent chose to stay at goal.
+Episode 4500: Agent chose to stay at goal.
+Episode 4600: Agent chose to stay at goal.
+Episode 4900: Agent chose to stay at goal.
+Episode 5500: Agent chose to stay at goal.

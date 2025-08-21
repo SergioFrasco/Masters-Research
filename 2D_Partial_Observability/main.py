@@ -81,7 +81,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     return result.strip()  # Return without newline for potential printing
 
 
-def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -89,6 +89,7 @@ def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=20
     ae_triggers_per_episode = []
     epsilon = epsilon_start
     step_counts = []
+   
 
     # Define egocentric view parameters
     VIEW_SIZE = 7  # Agent sees 7x7 grid around itself
@@ -109,6 +110,8 @@ def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=20
         f.write("="*50 + "\n")
 
     for episode in tqdm(range(episodes), "Training Successor Agent"):
+        step_count = 0
+
         plt.close('all')
         obs, info = env.reset()
 
@@ -135,6 +138,7 @@ def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=20
 
 
         for step in range(max_steps):
+            step_count += 1
 
             # Check if Pose estimate matches
             agent_pos = tuple(int(x) for x in env.unwrapped.agent_pos)
@@ -290,12 +294,14 @@ def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=20
             V_all = M_flat @ R_flat_all.T
             agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
+            
+
             if done:
                 if episode % 100 == 0:
                     evaluate_goal_state_values(agent, env, episode, log_file_path)
-                step_counts.append(step)
                 break
-                
+            
+        step_counts.append(step_count)      
         # Decay epsilon
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
         
@@ -308,7 +314,17 @@ def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=20
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
             
             # Save egocentric view visualization
-            save_egocentric_view_visualization(egocentric_input, predicted_ego_view_2d, egocentric_target, episode, step)
+            # save_egocentric_view_visualization(egocentric_input, predicted_ego_view_2d, egocentric_target, episode, step)
+            save_egocentric_view_visualization(
+                egocentric_input,
+                predicted_ego_view_2d,
+                egocentric_target,
+                episode,
+                step,
+                agent_pos=agent.estimated_pos,
+                agent_dir=agent.estimated_dir,
+                env_size=env.unwrapped.size
+            )
 
             # Averaged SR matrix: shape (state_size, state_size)
             averaged_M = np.mean(agent.M, axis=0)
@@ -544,46 +560,99 @@ def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir
     
     return egocentric_target
 
-
-def save_egocentric_view_visualization(input_view, prediction, target, episode, step):
+# helper for ego plotting
+def overlay_out_of_bounds(ax, view_size, env_size, agent_pos, agent_dir):
     """
-    Save visualization of egocentric views for debugging
-    Shows agent position as a red dot in the center bottom
+    Overlay yellow dots for out-of-bounds cells in egocentric view.
+    """
+    agent_x, agent_y = agent_pos
+    center_x = view_size // 2
+    agent_ego_y = view_size - 1
+
+    oob_xs, oob_ys = [], []
+    for ego_y in range(view_size):
+        for ego_x in range(view_size):
+            global_x, global_y = egocentric_to_global_coords(
+                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
+            )
+            # If out of bounds → mark for scatter
+            if not (0 <= global_x < env_size and 0 <= global_y < env_size):
+                oob_xs.append(ego_x)
+                oob_ys.append(ego_y)
+
+    ax.scatter(oob_xs, oob_ys, c="yellow", s=20, edgecolors="black", linewidths=0.5)
+
+def save_egocentric_view_visualization(input_view, prediction, target, episode, step,
+                                       agent_pos=None, agent_dir=None, env_size=None):
+    """
+    Save visualization of egocentric views for debugging.
+    Shows agent position as a red dot in the center bottom.
+    Optionally overlays yellow dots for out-of-bounds cells.
     """
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    
-    # Agent position in egocentric coordinates (bottom center)
+
     view_size = input_view.shape[0]
     agent_ego_x = view_size // 2
     agent_ego_y = view_size - 1
-    
-    # Plot input view
-    im0 = axes[0].imshow(input_view, cmap='viridis', vmin=0, vmax=10)
-    axes[0].set_title('Input View')
-    axes[0].axis('off')
-    # Add red dot for agent position
-    axes[0].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
-    fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
-    # Plot prediction
-    im1 = axes[1].imshow(prediction, cmap='viridis', vmin=0, vmax=10)
-    axes[1].set_title('AE Prediction')
-    axes[1].axis('off')
-    # Add red dot for agent position
-    axes[1].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
-    fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+    for ax, mat, title in zip(axes, [input_view, prediction, target],
+                              ["Input View", "AE Prediction", "Target"]):
+        im = ax.imshow(mat, cmap="viridis", vmin=0, vmax=10)
+        ax.set_title(title)
+        ax.axis("off")
+        ax.plot(agent_ego_x, agent_ego_y, 'ro', markersize=8,
+                markeredgecolor='white', markeredgewidth=1)
 
-    # Plot target
-    im2 = axes[2].imshow(target, cmap='viridis', vmin=0, vmax=10)
-    axes[2].set_title('Target')
-    axes[2].axis('off')
-    # Add red dot for agent position
-    axes[2].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
-    fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        # overlay OOB markers if env info provided
+        if agent_pos is not None and agent_dir is not None and env_size is not None:
+            overlay_out_of_bounds(ax, view_size, env_size, agent_pos, agent_dir)
+
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     plt.tight_layout()
     plt.savefig(generate_save_path(f"egocentric_views/episode_{episode}_step_{step}.png"))
     plt.close()
+
+
+# def save_egocentric_view_visualization(input_view, prediction, target, episode, step):
+#     """
+#     Save visualization of egocentric views for debugging
+#     Shows agent position as a red dot in the center bottom
+#     """
+#     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    
+#     # Agent position in egocentric coordinates (bottom center)
+#     view_size = input_view.shape[0]
+#     agent_ego_x = view_size // 2
+#     agent_ego_y = view_size - 1
+    
+#     # Plot input view
+#     im0 = axes[0].imshow(input_view, cmap='viridis', vmin=0, vmax=10)
+#     axes[0].set_title('Input View')
+#     axes[0].axis('off')
+#     # Add red dot for agent position
+#     axes[0].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
+#     fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+#     # Plot prediction
+#     im1 = axes[1].imshow(prediction, cmap='viridis', vmin=0, vmax=10)
+#     axes[1].set_title('AE Prediction')
+#     axes[1].axis('off')
+#     # Add red dot for agent position
+#     axes[1].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
+#     fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+#     # Plot target
+#     im2 = axes[2].imshow(target, cmap='viridis', vmin=0, vmax=10)
+#     axes[2].set_title('Target')
+#     axes[2].axis('off')
+#     # Add red dot for agent position
+#     axes[2].plot(agent_ego_x, agent_ego_y, 'ro', markersize=8, markeredgecolor='white', markeredgewidth=1)
+#     fig.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+
+#     plt.tight_layout()
+#     plt.savefig(generate_save_path(f"egocentric_views/episode_{episode}_step_{step}.png"))
+#     plt.close()
 
 def main():
 
