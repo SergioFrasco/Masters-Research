@@ -206,48 +206,48 @@ def train_successor_agent(agent, env, episodes=6000, ae_model=None, max_steps=20
             
             update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, learning_rate=1.0)
 
-            if done and step < max_steps:
-                agent.true_reward_map[agent_pos[0], agent_pos[1]] = 10.0
-            else:
-                agent.true_reward_map[agent_pos[0], agent_pos[1]] = 0.0
+            # if done and step < max_steps:
+            #     agent.true_reward_map[agent_pos[0], agent_pos[1]] = 10.0
+            # else:
+            #     agent.true_reward_map[agent_pos[0], agent_pos[1]] = 0.0
 
             # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
-            egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, OUT_OF_BOUNDS)
+            egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent.estimated_pos, agent.estimated_dir, done,  VIEW_SIZE, OUT_OF_BOUNDS)
 
-            if step % 50 == 0:
-            # Plot actual entire environment as well as the true reward map here
-                fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+            # if step % 50 == 0:
+            # # Plot actual entire environment as well as the true reward map here
+            #     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
                 
-                # Create environment grid visualization
-                env_grid = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=float)
-                for x in range(env.unwrapped.size):
-                    for y in range(env.unwrapped.size):
-                        cell = env.unwrapped.grid.get(x, y)
-                        if cell is None:
-                            env_grid[y, x] = 0.0  # Empty
-                        elif cell.type == 'wall':
-                            env_grid[y, x] = 5.0  # Wall
-                        elif cell.type == 'goal':
-                            env_grid[y, x] = 1.0  # Goal
-                        else:
-                            env_grid[y, x] = 8.0
-                # Mark agent position
-                env_grid[agent_pos[1], agent_pos[0]] = 3.0  # Agent
+            #     # Create environment grid visualization
+            #     env_grid = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=float)
+            #     for x in range(env.unwrapped.size):
+            #         for y in range(env.unwrapped.size):
+            #             cell = env.unwrapped.grid.get(x, y)
+            #             if cell is None:
+            #                 env_grid[y, x] = 0.0  # Empty
+            #             elif cell.type == 'wall':
+            #                 env_grid[y, x] = 5.0  # Wall
+            #             elif cell.type == 'goal':
+            #                 env_grid[y, x] = 1.0  # Goal
+            #             else:
+            #                 env_grid[y, x] = 8.0
+            #     # Mark agent position
+            #     env_grid[agent_pos[1], agent_pos[0]] = 3.0  # Agent
 
-                im1 = axes[0].imshow(env_grid, cmap='tab10', vmin=0, vmax=10)
-                axes[0].set_title(f'Environment (Episode {episode}, Step {step})\nAgent: {agent_pos}, Dir: {env.unwrapped.agent_dir}, Done: {done}')
-                axes[0].axis('off')
-                fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
+            #     im1 = axes[0].imshow(env_grid, cmap='tab10', vmin=0, vmax=10)
+            #     axes[0].set_title(f'Environment (Episode {episode}, Step {step})\nAgent: {agent_pos}, Dir: {env.unwrapped.agent_dir}, Done: {done}')
+            #     axes[0].axis('off')
+            #     fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
 
-                im2 = axes[1].imshow(agent.true_reward_map, cmap='viridis', vmin=0, vmax=10)
-                axes[1].set_title('True Reward Map')
-                axes[1].axis('off')
-                fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+            #     im2 = axes[1].imshow(agent.true_reward_map, cmap='viridis', vmin=0, vmax=10)
+            #     axes[1].set_title('True Reward Map')
+            #     axes[1].axis('off')
+            #     fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
 
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f"debug/env_vs_reward_episode_{episode}_step_{step}.png"))
-                plt.close()
+            #     plt.tight_layout()
+            #     plt.savefig(generate_save_path(f"debug/env_vs_reward_episode_{episode}_step_{step}.png"))
+            #     plt.close()
 
             # 5. DECIDE WHETHER TO TRAIN AE
             center_x = VIEW_SIZE // 2
@@ -515,8 +515,7 @@ def update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view,
                 agent.true_reward_map[global_y, global_x] = 0.0
 
 
-def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir, 
-                                         view_size, oob_val=0.0):
+def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir, done, view_size, oob_val=0.0):
     """
     Create egocentric target from the current true_reward_map
     This serves as the training target for the autoencoder
@@ -527,13 +526,19 @@ def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir
     
     for ego_y in range(view_size):
         for ego_x in range(view_size):
-            global_x, global_y = egocentric_to_global_coords(
-                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
-            )
+            global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, agent_x, agent_y, agent_dir, view_size)
             
             if 0 <= global_x < env_size and 0 <= global_y < env_size:
                 egocentric_target[ego_y, ego_x] = true_reward_map[global_y, global_x]
             # else: keep out_of_bounds value
+            center_x = view_size // 2
+            agent_ego_x = center_x
+            agent_ego_y = view_size - 1
+
+            # Reward Signal
+            if done and ego_y == agent_ego_y and ego_x == agent_ego_x:
+                    egocentric_target[ego_y, ego_x] = 10
+    
     
     return egocentric_target
 
