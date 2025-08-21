@@ -535,10 +535,12 @@ def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir
             agent_ego_x = center_x
             agent_ego_y = view_size - 1
 
-            # Reward Signal
+            # Learning Signal
             if done and ego_y == agent_ego_y and ego_x == agent_ego_x:
-                    egocentric_target[ego_y, ego_x] = 10
-    
+                egocentric_target[ego_y, ego_x] = 10
+            
+            if not done and ego_y == agent_ego_y and ego_x == agent_ego_x:
+                egocentric_target[ego_y, ego_x] = 0
     
     return egocentric_target
 
