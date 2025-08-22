@@ -1,2 +1,44 @@
 Goal State Value Evaluations
 ==================================================
+Episode 100: Agent chose to stay at goal.
+Episode 200: Agent chose to stay at goal.
+Episode 400: Agent chose to stay at goal.
+Episode 600: Agent chose to stay at goal.
+Episode 700: Agent chose to stay at goal.
+Episode 800: Agent did not choose to stay in the same position.
+Episode 1000: Agent chose to stay at goal.
+Episode 1200: Agent chose to stay at goal.
+Episode 1300: Agent chose to stay at goal.
+Episode 1400: Agent did not choose to stay in the same position.
+Episode 1600: Agent chose to stay at goal.
+Episode 1800: Agent chose to stay at goal.
+Episode 2000: Agent chose to stay at goal.
+Episode 2100: Agent chose to stay at goal.
+Episode 2700: Agent chose to stay at goal.
+Episode 2800: Agent chose to stay at goal.
+Episode 2900: Agent chose to stay at goal.
+Episode 3200: Agent chose to stay at goal.
+Episode 3400: Agent chose to stay at goal.
+Episode 3700: Agent chose to stay at goal.
+Episode 4100: Agent chose to stay at goal.
+Episode 4300: Agent chose to stay at goal.
+Episode 4400: Agent did not choose to stay in the same position.
+Episode 4500: Agent chose to stay at goal.
+Episode 4900: Agent chose to stay at goal.
+Episode 5600: Agent chose to stay at goal.
+Episode 5800: Agent chose to stay at goal.
+Episode 5900: Agent did not choose to stay in the same position.
+Episode 6000: Agent chose to stay at goal.
+Episode 6400: Agent chose to stay at goal.
+Episode 6800: Agent chose to stay at goal.
+Episode 7000: Agent chose to stay at goal.
+Episode 7300: Agent chose to stay at goal.
+Episode 7900: Agent chose to stay at goal.
+Episode 8000: Agent chose to stay at goal.
+Episode 8400: Agent chose to stay at goal.
+Episode 8800: Agent chose to stay at goal.
+Episode 9100: Agent chose to stay at goal.
+Episode 9200: Agent chose to stay at goal.
+Episode 9300: Agent chose to stay at goal.
+Episode 9600: Agent chose to stay at goal.
+Episode 9800: Agent chose to stay at goal.

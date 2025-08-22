@@ -81,7 +81,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     return result.strip()  # Return without newline for potential printing
 
 
-def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -143,8 +143,8 @@ def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=2
             # Check if Pose estimate matches
             agent_pos = tuple(int(x) for x in env.unwrapped.agent_pos)
             agent_dir = env.unwrapped.agent_dir
-
             exact_pose = (agent_pos, agent_dir)
+
             estimated_pose = (tuple(agent.estimated_pos), agent.estimated_dir)
 
             if exact_pose != estimated_pose:
@@ -161,8 +161,8 @@ def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=2
             next_state_idx = agent.get_state_index(obs)
 
             # Get current agent position for tracking
-            agent_pos = tuple(env.unwrapped.agent_pos)
-            state_occupancy[agent_pos[0], agent_pos[1]] += 1
+            agent_pos = agent.estimated_pos
+            state_occupancy[int(agent_pos[0]), int(agent_pos[1])] += 1
             
             # Complete current experience tuple
             current_exp[2] = next_state_idx
@@ -203,7 +203,7 @@ def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=2
 
             # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
             # Mark current position with ground truth
-            agent.visited_positions[agent_pos[0], agent_pos[1]] = True
+            agent.visited_positions[int(agent_pos[0]), int(agent_pos[1])] = True
 
             # Update true_reward_map only for visible cells using prediction
             visible_global_positions = get_visible_global_positions(agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, env.unwrapped.size)
@@ -318,7 +318,7 @@ def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=2
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
         # Generate visualizations occasionally
-        if episode % 10 == 0:
+        if episode % 50 == 0:
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
             
             # Save egocentric view visualization
@@ -480,7 +480,7 @@ def create_egocentric_view(env, agent_pos, agent_dir, view_size, empty_val, rewa
     for ego_y in range(view_size):
         for ego_x in range(view_size):
             # Convert egocentric coordinates to global coordinates
-            global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, agent_x, agent_y, agent_dir, view_size)
+            global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, int(agent_x), int(agent_y), agent_dir, view_size)
             
             # # Special case: if this is the agent's position, encode as empty
             # if global_x == agent_x and global_y == agent_y:
@@ -586,7 +586,7 @@ def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir
     
     for ego_y in range(view_size):
         for ego_x in range(view_size):
-            global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, agent_x, agent_y, agent_dir, view_size)
+            global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, int(agent_x), int(agent_y), agent_dir, view_size)
             
             if 0 <= global_x < env_size and 0 <= global_y < env_size:
                 egocentric_target[ego_y, ego_x] = true_reward_map[global_y, global_x]
@@ -616,9 +616,8 @@ def overlay_out_of_bounds(ax, view_size, env_size, agent_pos, agent_dir):
     oob_xs, oob_ys = [], []
     for ego_y in range(view_size):
         for ego_x in range(view_size):
-            global_x, global_y = egocentric_to_global_coords(
-                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
-            )
+
+            global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, int(agent_x), int(agent_y), agent_dir, view_size)
             # If out of bounds → mark for scatter
             if not (0 <= global_x < env_size and 0 <= global_y < env_size):
                 oob_xs.append(ego_x)
@@ -626,8 +625,7 @@ def overlay_out_of_bounds(ax, view_size, env_size, agent_pos, agent_dir):
 
     ax.scatter(oob_xs, oob_ys, c="yellow", s=20, edgecolors="black", linewidths=0.5)
 
-def save_egocentric_view_visualization(input_view, prediction, target, episode, step,
-                                       agent_pos=None, agent_dir=None, env_size=None):
+def save_egocentric_view_visualization(input_view, prediction, target, episode, step, agent_pos=None, agent_dir=None, env_size=None):
     """
     Save visualization of egocentric views for debugging.
     Shows agent position as a red dot in the center bottom.
