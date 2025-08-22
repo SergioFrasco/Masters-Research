@@ -40,16 +40,13 @@ class SuccessorAgent:
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
 
         # Path integration for partial observability
-        self.estimated_pos = np.array([1, 1])  # Start position estimate
+        self.estimated_pos = (1, 1)  # Start position estimate
         self.estimated_dir = 0  # Start direction estimate
         self.position_confidence = 1.0  # Confidence in position estimate
 
         # Track movement history for error correction
         self.movement_history = []
         self.max_history = 100
-
-        # Adding this for partial observability
-        self.global_map = np.zeros((self.grid_size, self.grid_size))
 
     # Functions added or adapted for partial observability
     def update_position_estimate(self, action):
@@ -67,6 +64,8 @@ class SuccessorAgent:
 
         # Move forward
         elif action == 2:  
+            x, y = self.estimated_pos  # Unpack tuple
+            
             dx, dy = 0, 0
             if self.estimated_dir == 0:   # facing right
                 dx = 1
@@ -77,15 +76,15 @@ class SuccessorAgent:
             elif self.estimated_dir == 3: # facing up
                 dy = -1
 
-            new_pos = self.estimated_pos + np.array([dx, dy])
+            new_x = x + dx
+            new_y = y + dy
 
             # Clamp to within grid bounds
-            grid_size = self.grid_size if hasattr(self, "grid_size") else None
-            if grid_size is not None:
-                new_pos[0] = np.clip(new_pos[0], 0, grid_size - 1)
-                new_pos[1] = np.clip(new_pos[1], 0, grid_size - 1)
+            if hasattr(self, "grid_size"):
+                new_x = max(0, min(self.grid_size - 1, new_x))
+                new_y = max(0, min(self.grid_size - 1, new_y))
 
-            self.estimated_pos = new_pos
+            self.estimated_pos = (new_x, new_y)  # Store as tuple
             
     def _obs_to_global_coords(self, obs_x, obs_y, agent_x, agent_y, agent_dir, obs_width, obs_height):
         """
@@ -432,9 +431,9 @@ class SuccessorAgent:
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
         
-        current_pos = self.env.agent_pos
+        current_pos = self.estimated_pos
         x, y = current_pos
-        current_dir = self.env.agent_dir
+        current_dir = self.estimated_dir
         
         neighbors = [
             ((x + 1, y), 0), ((x, y + 1), 1), 

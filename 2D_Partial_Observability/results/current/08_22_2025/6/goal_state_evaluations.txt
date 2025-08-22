@@ -1,0 +1,12 @@
+Goal State Value Evaluations
+==================================================
+Episode 400: Agent chose to stay at goal.
+Episode 500: Agent chose to stay at goal.
+Episode 600: Agent did not choose to stay in the same position.
+Episode 700: Agent did not choose to stay in the same position.
+Episode 1100: Agent did not choose to stay in the same position.
+Episode 1300: Agent did not choose to stay in the same position.
+Episode 1500: Agent did not choose to stay in the same position.
+Episode 1700: Agent did not choose to stay in the same position.
+Episode 1800: Agent chose to stay at goal.
+Episode 1900: Agent did not choose to stay in the same position.

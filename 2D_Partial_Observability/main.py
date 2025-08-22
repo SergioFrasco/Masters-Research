@@ -81,7 +81,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     return result.strip()  # Return without newline for potential printing
 
 
-def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=10000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -96,7 +96,7 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
     
     # Encoding values for egocentric view
     EMPTY_SPACE = 0.0
-    REWARD = 10.0
+    REWARD = 1.0
     OUT_OF_BOUNDS = 0.0  # or 8.0
     WALL = 0.0  # distinguishable from empty space
 
@@ -278,15 +278,23 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             # Update reward maps and WVF
             agent.reward_maps.fill(0)
 
+            # for y in range(agent.grid_size):
+            #     for x in range(agent.grid_size):
+            #         reward = agent.true_reward_map[y, x]
+            #         idx = y * agent.grid_size + x
+            #         reward_threshold = 0.5
+            #         if reward > reward_threshold:
+            #             agent.reward_maps[idx, y, x] = 1
+            #         else:
+            #             agent.reward_maps[idx, y, x] = 0
+
+            # Instead of binary thresholding:
             for y in range(agent.grid_size):
                 for x in range(agent.grid_size):
                     reward = agent.true_reward_map[y, x]
                     idx = y * agent.grid_size + x
-                    reward_threshold = 0.5
-                    if reward > reward_threshold:
-                        agent.reward_maps[idx, y, x] = 10
-                    else:
-                        agent.reward_maps[idx, y, x] = 0
+                    # Use the actual predicted values, not binary
+                    agent.reward_maps[idx, y, x] = reward * 10  # Scale up if needed
 
             # Compute WVF
             M_flat = np.mean(agent.M, axis=0)
@@ -310,7 +318,7 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
         ae_triggers_per_episode.append(ae_trigger_count_this_episode)
 
         # Generate visualizations occasionally
-        if episode % 100 == 0:
+        if episode % 10 == 0:
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
             
             # Save egocentric view visualization
@@ -337,7 +345,43 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             plt.tight_layout()
             plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
             plt.close()  # Close the figure to free memory
+    
 
+            # Plot the actual environment layout with viridis
+            env_grid = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=float)
+            
+            # Iterate through the grid to identify objects
+            for x in range(env.unwrapped.size):
+                for y in range(env.unwrapped.size):
+                    cell = env.unwrapped.grid.get(x, y)
+                    if cell is None:
+                        env_grid[y, x] = 0.0  # Empty space - dark purple
+                    elif cell.type == 'wall':
+                        env_grid[y, x] = 0.3  # Wall - dark blue/green
+                    elif cell.type == 'goal':
+                        env_grid[y, x] = 1.0  # Goal/Reward - bright yellow
+            
+            # Mark current agent position
+            agent_x, agent_y = env.unwrapped.agent_pos
+            env_grid[agent_y, agent_x] = 0.6  # Agent - teal/green
+            
+            # Create the plot
+            plt.figure(figsize=(6, 6))
+            im = plt.imshow(env_grid, cmap='viridis', vmin=0, vmax=1)
+            plt.title(f"Environment Ground Truth (Episode {episode})")
+            
+            # Add grid lines for clarity
+            plt.grid(True, which='both', color='white', linewidth=0.5, alpha=0.3)
+            plt.xticks(range(env.unwrapped.size))
+            plt.yticks(range(env.unwrapped.size))
+            
+            # Add colorbar with labels
+            cbar = plt.colorbar(im, label="Object Type", ticks=[0, 0.3, 0.6, 1.0])
+            cbar.ax.set_yticklabels(['Empty', 'Wall', 'Agent', 'Goal'])
+            
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'environment/ground_truth_episode_{episode}.png'))
+            plt.close()
 
     # Save model and create visualizations (same as before)
     torch.save(ae_model.state_dict(), generate_save_path('vision_model.pth'))
@@ -514,7 +558,7 @@ def get_visible_global_positions(agent_pos, agent_dir, view_size, env_size):
 
 def update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view, 
                                                     visible_positions, view_size, 
-                                                    learning_rate=1.0):
+                                                    learning_rate=0.2):
     """
     Update true_reward_map using predictions from egocentric view
     Only updates cells that are currently visible and not previously visited
@@ -523,13 +567,13 @@ def update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view,
         # Skip already visited positions to preserve ground truth
         if not agent.visited_positions[global_x, global_y]:
             predicted_value = predicted_ego_view[ego_y, ego_x]
+            current_value = agent.true_reward_map[global_y, global_x]
             
-            if predicted_value > 0.001:  # Only update if prediction is significant
-                agent.true_reward_map[global_y, global_x] = predicted_value
-            else:
-                # Set to zero if prediction is very low
-                agent.true_reward_map[global_y, global_x] = 0.0
-
+            # Always use learning rate for smooth updates
+            agent.true_reward_map[global_y, global_x] += learning_rate * (predicted_value - current_value)
+            
+            # clip to valid range
+            agent.true_reward_map[global_y, global_x] = np.clip(agent.true_reward_map[global_y, global_x], 0.0, 1.0)
 
 def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir, done, view_size, oob_val=0.0):
     """
@@ -553,7 +597,7 @@ def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir
 
             # Learning Signal
             if done and ego_y == agent_ego_y and ego_x == agent_ego_x:
-                egocentric_target[ego_y, ego_x] = 10
+                egocentric_target[ego_y, ego_x] = 1
             
             if not done and ego_y == agent_ego_y and ego_x == agent_ego_x:
                 egocentric_target[ego_y, ego_x] = 0
@@ -597,7 +641,7 @@ def save_egocentric_view_visualization(input_view, prediction, target, episode, 
 
     for ax, mat, title in zip(axes, [input_view, prediction, target],
                               ["Input View", "AE Prediction", "Target"]):
-        im = ax.imshow(mat, cmap="viridis", vmin=0, vmax=10)
+        im = ax.imshow(mat, cmap="viridis", vmin=0, vmax=1)
         ax.set_title(title)
         ax.axis("off")
         ax.plot(agent_ego_x, agent_ego_y, 'ro', markersize=8,
