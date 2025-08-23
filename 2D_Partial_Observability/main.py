@@ -193,13 +193,35 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             # 1. CREATE EGOCENTRIC VIEW INPUT
             egocentric_input = create_egocentric_view(env, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL, done=done)
             
-            # 2. GET AE PREDICTION
-            input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], 
-                                      dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+            # # 2. GET AE PREDICTION
+            # input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], 
+            #                           dtype=torch.float32).permute(0, 3, 1, 2).to(device)
             
-            with torch.no_grad():
-                predicted_ego_view = ae_model(input_tensor)
-                predicted_ego_view_2d = predicted_ego_view.squeeze().cpu().numpy()
+            # with torch.no_grad():
+            #     predicted_ego_view = ae_model(input_tensor)
+            #     predicted_ego_view_2d = predicted_ego_view.squeeze().cpu().numpy()
+
+            # 2. GET PERFECT GROUND TRUTH INSTEAD OF AE PREDICTION - if this breaks ego to global func is a problem
+            # Create perfect prediction based on actual environment
+            predicted_ego_view_2d = np.zeros((VIEW_SIZE, VIEW_SIZE))
+
+            for ego_y in range(VIEW_SIZE):
+                for ego_x in range(VIEW_SIZE):
+                    global_x, global_y = egocentric_to_global_coords(
+                        ego_x, ego_y, int(agent.estimated_pos[0]), int(agent.estimated_pos[1]), 
+                        agent.estimated_dir, VIEW_SIZE
+                    )
+                    
+                    # Check actual environment for ground truth
+                    if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
+                        cell = env.unwrapped.grid.get(global_x, global_y)
+                        if cell is not None and cell.type == 'goal':
+                            predicted_ego_view_2d[ego_y, ego_x] = 1.0  # Perfect prediction
+                        else:
+                            predicted_ego_view_2d[ego_y, ego_x] = 0.0
+                    else:
+                        predicted_ego_view_2d[ego_y, ego_x] = 0.0  # Out of bounds
+
 
             # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
             # Mark current position with ground truth
@@ -218,6 +240,8 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
             egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent.estimated_pos, agent.estimated_dir, done,  VIEW_SIZE, OUT_OF_BOUNDS)
 
+            # ------------------------------------------------------------------
+            # Not commented now
             # if step % 50 == 0:
             # # Plot actual entire environment as well as the true reward map here
             #     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -252,32 +276,36 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             #     plt.tight_layout()
             #     plt.savefig(generate_save_path(f"debug/env_vs_reward_episode_{episode}_step_{step}.png"))
             #     plt.close()
+            # ------------------------------------------------------------------
 
             # 5. DECIDE WHETHER TO TRAIN AE
             center_x = VIEW_SIZE // 2
             agent_ego_x = center_x
             agent_ego_y = VIEW_SIZE - 1
 
-            trigger_ae_training = False
-            if abs(predicted_ego_view_2d[agent_ego_y, agent_ego_x] - egocentric_target[agent_ego_y, agent_ego_x]) > train_vision_threshold:
-                ae_trigger_count_this_episode += 1
-                trigger_ae_training = True
+            # Commented because testing perfect vision
+            # trigger_ae_training = False
+            # if abs(predicted_ego_view_2d[agent_ego_y, agent_ego_x] - egocentric_target[agent_ego_y, agent_ego_x]) > train_vision_threshold:
+            #     ae_trigger_count_this_episode += 1
+            #     trigger_ae_training = True
             
-            if trigger_ae_training:
-                # Train autoencoder
-                target_tensor = torch.tensor(egocentric_target[np.newaxis, ..., np.newaxis], dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+            # if trigger_ae_training:
+            #     # Train autoencoder
+            #     target_tensor = torch.tensor(egocentric_target[np.newaxis, ..., np.newaxis], dtype=torch.float32).permute(0, 3, 1, 2).to(device)
 
-                ae_model.train()
-                optimizer.zero_grad()
-                output = ae_model(input_tensor)
-                loss = loss_fn(output, target_tensor)
-                loss.backward()
-                optimizer.step()
+            #     ae_model.train()
+            #     optimizer.zero_grad()
+            #     output = ae_model(input_tensor)
+            #     loss = loss_fn(output, target_tensor)
+            #     loss.backward()
+            #     optimizer.step()
 
             # 6. UPDATE WVF (same as before)
             # Update reward maps and WVF
             agent.reward_maps.fill(0)
 
+            # ------------------------------------------------------------------
+            # Not commented now
             # for y in range(agent.grid_size):
             #     for x in range(agent.grid_size):
             #         reward = agent.true_reward_map[y, x]
@@ -287,6 +315,7 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             #             agent.reward_maps[idx, y, x] = 1
             #         else:
             #             agent.reward_maps[idx, y, x] = 0
+            # ---------------------------------------------------------
 
             # Instead of binary thresholding:
             for y in range(agent.grid_size):
@@ -627,30 +656,87 @@ def overlay_out_of_bounds(ax, view_size, env_size, agent_pos, agent_dir):
 
 def save_egocentric_view_visualization(input_view, prediction, target, episode, step, agent_pos=None, agent_dir=None, env_size=None):
     """
-    Save visualization of egocentric views for debugging.
-    Shows agent position as a red dot in the center bottom.
-    Optionally overlays yellow dots for out-of-bounds cells.
+    Save visualization showing how egocentric views map to global coordinates.
+    Shows the full environment grid with egocentric values overlaid where visible.
     """
+    if agent_pos is None or agent_dir is None or env_size is None:
+        print("Warning: Need agent_pos, agent_dir, and env_size for global visualization")
+        return
+    
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-
     view_size = input_view.shape[0]
-    agent_ego_x = view_size // 2
-    agent_ego_y = view_size - 1
-
+    
     for ax, mat, title in zip(axes, [input_view, prediction, target],
                               ["Input View", "AE Prediction", "Target"]):
-        im = ax.imshow(mat, cmap="viridis", vmin=0, vmax=1)
-        ax.set_title(title)
-        ax.axis("off")
-        ax.plot(agent_ego_x, agent_ego_y, 'ro', markersize=8,
-                markeredgecolor='white', markeredgewidth=1)
-
-        # overlay OOB markers if env info provided
-        if agent_pos is not None and agent_dir is not None and env_size is not None:
-            overlay_out_of_bounds(ax, view_size, env_size, agent_pos, agent_dir)
-
+        
+        # Create empty global grid
+        global_grid = np.full((env_size, env_size), np.nan)  # NaN for unseen areas
+        
+        # Map egocentric view to global coordinates
+        for ego_y in range(view_size):
+            for ego_x in range(view_size):
+                # Convert egocentric to global coordinates
+                global_x, global_y = egocentric_to_global_coords(
+                    ego_x, ego_y, int(agent_pos[0]), int(agent_pos[1]), 
+                    agent_dir, view_size
+                )
+                
+                # If within bounds, place the value
+                if 0 <= global_x < env_size and 0 <= global_y < env_size:
+                    global_grid[global_y, global_x] = mat[ego_y, ego_x]
+        
+        # Plot the global grid
+        im = ax.imshow(global_grid, cmap="viridis", vmin=0, vmax=1)
+        ax.set_title(f"{title} (Global View)")
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        
+        # Mark agent position and direction
+        agent_x, agent_y = int(agent_pos[0]), int(agent_pos[1])
+        ax.plot(agent_x, agent_y, 'ro', markersize=10, markeredgecolor='white', markeredgewidth=2)
+        
+        # Draw arrow showing agent direction
+        dx, dy = 0, 0
+        if agent_dir == 0:  # right
+            dx = 0.4
+        elif agent_dir == 1:  # down
+            dy = 0.4
+        elif agent_dir == 2:  # left
+            dx = -0.4
+        elif agent_dir == 3:  # up
+            dy = -0.4
+        
+        ax.arrow(agent_x, agent_y, dx, dy, head_width=0.2, head_length=0.15, 
+                fc='red', ec='white', linewidth=1)
+        
+        # Draw grid lines
+        ax.grid(True, which='both', color='gray', linewidth=0.5, alpha=0.3)
+        ax.set_xticks(range(env_size))
+        ax.set_yticks(range(env_size))
+        
+        # Draw the viewing cone/box to show what area is visible
+        # Calculate corners of the egocentric view in global coordinates
+        corners = []
+        for (ego_x, ego_y) in [(0, 0), (view_size-1, 0), 
+                               (view_size-1, view_size-1), (0, view_size-1)]:
+            global_x, global_y = egocentric_to_global_coords(
+                ego_x, ego_y, int(agent_pos[0]), int(agent_pos[1]), 
+                agent_dir, view_size
+            )
+            if 0 <= global_x < env_size and 0 <= global_y < env_size:
+                corners.append((global_x, global_y))
+        
+        # Draw lines connecting the corners to show field of view
+        if len(corners) >= 2:
+            for i in range(len(corners)):
+                x1, y1 = corners[i]
+                x2, y2 = corners[(i+1) % len(corners)]
+                ax.plot([x1, x2], [y1, y2], 'w--', alpha=0.5, linewidth=1)
+        
+        # Add colorbar
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
+    
+    plt.suptitle(f"Episode {episode}, Step {step} - Agent at ({agent_x}, {agent_y}) facing {['right', 'down', 'left', 'up'][agent_dir]}")
     plt.tight_layout()
     plt.savefig(generate_save_path(f"egocentric_views/episode_{episode}_step_{step}.png"))
     plt.close()
