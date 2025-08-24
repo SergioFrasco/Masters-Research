@@ -239,7 +239,7 @@ class SuccessorAgent:
         return agent_x + global_offset_x, agent_y + global_offset_y
        # Updated get state index for Partial Observability
     def get_state_index(self, obs):
-        """Use estimated position instead of true position"""
+        """Convert MiniGrid observation to state index - make consistent"""
         agent_pos = self.env.agent_pos
         x, y = agent_pos
         return y * self.grid_size + x  # Use (y,x) consistently
@@ -429,9 +429,9 @@ class SuccessorAgent:
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
         
-        current_pos = self.estimated_pos
+        current_pos = self.env.agent_pos
         x, y = current_pos
-        current_dir = self.estimated_dir
+        current_dir = self.env.agent_dir
         
         neighbors = [
             ((x + 1, y), 0), ((x, y + 1), 1), 
