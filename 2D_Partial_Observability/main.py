@@ -81,7 +81,7 @@ def evaluate_goal_state_values(agent, env, episode, log_file_path):
     return result.strip()  # Return without newline for potential printing
 
 
-def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=200, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
+def train_successor_agent(agent, env, episodes=2000, ae_model=None, max_steps=300, epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995, train_vision_threshold=0.1, device='cpu', optimizer=None, loss_fn=None):
     """
     Training loop with egocentric view for autoencoder
     """
@@ -90,7 +90,6 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
     epsilon = epsilon_start
     step_counts = []
    
-
     # Define egocentric view parameters
     VIEW_SIZE = 7  # Agent sees 7x7 grid around itself
     
@@ -113,16 +112,10 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
         step_count = 0
 
         plt.close('all')
-        obs, info = env.reset()
-
-        initial_agent_pos = env.unwrapped.agent_pos
-        initial_agent_dir = env.unwrapped.agent_dir
+        obs = env.reset()
 
         total_reward = 0
         step_count = 0
-
-        agent.estimated_pos = np.array(initial_agent_pos)
-        agent.estimated_dir = initial_agent_dir
 
         # Reset for new episode
         agent.true_reward_map = np.zeros((env.unwrapped.size, env.unwrapped.size))
@@ -136,32 +129,21 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
         current_action = agent.sample_random_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
 
-
         for step in range(max_steps):
             step_count += 1
 
-            # Check if Pose estimate matches
-            agent_pos = tuple(int(x) for x in env.unwrapped.agent_pos)
-            agent_dir = env.unwrapped.agent_dir
-            exact_pose = (agent_pos, agent_dir)
-
-            estimated_pose = (tuple(agent.estimated_pos), agent.estimated_dir)
-
-            if exact_pose != estimated_pose:
-                print("Mismatch detected!")
-                print("Exact Pose:     ", exact_pose)
-                print("Estimated Pose: ", estimated_pose)
-
+            agent_pos = tuple(env.unwrapped.agent_pos)  # Use exact pos
+            agent_dir = env.unwrapped.agent_dir  # Use exact direction
+            
+            obs, reward, done, _, _ = env.step(current_action)
+            next_state_idx = agent.get_state_index(obs)
 
             # Take action and observe result
             obs, reward, done, _, _ = env.step(current_action)
-            
-            # Update agent's position estimate
-            agent.update_position_estimate(current_action)
             next_state_idx = agent.get_state_index(obs)
 
             # Get current agent position for tracking
-            agent_pos = agent.estimated_pos
+            # agent_pos = agent.estimated_pos
             state_occupancy[int(agent_pos[0]), int(agent_pos[1])] += 1
             
             # Complete current experience tuple
@@ -190,6 +172,12 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             
             # ============== EGOCENTRIC VISION MODEL ==============
             
+            agent.estimated_pos = tuple(env.unwrapped.agent_pos)
+            agent.estimated_dir = env.unwrapped.agent_dir
+            # Use exact position and direction from environment
+            agent_pos = tuple(env.unwrapped.agent_pos)
+            agent_dir = env.unwrapped.agent_dir
+
             # 1. CREATE EGOCENTRIC VIEW INPUT
             egocentric_input = create_egocentric_view(env, agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL, done=done)
             
@@ -230,7 +218,17 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             # Update true_reward_map only for visible cells using prediction
             visible_global_positions = get_visible_global_positions(agent.estimated_pos, agent.estimated_dir, VIEW_SIZE, env.unwrapped.size)
             
-            update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, learning_rate=1.0)
+
+            update_true_reward_map_from_egocentric_prediction(
+                agent, 
+                predicted_ego_view_2d, 
+                visible_global_positions, 
+                VIEW_SIZE, 
+                learning_rate=1.0,
+                env=env,  # Pass the environment
+                episode=episode,  # Pass current episode
+                step=step  # Pass current step
+)
 
             # if done and step < max_steps:
             #     agent.true_reward_map[agent_pos[0], agent_pos[1]] = 10.0
@@ -305,7 +303,6 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
             agent.reward_maps.fill(0)
 
             # ------------------------------------------------------------------
-            # Not commented now
             # for y in range(agent.grid_size):
             #     for x in range(agent.grid_size):
             #         reward = agent.true_reward_map[y, x]
@@ -323,15 +320,13 @@ def train_successor_agent(agent, env, episodes=1000, ae_model=None, max_steps=20
                     reward = agent.true_reward_map[y, x]
                     idx = y * agent.grid_size + x
                     # Use the actual predicted values, not binary
-                    agent.reward_maps[idx, y, x] = reward * 10  # Scale up if needed
+                    agent.reward_maps[idx, y, x] = reward
 
             # Compute WVF
             M_flat = np.mean(agent.M, axis=0)
             R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
             V_all = M_flat @ R_flat_all.T
             agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
-
-            
 
             if done:
                 if episode % 100 == 0:
@@ -587,10 +582,12 @@ def get_visible_global_positions(agent_pos, agent_dir, view_size, env_size):
 
 def update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view, 
                                                     visible_positions, view_size, 
-                                                    learning_rate=0.2):
+                                                    learning_rate=0.2, env=None, episode=None, step=None):
     """
     Update true_reward_map using predictions from egocentric view
     Only updates cells that are currently visible and not previously visited
+    
+    Added debugging plots to visualize ground truth vs true reward map
     """
     for global_x, global_y, ego_x, ego_y in visible_positions:
         # Skip already visited positions to preserve ground truth
@@ -603,6 +600,146 @@ def update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view,
             
             # clip to valid range
             agent.true_reward_map[global_y, global_x] = np.clip(agent.true_reward_map[global_y, global_x], 0.0, 1.0)
+
+    # # ============== DEBUGGING PLOTS FOR EVERY STEP ==============
+    # if env is not None and episode is not None and step is not None:
+    #     import matplotlib.pyplot as plt
+    #     from utils.plotting import generate_save_path
+        
+    #     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        
+    #     # === PLOT 1: GROUND TRUTH ENVIRONMENT ===
+    #     env_grid = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=float)
+        
+    #     # Build ground truth environment grid
+    #     for x in range(env.unwrapped.size):
+    #         for y in range(env.unwrapped.size):
+    #             cell = env.unwrapped.grid.get(x, y)
+    #             if cell is None:
+    #                 env_grid[y, x] = 0.0  # Empty space
+    #             elif cell.type == 'wall':
+    #                 env_grid[y, x] = 0.5  # Wall
+    #             elif cell.type == 'goal':
+    #                 env_grid[y, x] = 1.0  # Goal/Reward
+    #             else:
+    #                 env_grid[y, x] = 0.2  # Other objects
+        
+    #     # Plot ground truth environment
+    #     im1 = axes[0].imshow(env_grid, cmap='viridis', vmin=0, vmax=1)
+    #     axes[0].set_title(f'Ground Truth Environment\nEpisode {episode}, Step {step}')
+        
+    #     # Mark agent position and direction on ground truth
+    #     agent_x, agent_y = int(agent.estimated_pos[0]), int(agent.estimated_pos[1])
+    #     axes[0].plot(agent_x, agent_y, 'ro', markersize=12, markeredgecolor='white', markeredgewidth=2)
+        
+    #     # Draw arrow showing agent direction
+    #     dx, dy = 0, 0
+    #     arrow_length = 0.4
+    #     if agent.estimated_dir == 0:  # right
+    #         dx = arrow_length
+    #     elif agent.estimated_dir == 1:  # down
+    #         dy = arrow_length
+    #     elif agent.estimated_dir == 2:  # left
+    #         dx = -arrow_length
+    #     elif agent.estimated_dir == 3:  # up
+    #         dy = -arrow_length
+        
+    #     axes[0].arrow(agent_x, agent_y, dx, dy, head_width=0.15, head_length=0.1, 
+    #                  fc='red', ec='white', linewidth=2)
+        
+    #     # Add grid and labels for ground truth
+    #     axes[0].grid(True, which='both', color='white', linewidth=0.5, alpha=0.3)
+    #     axes[0].set_xticks(range(env.unwrapped.size))
+    #     axes[0].set_yticks(range(env.unwrapped.size))
+    #     axes[0].set_xlabel('X')
+    #     axes[0].set_ylabel('Y')
+        
+    #     # Add colorbar with labels for ground truth
+    #     cbar1 = fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
+    #     cbar1.set_label('Object Type')
+        
+    #     # === PLOT 2: TRUE REWARD MAP ===
+    #     im2 = axes[1].imshow(agent.true_reward_map, cmap='hot', vmin=0, vmax=1)
+    #     axes[1].set_title(f'True Reward Map (Agent\'s Belief)\nEpisode {episode}, Step {step}')
+        
+    #     # Mark agent position and direction on true reward map
+    #     axes[1].plot(agent_x, agent_y, 'co', markersize=12, markeredgecolor='white', markeredgewidth=2)
+    #     axes[1].arrow(agent_x, agent_y, dx, dy, head_width=0.15, head_length=0.1, 
+    #                  fc='cyan', ec='white', linewidth=2)
+        
+    #     # Highlight visited positions with small markers
+    #     visited_x, visited_y = np.where(agent.visited_positions)
+    #     axes[1].scatter(visited_x, visited_y, c='lime', s=20, marker='s', alpha=0.7, 
+    #                    edgecolors='black', linewidths=0.5, label='Visited')
+        
+    #     # Highlight currently visible positions
+    #     visible_x = [pos[0] for pos in visible_positions]
+    #     visible_y = [pos[1] for pos in visible_positions]
+    #     axes[1].scatter(visible_x, visible_y, c='yellow', s=30, marker='o', alpha=0.8,
+    #                    edgecolors='black', linewidths=1, label='Currently Visible')
+        
+    #     # Add grid and labels for true reward map
+    #     axes[1].grid(True, which='both', color='white', linewidth=0.5, alpha=0.3)
+    #     axes[1].set_xticks(range(env.unwrapped.size))
+    #     axes[1].set_yticks(range(env.unwrapped.size))
+    #     axes[1].set_xlabel('X')
+    #     axes[1].set_ylabel('Y')
+    #     axes[1].legend(loc='upper right', bbox_to_anchor=(1, 1))
+        
+    #     # Add colorbar for true reward map
+    #     cbar2 = fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+    #     cbar2.set_label('Reward Belief')
+        
+    #     # Add text annotations with key information
+    #     direction_names = ['Right', 'Down', 'Left', 'Up']
+    #     info_text = f"Agent Dir: {direction_names[agent.estimated_dir]}\n"
+    #     info_text += f"Position: ({agent_x}, {agent_y})\n"
+    #     info_text += f"Visited Positions: {np.sum(agent.visited_positions)}\n"
+    #     info_text += f"Learning Rate: {learning_rate}"
+        
+    #     fig.text(0.02, 0.02, info_text, fontsize=10, bbox=dict(boxstyle="round,pad=0.3", 
+    #                                                           facecolor="lightgray", alpha=0.8))
+        
+    #     plt.tight_layout()
+        
+    #     # Save the plot
+    #     save_path = generate_save_path(f"debug_reward_maps/episode_{episode}_step_{step:03d}.png")
+    #     plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    #     plt.close()
+        
+    #     # Also save a summary every 10 steps showing reward retention
+    #     if step % 10 == 0:
+    #         # Create a difference plot to show how much the true reward map differs from ground truth
+    #         fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+            
+    #         # Create ground truth reward map (1 where goals are, 0 elsewhere)
+    #         gt_reward_map = np.zeros_like(agent.true_reward_map)
+    #         for x in range(env.unwrapped.size):
+    #             for y in range(env.unwrapped.size):
+    #                 cell = env.unwrapped.grid.get(x, y)
+    #                 if cell is not None and cell.type == 'goal':
+    #                     gt_reward_map[y, x] = 1.0
+            
+    #         # Calculate difference (how well agent remembers rewards)
+    #         difference = np.abs(agent.true_reward_map - gt_reward_map)
+            
+    #         im = ax.imshow(difference, cmap='Reds', vmin=0, vmax=1)
+    #         ax.set_title(f'Reward Memory Error\nEpisode {episode}, Step {step}\n(Red = Forgot Reward, Dark = Correct)')
+            
+    #         # Mark agent
+    #         ax.plot(agent_x, agent_y, 'bo', markersize=10, markeredgecolor='white', markeredgewidth=2)
+            
+    #         # Add grid
+    #         ax.grid(True, which='both', color='white', linewidth=0.5, alpha=0.3)
+    #         ax.set_xticks(range(env.unwrapped.size))
+    #         ax.set_yticks(range(env.unwrapped.size))
+            
+    #         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label='Absolute Error')
+    #         plt.tight_layout()
+            
+    #         save_path = generate_save_path(f"reward_memory_error/episode_{episode}_step_{step:03d}.png")
+    #         plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    #         plt.close()
 
 def create_egocentric_target_from_true_map(true_reward_map, agent_pos, agent_dir, done, view_size, oob_val=0.0):
     """

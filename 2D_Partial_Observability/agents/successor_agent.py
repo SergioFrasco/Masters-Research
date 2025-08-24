@@ -40,7 +40,7 @@ class SuccessorAgent:
         self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
 
         # Path integration for partial observability
-        self.estimated_pos = (1, 1)  # Start position estimate
+        self.estimated_pos = (1,1)  # Start position estimate
         self.estimated_dir = 0  # Start direction estimate
         self.position_confidence = 1.0  # Confidence in position estimate
 
@@ -240,11 +240,9 @@ class SuccessorAgent:
        # Updated get state index for Partial Observability
     def get_state_index(self, obs):
         """Use estimated position instead of true position"""
-        x, y = self.estimated_pos
-        # Clamp to valid bounds
-        x = int(np.clip(x, 0, self.grid_size - 1))
-        y = int(np.clip(y, 0, self.grid_size - 1))
-        return y * self.grid_size + x
+        agent_pos = self.env.agent_pos
+        x, y = agent_pos
+        return y * self.grid_size + x  # Use (y,x) consistently
 
     # def extract_local_observation_info(self, obs, view_size=7):
     #     """
@@ -511,6 +509,17 @@ class SuccessorAgent:
         The SR should capture state transition dynamics regardless of reward structure.
         Only updates when action is 'move forward' (actual state transition).
         """
+        # agent_pos = tuple(self.env.unwrapped.agent_pos)
+        # agent_dir = self.env.unwrapped.agent_dir
+        # exact_pose = (agent_pos, agent_dir)
+
+        # estimated_pose = (tuple(self.estimated_pos), self.estimated_dir)
+
+        # if exact_pose != estimated_pose:
+        #     print("Mismatch detected!")
+        #     print("Exact Pose:     ", exact_pose)
+        #     print("Estimated Pose: ", estimated_pose)
+
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action
         s_1 = current_exp[2]  # next state index
