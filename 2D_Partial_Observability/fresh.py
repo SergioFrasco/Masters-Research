@@ -16,46 +16,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from minigrid.wrappers import ViewSizeWrapper
+from models import Autoencoder2
 
 
 # Set environment variables to prevent memory issues
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
-
-
-class PartialObservableAutoencoder(nn.Module):
-    """
-    Autoencoder designed for 7x7 partial observations.
-    Learns to predict reward locations from local visual patterns.
-    """
-    def __init__(self, input_channels=1, view_size=7):
-        super(PartialObservableAutoencoder, self).__init__()
-        self.view_size = view_size
-        
-        # Encoder: Processes 7x7 partial views to learn visual features
-        self.encoder = nn.Sequential(
-            nn.Conv2d(input_channels, 16, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 3, padding=1),
-            nn.ReLU()
-        )
-        
-        # Decoder: Reconstructs reward predictions for the 7x7 view
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, 3, padding=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 16, 3, padding=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(16, 1, 3, padding=1),
-            nn.Sigmoid()  # Output between 0 and 1 for reward probability
-        )
-    
-    def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
 
 
 class PartiallyObservableSuccessorAgent(SuccessorAgent):
@@ -70,10 +36,6 @@ class PartiallyObservableSuccessorAgent(SuccessorAgent):
         # learned_map: Accumulates predicted reward probabilities over time
         # confidence_map: Tracks how many times each cell has been observed
         self.learned_map = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
-        self.confidence_map = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
-        
-        # exploration_bonus: Encourages visiting low-confidence areas
-        self.exploration_bonus = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
         
     def egocentric_to_global_coords(self, local_x, local_y, agent_x, agent_y, agent_dir):
         """
@@ -108,30 +70,18 @@ class PartiallyObservableSuccessorAgent(SuccessorAgent):
         for local_y in range(self.view_size):
             for local_x in range(self.view_size):
                 # Convert local coordinates to global
-                global_x, global_y = self.egocentric_to_global_coords(
-                    local_x, local_y, agent_x, agent_y, agent_dir
-                )
+                global_x, global_y = self.egocentric_to_global_coords(local_x, local_y, agent_x, agent_y, agent_dir)
                 
                 # Only update if within map bounds
                 if 0 <= global_x < self.grid_size and 0 <= global_y < self.grid_size:
-                    # STEP 3a: Calculate confidence-weighted update
-                    old_confidence = self.confidence_map[global_y, global_x]
-                    new_confidence = min(1.0, old_confidence + 0.1)  # Gradually increase confidence
-                    
-                    # STEP 3b: Blend old and new predictions based on confidence
+                    # STEP 3b: Blend old and new predictions 
+                    # FIXED: Use [y, x] for array indexing
                     old_value = self.learned_map[global_y, global_x]
                     new_value = predicted_partial_2d[local_y, local_x]
                     
                     # Weighted average: more weight to new observations initially
-                    weight_new = 0.3 if old_confidence > 0 else 1.0
-                    self.learned_map[global_y, global_x] = (
-                        old_value * (1 - weight_new) + new_value * weight_new
-                    )
-                    
-                    self.confidence_map[global_y, global_x] = new_confidence
-                    
-                    # STEP 3c: Update exploration bonus (decreases as confidence increases)
-                    self.exploration_bonus[global_y, global_x] = max(0, 1.0 - new_confidence)
+                    update_learning_rate = 1
+                    self.learned_map[global_y, global_x] = (old_value * (1 - update_learning_rate) + new_value * update_learning_rate)
 
 
 class ExperimentRunner:
@@ -152,14 +102,15 @@ class ExperimentRunner:
         
         # Mark the trajectory
         for i, (x, y, action) in enumerate(trajectory):
+            # FIXED: Use [y, x] for grid indexing
             if i == 0:
-                grid[x, y] = 'S'  # Start
+                grid[y, x] = 'S'  # Start
             elif i == len(trajectory) - 1:
-                grid[x, y] = 'E'  # End
+                grid[y, x] = 'E'  # End
             else:
                 # Use action arrows
                 action_symbols = {0: '↑', 1: '→', 2: '↓', 3: '←'}
-                grid[x, y] = action_symbols.get(action, str(i % 10))
+                grid[y, x] = action_symbols.get(action, str(i % 10))
         
         # Create matplotlib figure
         fig, ax = plt.subplots(figsize=(10, 10))
@@ -216,7 +167,7 @@ class ExperimentRunner:
         print(f"Trajectory plot saved to: {save_path}")
 
     
-    def run_successor_experiment(self, episodes=5000, max_steps=300, seed=20):
+    def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
         """Run Partially Observable Successor Agent experiment"""
         
         np.random.seed(seed)
@@ -229,7 +180,7 @@ class ExperimentRunner:
 
         # Setup torch with partial observable autoencoder
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        ae_model = PartialObservableAutoencoder(input_channels=1, view_size=view_size).to(device)
+        ae_model = Autoencoder2(input_channels=1).to(device)
         optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
         loss_fn = nn.MSELoss()
 
@@ -249,9 +200,6 @@ class ExperimentRunner:
             agent.true_reward_map = np.zeros((env.unwrapped.size, env.unwrapped.size))
             agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
             agent.visited_positions = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=bool)
-            
-            # Optional: Decay confidence slightly each episode to handle changing environments
-            agent.confidence_map *= 0.99  # Slight decay to allow adaptation
 
             current_state_idx = agent.get_state_index(obs)
             current_action = agent.sample_random_action(obs, epsilon=epsilon)
@@ -283,7 +231,7 @@ class ExperimentRunner:
                 agent.update(current_exp, None if done else next_exp)
 
                 # ========== VISION MODEL WITH PARTIAL OBSERVABILITY ==========
-                
+                agent_position = tuple(env.unwrapped.agent_pos)
                 # STEP 5: Process the partial observation (7x7 view)
                 partial_obs = obs['image']  # 7x7x3 observation from ViewSizeWrapper
                 
@@ -306,19 +254,18 @@ class ExperimentRunner:
                     predicted_partial_2d = predicted_partial.squeeze().cpu().numpy()  # (7, 7)
                 
                 # STEP 7: Update the global learned map with the partial prediction
-                agent_x, agent_y = agent_pos
-                agent.update_learned_map_from_partial_view(
-                    predicted_partial_2d, agent_x, agent_y, agent_dir
-                )
+                agent_x, agent_y = agent_position
+                agent.update_learned_map_from_partial_view(predicted_partial_2d, agent_x, agent_y, agent_dir)
                 
-                # Mark current position as visited
-                agent.visited_positions[agent_x, agent_y] = True
+                # FIXED: Mark current position as visited using [y, x]
+                agent.visited_positions[agent_y, agent_x] = True
                 
                 # STEP 8: Update true reward map at current position (ground truth for training)
+                # FIXED: Use [y, x] for array indexing
                 if done and step < max_steps:
-                    agent.true_reward_map[agent_x, agent_y] = 1.0  # Found reward!
+                    agent.true_reward_map[agent_y, agent_x] = 1.0  # Found reward!
                 else:
-                    agent.true_reward_map[agent_x, agent_y] = 0.0  # No reward here
+                    agent.true_reward_map[agent_y, agent_x] = 0.0  # No reward here
                 
                 # STEP 9: Create training target for the partial view
                 # This combines ground truth (visited positions) with predictions (unvisited)
@@ -327,11 +274,10 @@ class ExperimentRunner:
                 for local_y in range(view_size):
                     for local_x in range(view_size):
                         # Convert to global coordinates
-                        global_x, global_y = agent.egocentric_to_global_coords(
-                            local_x, local_y, agent_x, agent_y, agent_dir
-                        )
+                        global_x, global_y = agent.egocentric_to_global_coords(local_x, local_y, agent_x, agent_y, agent_dir)
                         
                         if 0 <= global_x < agent.grid_size and 0 <= global_y < agent.grid_size:
+                            # FIXED: Use [y, x] for array indexing
                             # Use true reward if we've visited this position
                             if agent.visited_positions[global_y, global_x]:
                                 partial_target[local_y, local_x] = agent.true_reward_map[global_y, global_x]
@@ -342,18 +288,13 @@ class ExperimentRunner:
                 # STEP 10: Train the vision model when prediction error is high
                 # Calculate prediction error at agent's current position (center of 7x7 view)
                 center_idx = view_size // 2
-                prediction_error = abs(
-                    predicted_partial_2d[center_idx, center_idx] - 
-                    agent.true_reward_map[agent_x, agent_y]
-                )
+                # FIXED: Use [y, x] for accessing true_reward_map
+                prediction_error = abs(predicted_partial_2d[center_idx, center_idx] - agent.true_reward_map[agent_y, agent_x])
                 
                 train_vision_threshold = 0.1
                 if prediction_error > train_vision_threshold:
                     # STEP 10a: Prepare target tensor
-                    target_tensor = torch.tensor(
-                        partial_target[np.newaxis, ..., np.newaxis], 
-                        dtype=torch.float32
-                    ).permute(0, 3, 1, 2).to(device)  # (1, 1, 7, 7)
+                    target_tensor = torch.tensor(partial_target[np.newaxis, ..., np.newaxis], dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, 7, 7)
                     
                     # STEP 10b: Train the autoencoder
                     ae_model.train()
@@ -371,17 +312,14 @@ class ExperimentRunner:
                 
                 for y in range(agent.grid_size):
                     for x in range(agent.grid_size):
+                        # FIXED: Use [y, x] for accessing learned_map
                         # Use learned map which is built from partial observations
                         curr_reward = agent.learned_map[y, x]
-                        
-                        # Add exploration bonus to encourage visiting low-confidence areas
-                        exploration_weight = 0.1  # How much to weight exploration
-                        curr_reward += agent.exploration_bonus[y, x] * exploration_weight
                         
                         idx = y * agent.grid_size + x
                         reward_threshold = 0.5
                         if curr_reward > reward_threshold:
-                            agent.reward_maps[idx, y, x] = curr_reward  # Use actual value, not just 1
+                            agent.reward_maps[idx, y, x] = 1 
                         else:
                             agent.reward_maps[idx, y, x] = 0
 
@@ -399,6 +337,7 @@ class ExperimentRunner:
                 if done:
                     break
 
+            
             # Check for failure in last 100 episodes and save trajectory plot
             if episode >= episodes - 100 and not done:
                 self.plot_and_save_trajectory("Partial Observable Successor", episode, trajectory, env.unwrapped.size, seed)
@@ -416,18 +355,6 @@ class ExperimentRunner:
                 im1 = plt.imshow(agent.learned_map, cmap='hot', vmin=0, vmax=1)
                 plt.title(f"Learned Reward Map (Episode {episode})")
                 plt.colorbar(im1, label="Predicted Reward Probability")
-                
-                # Plot 2: Confidence map
-                plt.subplot(1, 3, 2)
-                im2 = plt.imshow(agent.confidence_map, cmap='Blues', vmin=0, vmax=1)
-                plt.title(f"Confidence Map (Episode {episode})")
-                plt.colorbar(im2, label="Observation Confidence")
-                
-                # Plot 3: Exploration bonus
-                plt.subplot(1, 3, 3)
-                im3 = plt.imshow(agent.exploration_bonus, cmap='Greens', vmin=0, vmax=1)
-                plt.title(f"Exploration Bonus (Episode {episode})")
-                plt.colorbar(im3, label="Exploration Value")
                 
                 plt.tight_layout()
                 plt.savefig(generate_save_path(f'learned_maps/maps_episode_{episode}.png'))
@@ -449,6 +376,7 @@ class ExperimentRunner:
                 for x in range(env.unwrapped.size):
                     for y in range(env.unwrapped.size):
                         cell = env.unwrapped.grid.get(x, y)
+                        # FIXED: Use [y, x] for array indexing
                         if cell is None:
                             env_grid[y, x] = 0.0  # Empty space
                         elif cell.type == 'wall':
@@ -458,6 +386,7 @@ class ExperimentRunner:
                 
                 # Mark current agent position
                 agent_x, agent_y = env.unwrapped.agent_pos
+                # FIXED: Use [y, x] for array indexing
                 env_grid[agent_y, agent_x] = 0.6  # Agent
                 
                 plt.figure(figsize=(6, 6))
@@ -471,6 +400,149 @@ class ExperimentRunner:
                 plt.tight_layout()
                 plt.savefig(generate_save_path(f'environment/ground_truth_episode_{episode}.png'))
                 plt.close()
+
+                # ============== DEBUGGING PLOTS FOR EVERY STEP ==============
+                if env is not None and episode is not None and step is not None:
+                    
+                    visible_positions = get_visible_global_positions(agent_position, agent_dir, view_size, 10)
+
+                    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+                    
+                    # === PLOT 1: GROUND TRUTH ENVIRONMENT ===
+                    env_grid = np.zeros((env.unwrapped.size, env.unwrapped.size), dtype=float)
+                    
+                    # Build ground truth environment grid
+                    for x in range(env.unwrapped.size):
+                        for y in range(env.unwrapped.size):
+                            cell = env.unwrapped.grid.get(x, y)
+                            # FIXED: Use [y, x] for grid array indexing
+                            if cell is None:
+                                env_grid[y, x] = 0.0  # Empty space
+                            elif cell.type == 'wall':
+                                env_grid[y, x] = 0.5  # Wall
+                            elif cell.type == 'goal':
+                                env_grid[y, x] = 1.0  # Goal/Reward
+                            else:
+                                env_grid[y, x] = 0.2  # Other objects
+                    
+                    # Plot ground truth environment
+                    im1 = axes[0].imshow(env_grid, cmap='viridis', vmin=0, vmax=1)
+                    axes[0].set_title(f'Ground Truth Environment\nEpisode {episode}, Step {step}')
+                    
+                    # Mark agent position and direction on ground truth
+                    agent_x, agent_y = int(agent_position[0]), int(agent_position[1])
+                    # When plotting with matplotlib, x is column, y is row
+                    axes[0].plot(agent_x, agent_y, 'ro', markersize=12, markeredgecolor='white', markeredgewidth=2)
+                    
+                    # Draw arrow showing agent direction
+                    dx, dy = 0, 0
+                    arrow_length = 0.4
+                    if agent_dir == 0:  # right
+                        dx = arrow_length
+                    elif agent_dir == 1:  # down
+                        dy = arrow_length
+                    elif agent_dir == 2:  # left
+                        dx = -arrow_length
+                    elif agent_dir == 3:  # up
+                        dy = -arrow_length
+                    
+                    axes[0].arrow(agent_x, agent_y, dx, dy, head_width=0.15, head_length=0.1, 
+                                fc='red', ec='white', linewidth=2)
+                    
+                    # Add grid and labels for ground truth
+                    axes[0].grid(True, which='both', color='white', linewidth=0.5, alpha=0.3)
+                    axes[0].set_xticks(range(env.unwrapped.size))
+                    axes[0].set_yticks(range(env.unwrapped.size))
+                    axes[0].set_xlabel('X')
+                    axes[0].set_ylabel('Y')
+                    
+                    # Add colorbar with labels for ground truth
+                    cbar1 = fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
+                    cbar1.set_label('Object Type')
+                    
+                    # === PLOT 2: TRUE REWARD MAP ===
+                    im2 = axes[1].imshow(agent.true_reward_map, cmap='hot', vmin=0, vmax=1)
+                    axes[1].set_title(f'True Reward Map (Agent\'s Belief)\nEpisode {episode}, Step {step}')
+                    
+                    # Mark agent position and direction on true reward map
+                    axes[1].plot(agent_x, agent_y, 'co', markersize=12, markeredgecolor='white', markeredgewidth=2)
+                    axes[1].arrow(agent_x, agent_y, dx, dy, head_width=0.15, head_length=0.1, 
+                                fc='cyan', ec='white', linewidth=2)
+                    
+                    # Highlight visited positions with small markers
+                    # FIXED: np.where returns (row_indices, col_indices) which is (y, x)
+                    visited_y, visited_x = np.where(agent.visited_positions)
+                    axes[1].scatter(visited_x, visited_y, c='lime', s=20, marker='s', alpha=0.7, 
+                                edgecolors='black', linewidths=0.5, label='Visited')
+                    
+                    # Highlight currently visible positions
+                    visible_x = [pos[0] for pos in visible_positions]
+                    visible_y = [pos[1] for pos in visible_positions]
+                    axes[1].scatter(visible_x, visible_y, c='yellow', s=30, marker='o', alpha=0.8,
+                                edgecolors='black', linewidths=1, label='Currently Visible')
+                    
+                    # Add grid and labels for true reward map
+                    axes[1].grid(True, which='both', color='white', linewidth=0.5, alpha=0.3)
+                    axes[1].set_xticks(range(env.unwrapped.size))
+                    axes[1].set_yticks(range(env.unwrapped.size))
+                    axes[1].set_xlabel('X')
+                    axes[1].set_ylabel('Y')
+                    axes[1].legend(loc='upper right', bbox_to_anchor=(1, 1))
+                    
+                    # Add colorbar for true reward map
+                    cbar2 = fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
+                    cbar2.set_label('Reward Belief')
+                    
+                    # Add text annotations with key information
+                    direction_names = ['Right', 'Down', 'Left', 'Up']
+                    info_text = f"Agent Dir: {direction_names[agent_dir]}\n"
+                    info_text += f"Position: ({agent_x}, {agent_y})\n"
+                    info_text += f"Visited Positions: {np.sum(agent.visited_positions)}\n"
+                    
+                    fig.text(0.02, 0.02, info_text, fontsize=10, bbox=dict(boxstyle="round,pad=0.3", 
+                                                                        facecolor="lightgray", alpha=0.8))
+                    
+                    plt.tight_layout()
+                    
+                    # Save the plot
+                    save_path = generate_save_path(f"debug_reward_maps/episode_{episode}_step_{step:03d}.png")
+                    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+                    plt.close()
+                    
+                    # Also save a summary every 10 steps showing reward retention
+                    if step % 10 == 0:
+                        # Create a difference plot to show how much the true reward map differs from ground truth
+                        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+                        
+                        # Create ground truth reward map (1 where goals are, 0 elsewhere)
+                        gt_reward_map = np.zeros_like(agent.true_reward_map)
+                        for x in range(env.unwrapped.size):
+                            for y in range(env.unwrapped.size):
+                                cell = env.unwrapped.grid.get(x, y)
+                                if cell is not None and cell.type == 'goal':
+                                    # FIXED: Use [y, x] for array indexing
+                                    gt_reward_map[y, x] = 1.0
+                        
+                        # Calculate difference (how well agent remembers rewards)
+                        difference = np.abs(agent.true_reward_map - gt_reward_map)
+                        
+                        im = ax.imshow(difference, cmap='Reds', vmin=0, vmax=1)
+                        ax.set_title(f'Reward Memory Error\nEpisode {episode}, Step {step}\n(Red = Forgot Reward, Dark = Correct)')
+                        
+                        # Mark agent
+                        ax.plot(agent_x, agent_y, 'bo', markersize=10, markeredgecolor='white', markeredgewidth=2)
+                        
+                        # Add grid
+                        ax.grid(True, which='both', color='white', linewidth=0.5, alpha=0.3)
+                        ax.set_xticks(range(env.unwrapped.size))
+                        ax.set_yticks(range(env.unwrapped.size))
+                        
+                        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label='Absolute Error')
+                        plt.tight_layout()
+                        
+                        save_path = generate_save_path(f"reward_memory_error/episode_{episode}_step_{step:03d}.png")
+                        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+                        plt.close()
 
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
@@ -510,7 +582,7 @@ class ExperimentRunner:
         self.results = all_results
         return all_results
     
-    def analyze_results(self, window=100):
+    def analyze_results(self, window=5):
         """Analyze and plot comparison results"""
         if not self.results:
             print("No results to analyze. Run experiments first.")
@@ -660,6 +732,50 @@ class ExperimentRunner:
 
         print(f"Results saved to: {results_file}")
 
+def get_visible_global_positions(agent_pos, agent_dir, view_size, env_size):
+    """
+    Get all global positions that are visible in the current egocentric view
+    """
+    visible_positions = []
+    agent_x, agent_y = agent_pos
+    
+    for ego_y in range(view_size):
+        for ego_x in range(view_size):
+            global_x, global_y = egocentric_to_global_coords(
+                ego_x, ego_y, agent_x, agent_y, agent_dir, view_size
+            )
+            
+            if 0 <= global_x < env_size and 0 <= global_y < env_size:
+                visible_positions.append((global_x, global_y, ego_x, ego_y))
+    
+    return visible_positions        
+
+
+def egocentric_to_global_coords(ego_x, ego_y, agent_x, agent_y, agent_dir, view_size):
+    """
+    Convert egocentric coordinates to global coordinates
+    
+    In egocentric view: agent is at (view_size//2, view_size-1) facing up
+    """
+    center_x = view_size // 2
+    agent_ego_y = view_size - 1
+    
+    # Relative position in egocentric frame (agent facing up)
+    rel_x = ego_x - center_x
+    rel_y = agent_ego_y - ego_y  # Positive y goes "forward" (up in ego frame)
+    
+    # Rotate based on agent's actual direction
+    if agent_dir == 0:  # facing right
+        global_offset_x, global_offset_y = rel_y, -rel_x
+    elif agent_dir == 1:  # facing down  
+        global_offset_x, global_offset_y = rel_x, rel_y
+    elif agent_dir == 2:  # facing left
+        global_offset_x, global_offset_y = -rel_y, rel_x
+    else:  # agent_dir == 3, facing up
+        global_offset_x, global_offset_y = -rel_x, -rel_y
+    
+    return agent_x + global_offset_x, agent_y + global_offset_y
+
 
 def main():
     """Run the experiment comparison"""
@@ -676,7 +792,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5000)
+    results = runner.run_comparison_experiment(episodes=1000)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

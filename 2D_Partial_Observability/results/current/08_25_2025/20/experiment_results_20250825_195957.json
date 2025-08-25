@@ -1,0 +1,14 @@
+{
+  "Partial Observable Successor": [
+    {
+      "rewards": [
+        1.0
+      ],
+      "lengths": [
+        14
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Partial Observable Successor"
+    }
+  ]
+}
