@@ -222,11 +222,11 @@ class ExperimentRunner:
 
                 # ============== EGOCENTRIC VISION MODEL ==============
                 # Update the agent's true_reward_map based on current observation
-                agent_position = tuple(env.unwrapped.agent_pos)
-                agent_dir = env.unwrapped.agent_dir
+                # agent_position = tuple(env.unwrapped.agent_pos)
+                # agent_dir = env.unwrapped.agent_dir
 
                 # 1. CREATE EGOCENTRIC VIEW INPUT
-                egocentric_input = create_egocentric_view(env, agent_position, agent_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL, done=done)
+                # egocentric_input = create_egocentric_view(env, agent_position, agent_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL, done=done)
 
                 # 2. GET AE PREDICTION
                 # input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], 
@@ -238,39 +238,39 @@ class ExperimentRunner:
 
                 # 2. GET PERFECT GROUND TRUTH INSTEAD OF AE PREDICTION
                 # Create perfect prediction based on actual environment
-                predicted_ego_view_2d = np.zeros((VIEW_SIZE, VIEW_SIZE))
+                # predicted_ego_view_2d = np.zeros((VIEW_SIZE, VIEW_SIZE))
 
-                for ego_y in range(VIEW_SIZE):
-                    for ego_x in range(VIEW_SIZE):
-                        global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, agent_position[0], agent_position[1], agent_dir, VIEW_SIZE)
+                # for ego_y in range(VIEW_SIZE):
+                #     for ego_x in range(VIEW_SIZE):
+                #         global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, agent_position[0], agent_position[1], agent_dir, VIEW_SIZE)
                         
-                        # Check actual environment for ground truth
-                        if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
-                            cell = env.unwrapped.grid.get(global_x, global_y)
-                            if cell is not None and cell.type == 'goal':
-                                predicted_ego_view_2d[ego_y, ego_x] = 1.0  # Perfect prediction
-                            else:
-                                predicted_ego_view_2d[ego_y, ego_x] = 0.0
-                        else:
-                            predicted_ego_view_2d[ego_y, ego_x] = 0.0  # Out of bounds
+                #         # Check actual environment for ground truth
+                #         if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
+                #             cell = env.unwrapped.grid.get(global_x, global_y)
+                #             if cell is not None and cell.type == 'goal':
+                #                 predicted_ego_view_2d[ego_y, ego_x] = 1.0  # Perfect prediction
+                #             else:
+                #                 predicted_ego_view_2d[ego_y, ego_x] = 0.0
+                #         else:
+                #             predicted_ego_view_2d[ego_y, ego_x] = 0.0  # Out of bounds
 
-                # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
-                # Mark current position with ground truth 
-                agent.visited_positions[agent_position[0], agent_position[1]] = True
+                # # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
+                # # Mark current position with ground truth 
+                # agent.visited_positions[agent_position[0], agent_position[1]] = True
 
-                # Learning Signal 
-                if done and step < max_steps:
-                    agent.true_reward_map[agent_position[0], agent_position[1]] = 1.0 
-                else:
-                    agent.true_reward_map[agent_position[0], agent_position[1]] = 0.0
+                # # Learning Signal 
+                # if done and step < max_steps:
+                #     agent.true_reward_map[agent_position[0], agent_position[1]] = 1.0 
+                # else:
+                #     agent.true_reward_map[agent_position[0], agent_position[1]] = 0.0
 
-                # Update visible global positions using exact position
-                visible_global_positions = get_visible_global_positions(agent_position, agent_dir, VIEW_SIZE, env.unwrapped.size)
+                # # Update visible global positions using exact position
+                # visible_global_positions = get_visible_global_positions(agent_position, agent_dir, VIEW_SIZE, env.unwrapped.size)
 
-                update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, agent_position = agent_position, agent_dir=agent_dir, learning_rate=1.0, env=env, episode=episode, step=step)
+                # update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, agent_position = agent_position, agent_dir=agent_dir, learning_rate=1.0, env=env, episode=episode, step=step)
 
-                # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
-                egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent_position, agent_dir, done, VIEW_SIZE, OUT_OF_BOUNDS)
+                # # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
+                # egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent_position, agent_dir, done, VIEW_SIZE, OUT_OF_BOUNDS)
 
 
                 # 5. DECIDE WHETHER TO TRAIN AE
@@ -296,7 +296,7 @@ class ExperimentRunner:
                 # #     optimizer.step()
 
                 # 6. UPDATE WVF 
-                agent.reward_maps.fill(0)
+                # agent.reward_maps.fill(0)
 
                 # Use binary thresholding like reference
                 # for y in range(agent.grid_size):
@@ -309,15 +309,15 @@ class ExperimentRunner:
                 #         else:
                 #             agent.reward_maps[idx, y, x] = 0
 
-                # FIX FROM CLAUDE THAT PROBABLY WONT WORK -  Update ALL reward maps with the discovered rewards
-                for idx in range(agent.state_size):
-                    for y in range(agent.grid_size):
-                        for x in range(agent.grid_size):
-                            if agent.true_reward_map[y, x] > 0.5:
-                                # ALL hypothetical goal locations should know about this reward
-                                agent.reward_maps[idx, y, x] = 1.0
-                            else:
-                                agent.reward_maps[idx, y, x] = 0.0
+                # # FIX FROM CLAUDE THAT PROBABLY WONT WORK -  Update ALL reward maps with the discovered rewards
+                # for idx in range(agent.state_size):
+                #     for y in range(agent.grid_size):
+                #         for x in range(agent.grid_size):
+                #             if agent.true_reward_map[y, x] > 0.5:
+                #                 # ALL hypothetical goal locations should know about this reward
+                #                 agent.reward_maps[idx, y, x] = 1.0
+                #             else:
+                #                 agent.reward_maps[idx, y, x] = 0.0
 
                 # Instead of binary thresholding:
                 # for y in range(agent.grid_size):
@@ -328,74 +328,74 @@ class ExperimentRunner:
                 #         agent.reward_maps[idx, y, x] = reward
 
                 # Get the current environment grid
-                # grid = env.unwrapped.grid.encode()
-                # normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
+                grid = env.unwrapped.grid.encode()
+                normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
-                # # Setting up input for the AE to obtain it's prediction of the space
-                # object_layer = grid[..., 0]
-                # normalized_grid[object_layer == 2] = 0.0  # Wall
-                # normalized_grid[object_layer == 1] = 0.0  # Open space
-                # normalized_grid[object_layer == 8] = 1.0  # Reward (e.g. goal object)
+                # Setting up input for the AE to obtain it's prediction of the space
+                object_layer = grid[..., 0]
+                normalized_grid[object_layer == 2] = 0.0  # Wall
+                normalized_grid[object_layer == 1] = 0.0  # Open space
+                normalized_grid[object_layer == 8] = 1.0  # Reward (e.g. goal object)
 
-                # # Reshape for the autoencoder (add batch and channel dims)
-                # input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
+                # Reshape for the autoencoder (add batch and channel dims)
+                input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
 
-                # # Get the predicted reward map from the AE
-                # with torch.no_grad():
-                #     ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
-                #     predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
-                #     predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
+                # Get the predicted reward map from the AE
+                with torch.no_grad():
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
+                    predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
 
-                # # Mark position as visited
-                # agent.visited_positions[agent_position[0], agent_position[1]] = True
+                # Mark position as visited
+                agent.visited_positions[agent_position[0], agent_position[1]] = True
 
-                # # Learning Signal
-                # if done and step < max_steps:
-                #     agent.true_reward_map[agent_position[0], agent_position[1]] = 1
-                # else:
-                #     agent.true_reward_map[agent_position[0], agent_position[1]] = 0
+                # Learning Signal
+                if done and step < max_steps:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 1
+                else:
+                    agent.true_reward_map[agent_position[0], agent_position[1]] = 0
 
-                # # Update the rest of the true_reward_map with AE predictions
-                # for y in range(agent.true_reward_map.shape[0]):
-                #     for x in range(agent.true_reward_map.shape[1]):
-                #         if not agent.visited_positions[y, x]:
-                #             predicted_value = predicted_reward_map_2d[y, x]
-                #             if predicted_value > 0.001:
-                #                 agent.true_reward_map[y, x] = predicted_value
-                #             else:
-                #                 agent.true_reward_map[y, x] = 0
+                # Update the rest of the true_reward_map with AE predictions
+                for y in range(agent.true_reward_map.shape[0]):
+                    for x in range(agent.true_reward_map.shape[1]):
+                        if not agent.visited_positions[y, x]:
+                            predicted_value = predicted_reward_map_2d[y, x]
+                            if predicted_value > 0.001:
+                                agent.true_reward_map[y, x] = predicted_value
+                            else:
+                                agent.true_reward_map[y, x] = 0
 
-                # # Train the vision model
-                # trigger_ae_training = False
-                # train_vision_threshold = 0.1
-                # if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
-                #     trigger_ae_training = True
+                # Train the vision model
+                trigger_ae_training = False
+                train_vision_threshold = 0.1
+                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
+                    trigger_ae_training = True
 
-                # if trigger_ae_training:
-                #     target_tensor = torch.tensor(agent.true_reward_map[np.newaxis, ..., np.newaxis], dtype=torch.float32)
-                #     target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                if trigger_ae_training:
+                    target_tensor = torch.tensor(agent.true_reward_map[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
 
-                #     ae_model.train()
-                #     optimizer.zero_grad()
-                #     output = ae_model(ae_input_tensor)
-                #     loss = loss_fn(output, target_tensor)
-                #     loss.backward()
-                #     optimizer.step()
+                    ae_model.train()
+                    optimizer.zero_grad()
+                    output = ae_model(ae_input_tensor)
+                    loss = loss_fn(output, target_tensor)
+                    loss.backward()
+                    optimizer.step()
                     
-                #     step_loss = loss.item()
+                    step_loss = loss.item()
 
 
-                # agent.reward_maps.fill(0)  # Reset all maps to zero
+                agent.reward_maps.fill(0)  # Reset all maps to zero
 
-                # for y in range(agent.grid_size):
-                #     for x in range(agent.grid_size):
-                #         curr_reward = agent.true_reward_map[y, x]
-                #         idx = y * agent.grid_size + x
-                #         reward_threshold = 0.5
-                #         if curr_reward > reward_threshold:
-                #             agent.reward_maps[idx, y, x] = 1
-                #         else:
-                #             agent.reward_maps[idx, y, x] = 0
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        curr_reward = agent.true_reward_map[y, x]
+                        idx = y * agent.grid_size + x
+                        reward_threshold = 0.5
+                        if curr_reward > reward_threshold:
+                            agent.reward_maps[idx, y, x] = 1
+                        else:
+                            agent.reward_maps[idx, y, x] = 0
 
                 # Update agent WVF
                 M_flat = np.mean(agent.M, axis=0)
@@ -429,20 +429,20 @@ class ExperimentRunner:
                 self.plot_and_save_trajectory("Masters Successor", episode, trajectory, env.unwrapped.size, seed)
 
              # Generate visualizations occasionally
-            if episode % 50 == 0:
+            if episode % 200 == 0:
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
                 
                 # Save egocentric view visualization using exact position
-                save_egocentric_view_visualization(
-                    egocentric_input,
-                    predicted_ego_view_2d,
-                    egocentric_target,
-                    episode,
-                    step,
-                    agent_pos=agent_pos,  # Use exact position
-                    agent_dir=agent_dir,  # Use exact direction
-                    env_size=env.unwrapped.size
-                )
+                # save_egocentric_view_visualization(
+                #     egocentric_input,
+                #     predicted_ego_view_2d,
+                #     egocentric_target,
+                #     episode,
+                #     step,
+                #     agent_pos=agent_pos,  # Use exact position
+                #     agent_dir=agent_dir,  # Use exact direction
+                #     env_size=env.unwrapped.size
+                # )
 
                 # Averaged SR matrix: shape (state_size, state_size)
                 averaged_M = np.mean(agent.M, axis=0)
