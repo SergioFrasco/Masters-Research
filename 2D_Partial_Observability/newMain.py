@@ -229,8 +229,7 @@ class ExperimentRunner:
                 egocentric_input = create_egocentric_view(env, agent_position, agent_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL, done=done)
 
                 # 2. GET AE PREDICTION
-                # input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], 
-                #                           dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                # input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], dtype=torch.float32).permute(0, 3, 1, 2).to(device)
                 
                 # with torch.no_grad():
                 #     predicted_ego_view = ae_model(input_tensor)
@@ -254,17 +253,17 @@ class ExperimentRunner:
                         else:
                             predicted_ego_view_2d[ego_y, ego_x] = 0.0  # Out of bounds
 
-                # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
-                # Mark current position with ground truth 
+                # # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
+                # # Mark current position with ground truth 
                 agent.visited_positions[agent_position[0], agent_position[1]] = True
 
-                # Learning Signal 
+                # # Learning Signal 
                 if done and step < max_steps:
                     agent.true_reward_map[agent_position[0], agent_position[1]] = 1.0 
                 else:
                     agent.true_reward_map[agent_position[0], agent_position[1]] = 0.0
 
-                # Update visible global positions using exact position
+                # # Update visible global positions using exact position
                 visible_global_positions = get_visible_global_positions(agent_position, agent_dir, VIEW_SIZE, env.unwrapped.size)
 
                 update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, agent_position = agent_position, agent_dir=agent_dir, learning_rate=1.0, env=env, episode=episode, step=step)
@@ -299,17 +298,17 @@ class ExperimentRunner:
                 agent.reward_maps.fill(0)
 
                 # Use binary thresholding like reference
-                # for y in range(agent.grid_size):
-                #     for x in range(agent.grid_size):
-                #         reward = agent.true_reward_map[y, x]
-                #         idx = y * agent.grid_size + x
-                #         reward_threshold = 0.5
-                #         if reward > reward_threshold:
-                #             agent.reward_maps[idx, y, x] = 1
-                #         else:
-                #             agent.reward_maps[idx, y, x] = 0
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        reward = agent.true_reward_map[y, x]
+                        idx = y * agent.grid_size + x
+                        reward_threshold = 0.5
+                        if reward > reward_threshold:
+                            agent.reward_maps[idx, y, x] = 1
+                        else:
+                            agent.reward_maps[idx, y, x] = 0
 
-                # FIX FROM CLAUDE THAT PROBABLY WONT WORK -  Update ALL reward maps with the discovered rewards
+                # # FIX FROM CLAUDE THAT PROBABLY WONT WORK -  Update ALL reward maps with the discovered rewards
                 for idx in range(agent.state_size):
                     for y in range(agent.grid_size):
                         for x in range(agent.grid_size):
@@ -327,7 +326,7 @@ class ExperimentRunner:
                 #         # Use the actual predicted values, not binary
                 #         agent.reward_maps[idx, y, x] = reward
 
-                # Get the current environment grid
+                # # Get the current environment grid
                 # grid = env.unwrapped.grid.encode()
                 # normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
@@ -403,7 +402,6 @@ class ExperimentRunner:
                 V_all = M_flat @ R_flat_all.T
                 agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
-
                 # Choose next action
                 if step == 0 or episode < 1:  # Warmup period
                     next_action = agent.sample_random_action(obs, epsilon=epsilon)
@@ -429,20 +427,20 @@ class ExperimentRunner:
                 self.plot_and_save_trajectory("Masters Successor", episode, trajectory, env.unwrapped.size, seed)
 
              # Generate visualizations occasionally
-            if episode % 50 == 0:
+            if episode % 200 == 0:
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
                 
                 # Save egocentric view visualization using exact position
-                save_egocentric_view_visualization(
-                    egocentric_input,
-                    predicted_ego_view_2d,
-                    egocentric_target,
-                    episode,
-                    step,
-                    agent_pos=agent_pos,  # Use exact position
-                    agent_dir=agent_dir,  # Use exact direction
-                    env_size=env.unwrapped.size
-                )
+                # save_egocentric_view_visualization(
+                #     egocentric_input,
+                #     predicted_ego_view_2d,
+                #     egocentric_target,
+                #     episode,
+                #     step,
+                #     agent_pos=agent_pos,  # Use exact position
+                #     agent_dir=agent_dir,  # Use exact direction
+                #     env_size=env.unwrapped.size
+                # )
 
                 # Averaged SR matrix: shape (state_size, state_size)
                 averaged_M = np.mean(agent.M, axis=0)
