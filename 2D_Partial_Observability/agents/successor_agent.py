@@ -1,6 +1,7 @@
 import numpy as np
 
 from utils.matrices import onehot
+from utils.coordinate_system import CoordinateSystem
 from minigrid.core.world_object import Goal
 from gym import spaces
 
@@ -239,10 +240,9 @@ class SuccessorAgent:
         return agent_x + global_offset_x, agent_y + global_offset_y
        # Updated get state index for Partial Observability
     def get_state_index(self, obs):
-        """Convert MiniGrid observation to state index - make consistent"""
+        """Standardized state index calculation"""
         agent_pos = self.env.agent_pos
-        x, y = agent_pos
-        return y * self.grid_size + x  # Use (y,x) consistently
+        return CoordinateSystem.position_to_state_index(agent_pos, self.grid_size)
 
     # def extract_local_observation_info(self, obs, view_size=7):
     #     """
