@@ -215,6 +215,11 @@ class ExperimentRunner:
                 trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
                 obs, reward, done, _, _ = env.step(current_action)
+                print(obs['image'].T)
+                print(obs['image'].shape)
+                env.render()
+                plt.pause(1000)
+                dsddsd
                 next_state_idx = agent.get_state_index(obs)
 
                 # Plot just this step's egocentric view
