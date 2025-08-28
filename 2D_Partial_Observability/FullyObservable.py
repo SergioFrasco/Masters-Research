@@ -105,7 +105,7 @@ class ExperimentRunner:
         print(f"Trajectory plot saved to: {save_path}")
 
     
-    def run_successor_experiment(self, episodes=5000, max_steps=300, seed=20):
+    def run_successor_experiment(self, episodes=5000, max_steps=10, seed=20):
         """Run Master agent experiment"""
 
         # Define egocentric view parameters
@@ -117,8 +117,10 @@ class ExperimentRunner:
         WALL = 0.0  # distinguishable from empty space
         
         np.random.seed(seed)
-        env = SimpleEnv(size=10)
-        env = ViewSizeWrapper(env, agent_view_size=7)  # 7x7 partial view
+        env = SimpleEnv(size=10, render_mode = "human")
+        # env = SimpleEnv(size=10)
+        # env = ViewSizeWrapper(env, agent_view_size=7) 
+
         agent = SuccessorAgent(env.unwrapped)
 
         # Setup torch
@@ -145,6 +147,7 @@ class ExperimentRunner:
             total_reward = 0
             steps = 0
             trajectory = []  # Track trajectory for failure analysis
+            
 
             # Reset for new episode 
             agent.true_reward_map = np.zeros((env.unwrapped.size, env.unwrapped.size))
@@ -214,117 +217,28 @@ class ExperimentRunner:
                 obs, reward, done, _, _ = env.step(current_action)
                 next_state_idx = agent.get_state_index(obs)
 
+                # Plot just this step's egocentric view
+                agent_view = obs['image']
+
+                # Extract object types (first channel)
+                object_types = agent_view[:, :, 0]
+
+                plt.figure(figsize=(6, 6))
+                plt.imshow(object_types, cmap='tab10', vmin=0, vmax=10)
+                plt.title(f'Step {step} - Object Types')
+                plt.axis('off')
+
+                # Add colorbar with labels
+                cbar = plt.colorbar(ticks=[0, 1, 2, 5, 8])
+                cbar.ax.set_yticklabels(['Unseen', 'Empty', 'Wall', 'Goal', 'Agent'])
+
+                plt.savefig(f'step_{step}.png', bbox_inches='tight', dpi=100)
+                plt.close()
+
                 # Complete experience
                 current_exp[2] = next_state_idx
                 current_exp[3] = reward
                 current_exp[4] = done
-
-                # ============== EGOCENTRIC VISION MODEL ==============
-                # Update the agent's true_reward_map based on current observation
-                # agent_position = tuple(env.unwrapped.agent_pos)
-                # agent_dir = env.unwrapped.agent_dir
-
-                # 1. CREATE EGOCENTRIC VIEW INPUT
-                # egocentric_input = create_egocentric_view(env, agent_position, agent_dir, VIEW_SIZE, EMPTY_SPACE, REWARD, OUT_OF_BOUNDS, WALL, done=done)
-
-                # 2. GET AE PREDICTION
-                # input_tensor = torch.tensor(egocentric_input[np.newaxis, ..., np.newaxis], 
-                #                           dtype=torch.float32).permute(0, 3, 1, 2).to(device)
-                
-                # with torch.no_grad():
-                #     predicted_ego_view = ae_model(input_tensor)
-                #     predicted_ego_view_2d = predicted_ego_view.squeeze().cpu().numpy()
-
-                # 2. GET PERFECT GROUND TRUTH INSTEAD OF AE PREDICTION
-                # Create perfect prediction based on actual environment
-                # predicted_ego_view_2d = np.zeros((VIEW_SIZE, VIEW_SIZE))
-
-                # for ego_y in range(VIEW_SIZE):
-                #     for ego_x in range(VIEW_SIZE):
-                #         global_x, global_y = egocentric_to_global_coords(ego_x, ego_y, agent_position[0], agent_position[1], agent_dir, VIEW_SIZE)
-                        
-                #         # Check actual environment for ground truth
-                #         if 0 <= global_x < env.unwrapped.size and 0 <= global_y < env.unwrapped.size:
-                #             cell = env.unwrapped.grid.get(global_x, global_y)
-                #             if cell is not None and cell.type == 'goal':
-                #                 predicted_ego_view_2d[ego_y, ego_x] = 1.0  # Perfect prediction
-                #             else:
-                #                 predicted_ego_view_2d[ego_y, ego_x] = 0.0
-                #         else:
-                #             predicted_ego_view_2d[ego_y, ego_x] = 0.0  # Out of bounds
-
-                # # 3. UPDATE TRUE REWARD MAP WITH PREDICTION
-                # # Mark current position with ground truth 
-                # agent.visited_positions[agent_position[0], agent_position[1]] = True
-
-                # # Learning Signal 
-                # if done and step < max_steps:
-                #     agent.true_reward_map[agent_position[0], agent_position[1]] = 1.0 
-                # else:
-                #     agent.true_reward_map[agent_position[0], agent_position[1]] = 0.0
-
-                # # Update visible global positions using exact position
-                # visible_global_positions = get_visible_global_positions(agent_position, agent_dir, VIEW_SIZE, env.unwrapped.size)
-
-                # update_true_reward_map_from_egocentric_prediction(agent, predicted_ego_view_2d, visible_global_positions, VIEW_SIZE, agent_position = agent_position, agent_dir=agent_dir, learning_rate=1.0, env=env, episode=episode, step=step)
-
-                # # 4. CREATE EGOCENTRIC TARGET FROM TRUE REWARD MAP
-                # egocentric_target = create_egocentric_target_from_true_map(agent.true_reward_map, agent_position, agent_dir, done, VIEW_SIZE, OUT_OF_BOUNDS)
-
-
-                # 5. DECIDE WHETHER TO TRAIN AE
-                # center_x = VIEW_SIZE // 2
-                # agent_ego_x = center_x
-                # agent_ego_y = VIEW_SIZE - 1
-
-                # # Commented because testing perfect vision
-                # # trigger_ae_training = False
-                # # if abs(predicted_ego_view_2d[agent_ego_y, agent_ego_x] - egocentric_target[agent_ego_y, agent_ego_x]) > train_vision_threshold:
-                # #     ae_trigger_count_this_episode += 1
-                # #     trigger_ae_training = True
-                
-                # # if trigger_ae_training:
-                # #     # Train autoencoder
-                # #     target_tensor = torch.tensor(egocentric_target[np.newaxis, ..., np.newaxis], dtype=torch.float32).permute(0, 3, 1, 2).to(device)
-
-                # #     ae_model.train()
-                # #     optimizer.zero_grad()
-                # #     output = ae_model(input_tensor)
-                # #     loss = loss_fn(output, target_tensor)
-                # #     loss.backward()
-                # #     optimizer.step()
-
-                # 6. UPDATE WVF 
-                # agent.reward_maps.fill(0)
-
-                # Use binary thresholding like reference
-                # for y in range(agent.grid_size):
-                #     for x in range(agent.grid_size):
-                #         reward = agent.true_reward_map[y, x]
-                #         idx = y * agent.grid_size + x
-                #         reward_threshold = 0.5
-                #         if reward > reward_threshold:
-                #             agent.reward_maps[idx, y, x] = 1
-                #         else:
-                #             agent.reward_maps[idx, y, x] = 0
-
-                # # FIX FROM CLAUDE THAT PROBABLY WONT WORK -  Update ALL reward maps with the discovered rewards
-                # for idx in range(agent.state_size):
-                #     for y in range(agent.grid_size):
-                #         for x in range(agent.grid_size):
-                #             if agent.true_reward_map[y, x] > 0.5:
-                #                 # ALL hypothetical goal locations should know about this reward
-                #                 agent.reward_maps[idx, y, x] = 1.0
-                #             else:
-                #                 agent.reward_maps[idx, y, x] = 0.0
-
-                # Instead of binary thresholding:
-                # for y in range(agent.grid_size):
-                #     for x in range(agent.grid_size):
-                #         reward = agent.true_reward_map[y, x]
-                #         idx = y * agent.grid_size + x
-                #         # Use the actual predicted values, not binary
-                #         agent.reward_maps[idx, y, x] = reward
 
                 # Choose next action
                 if step == 0 or episode < 1:  # Warmup period
@@ -1069,7 +983,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5000)
+    results = runner.run_comparison_experiment(episodes=1)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

@@ -1,0 +1,14 @@
+{
+  "Masters Successor": [
+    {
+      "rewards": [
+        1.0
+      ],
+      "lengths": [
+        8
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "Masters Successor"
+    }
+  ]
+}
