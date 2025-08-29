@@ -444,12 +444,6 @@ class ExperimentRunner:
         optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
         loss_fn = nn.MSELoss()
 
-
-        # Setup vision model
-        # input_shape = (env.size, env.size, 1)
-        # ae_model = build_autoencoder(input_shape)
-        # ae_model.compile(optimizer="adam", loss="mse")
-
         episode_rewards = []
         episode_lengths = []
         epsilon = 1
@@ -464,9 +458,7 @@ class ExperimentRunner:
 
             # Reset for new episode 
             agent.true_reward_map = np.zeros((env.size, env.size))
-            agent.wvf = np.zeros(
-                (agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32
-            )
+            agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
             agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
 
             current_state_idx = agent.get_state_index(obs)
@@ -530,19 +522,19 @@ class ExperimentRunner:
                     agent.true_reward_map[agent_position[0], agent_position[1]] = 0
 
                 # Update the rest of the true_reward_map with AE predictions
-                for y in range(agent.true_reward_map.shape[0]):
-                    for x in range(agent.true_reward_map.shape[1]):
-                        if not agent.visited_positions[y, x]:
-                            predicted_value = predicted_reward_map_2d[y, x]
+                for x in range(agent.true_reward_map.shape[0]):
+                    for y in range(agent.true_reward_map.shape[1]):
+                        if not agent.visited_positions[x, y]:
+                            predicted_value = predicted_reward_map_2d[x, y]
                             if predicted_value > 0.001:
-                                agent.true_reward_map[y, x] = predicted_value
+                                agent.true_reward_map[x, y] = predicted_value
                             else:
-                                agent.true_reward_map[y, x] = 0
+                                agent.true_reward_map[x, y] = 0
 
                 # Train the vision model
                 trigger_ae_training = False
                 train_vision_threshold = 0.1
-                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]])> train_vision_threshold):
+                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]]) > train_vision_threshold):
                     trigger_ae_training = True
 
                 if trigger_ae_training:
@@ -558,18 +550,17 @@ class ExperimentRunner:
                     
                     step_loss = loss.item()
 
-
                 agent.reward_maps.fill(0)  # Reset all maps to zero
 
-                for y in range(agent.grid_size):
-                    for x in range(agent.grid_size):
-                        curr_reward = agent.true_reward_map[y, x]
-                        idx = y * agent.grid_size + x
+                for x in range(agent.grid_size):
+                    for y in range(agent.grid_size):
+                        curr_reward = agent.true_reward_map[x, y]
+                        idx = x * agent.grid_size + y
                         reward_threshold = 0.5
                         if curr_reward > reward_threshold:
-                            agent.reward_maps[idx, y, x] = 1
+                            agent.reward_maps[idx, x, y] = 1
                         else:
-                            agent.reward_maps[idx, y, x] = 0
+                            agent.reward_maps[idx, x, y] = 0
 
                 # Update agent WVF
                 M_flat = np.mean(agent.M, axis=0)
@@ -585,12 +576,9 @@ class ExperimentRunner:
                 if done:
                     break
 
-            # Check for failure in last 100 episodes and save trajectory plot
-            if episode >= episodes - 100 and not done:
-                self.plot_and_save_trajectory("Masters Successor", episode, trajectory, env.size, seed)
 
              # Generate visualizations occasionally
-            if episode % 1000 == 0:
+            if episode % 100 == 0:
                 # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
@@ -620,6 +608,7 @@ class ExperimentRunner:
             "final_epsilon": epsilon,
             "algorithm": "Masters Successor",
         }
+ 
     
     def run_sarsa_sr_experiment(self, episodes=5000, max_steps=200, seed=20):
         """Run SARSA SR baseline experiment"""
