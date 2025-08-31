@@ -5,19 +5,17 @@ import os
 from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
-from agents import SuccessorAgentFixedPartial
+from agents import SuccessorAgentFixedPartial  # Import the new path integration agent
 from models import Autoencoder
 from utils.plotting import generate_save_path
 import json
 import time
 import gc
 from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path
-# import tensorflow as tf
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from minigrid.wrappers import ViewSizeWrapper
-
 
 # Set environment variables to prevent memory issues
 os.environ['OMP_NUM_THREADS'] = '1'
@@ -32,14 +30,12 @@ class ExperimentRunner:
         self.results = {}
 
     def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
-        """Run Master agent experiment"""
+        """Run Master agent experiment with path integration"""
         
         np.random.seed(seed)
 
-        # env = SimpleEnv(size=self.env_size, render_mode='human')
         env = SimpleEnv(size=self.env_size)
-        
-        agent = SuccessorAgentFixedPartial(env)
+        agent = SuccessorAgentFixedPartial(env)  # Use path integration agent
 
         # Setup torch
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,14 +51,23 @@ class ExperimentRunner:
         epsilon_end = 0.05
         epsilon_decay = 0.9995
 
-        for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
+        # Track path integration accuracy
+        path_integration_errors = []
+
+        for episode in tqdm(range(episodes), desc=f"Masters Successor w/ Path Integration (seed {seed})"):
             obs = env.reset()
+            
+            # Reset agent for new episode
+            agent.reset_path_integration()
+            agent.initialize_path_integration(obs)
+            
             total_reward = 0
             steps = 0
-            trajectory = []  # Track trajectory for failure analysis
-            ae_triggers_this_episode = 0  # Counter for this episode
+            trajectory = []
+            ae_triggers_this_episode = 0
+            episode_path_errors = 0
 
-            # Reset for new episode 
+            # Reset maps for new episode 
             agent.true_reward_map = np.zeros((env.size, env.size))
             agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
             agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
@@ -72,29 +77,27 @@ class ExperimentRunner:
             current_exp = [current_state_idx, current_action, None, None, None]
 
             for step in range(max_steps):
-                # Record position and action for trajectory
-                agent_pos = tuple(env.agent_pos) # x,y
+                # Record position and action for trajectory (using path integration)
+                agent_pos = agent.internal_pos
                 trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
+                # Take action in environment
                 obs, reward, done, _, _ = env.step(current_action)
+                
+                # Update internal state based on action taken
+                agent.update_internal_state(current_action)
+                
+                # Verify path integration accuracy (optional - can remove for performance)
+                if episode % 100 == 0:  # Check every 100 episodes
+                    is_accurate, error_msg = agent.verify_path_integration(obs)
+                    if not is_accurate:
+                        episode_path_errors += 1
+                        if episode_path_errors == 1:  # Print first error of episode
+                            print(f"Episode {episode}, Step {step}: {error_msg}")
+
                 next_state_idx = agent.get_state_index(obs)
                 obs['image'] = obs['image'].T
 
-                def transpose_direction(agent_dir):
-                    """
-                    Transpose direction for when x and y axes are swapped
-                    This swaps the meaning of horizontal and vertical movements
-                    """
-                    # Original: 0=right, 1=down, 2=left, 3=up
-                    # After transpose: right becomes down, down becomes right, etc.
-                    transpose_map = {0: 1, 1: 0, 2: 3, 3: 2}
-                    return transpose_map[agent_dir]
-                
-                # obs['direction'] = transpose_direction(obs['direction'])
-                # print(obs['image'])
-                # print(obs['direction'])
-                # plt.pause(100)
-                # sddsds
                 # Complete experience
                 current_exp[2] = next_state_idx
                 current_exp[3] = reward
@@ -113,16 +116,15 @@ class ExperimentRunner:
 
                 # Vision Model
                 # Update the agent's true_reward_map based on current observation
-                agent_position = tuple(env.agent_pos)
+                agent_position = agent.internal_pos  # Use path integration position
 
                 # Get the agent's 7x7 view from observation (already processed)
                 agent_view = obs['image'][0]  
-                # print(obs['image'][0])
-   
+
                 # Convert to channels last for easier processing
                 normalized_grid = np.zeros((7, 7), dtype=np.float32)
 
-               # Setting up input for the AE based on agent's partial view
+                # Setting up input for the AE based on agent's partial view
                 normalized_grid[agent_view == 2] = 0.0  # Wall
                 normalized_grid[agent_view == 1] = 0.0  # Open space  
                 normalized_grid[agent_view == 8] = 1.0 
@@ -131,12 +133,12 @@ class ExperimentRunner:
                 input_grid = normalized_grid[np.newaxis, ..., np.newaxis] 
 
                 with torch.no_grad():
-                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)  # (1, 1, 7, 7)
-                    predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, 7, 7)
-                    predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (7, 7)
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)
+                    predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
 
-                # Mark position as visited
-                agent.visited_positions[agent_position[1], agent_position[0]] = True #y,x
+                # Mark position as visited (using path integration)
+                agent.visited_positions[agent_position[1], agent_position[0]] = True  # y,x
 
                 # Learning Signal
                 if done and step < max_steps:
@@ -144,22 +146,11 @@ class ExperimentRunner:
                 else:
                     agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
-                # Update the rest of the true_reward_map with AE predictions
-                # for y in range(agent.true_reward_map.shape[0]):
-                #     for x in range(agent.true_reward_map.shape[1]):
-                #         if not agent.visited_positions[y, x]:
-                #             predicted_value = predicted_reward_map_2d[y, x]
-                #             if predicted_value > 0.001:
-                #                 agent.true_reward_map[y, x] = predicted_value
-                #             else:
-                #                 agent.true_reward_map[y, x] = 0
-
                 # Map the 7x7 predicted reward map to the 10x10 global map
                 agent_x, agent_y = agent_position
-                # The agent is at center-bottom of 7x7 view, facing up (position [6,3] in view)
-                ego_center_x  = 3  # Center column
-                ego_center_y  = 6  # Bottom row
-                agent_dir = obs['direction'] 
+                ego_center_x = 3  # Center column
+                ego_center_y = 6  # Bottom row
+                agent_dir = agent.internal_dir  # Use path integration direction
                 
                 for view_y in range(7):
                     for view_x in range(7):
@@ -168,7 +159,6 @@ class ExperimentRunner:
                         dy_ego = view_y - ego_center_y  # -6 to 0
                         
                         # Rotate the offset based on agent's direction to get world offsets
-                        # Default ego view assumes agent faces "up" (direction 3)
                         if agent_dir == 3:  # Facing up (north)
                             dx_world = dx_ego
                             dy_world = dy_ego
@@ -197,7 +187,7 @@ class ExperimentRunner:
                 target_7x7 = np.zeros((7, 7), dtype=np.float32)
                 
                 agent_x, agent_y = agent_position
-                agent_dir = obs['direction']
+                agent_dir = agent.internal_dir  # Use path integration direction
                 
                 for view_y in range(7):
                     for view_x in range(7):
@@ -227,7 +217,7 @@ class ExperimentRunner:
                         if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
                             target_7x7[view_y, view_x] = agent.true_reward_map[global_y, global_x]
                         else:
-                            # Out of bounds positions get 0 (could also use wall value)
+                            # Out of bounds positions get 0
                             target_7x7[view_y, view_x] = 0.0
 
                 trigger_ae_training = False
@@ -236,13 +226,13 @@ class ExperimentRunner:
                 max_error = np.max(view_error)
                 mean_error = np.mean(view_error)
 
-                if max_error > 0.05 or mean_error > 0.01:  # Trigger on any meaningful difference
+                if max_error > 0.05 or mean_error > 0.01:
                     trigger_ae_training = True
 
                 if trigger_ae_training:
                     ae_triggers_this_episode += 1 
                     target_tensor = torch.tensor(target_7x7[np.newaxis, ..., np.newaxis], dtype=torch.float32)
-                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)
 
                     ae_model.train()
                     optimizer.zero_grad()
@@ -252,7 +242,6 @@ class ExperimentRunner:
                     optimizer.step()
                     
                     step_loss = loss.item()
-
 
                 agent.reward_maps.fill(0)  # Reset all maps to zero
 
@@ -277,23 +266,23 @@ class ExperimentRunner:
                     break
 
             ae_triggers_per_episode.append(ae_triggers_this_episode)
-             # Generate visualizations occasionally
+            path_integration_errors.append(episode_path_errors)
+            
+            # Generate visualizations occasionally
             if episode % 250 == 0:
-                # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
                 # Saving the SR
-                # Averaged SR matrix: shape (state_size, state_size)
                 averaged_M = np.mean(agent.M, axis=0)
 
                 # Create a figure
                 plt.figure(figsize=(6, 5))
                 im = plt.imshow(averaged_M, cmap='hot')
                 plt.title(f"Averaged SR Matrix (Episode {episode})")
-                plt.colorbar(im, label="SR Value")  # Add colorbar
+                plt.colorbar(im, label="SR Value")
                 plt.tight_layout()
                 plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
-                plt.close()  # Close the figure to free memory
+                plt.close()
 
                 # Create vision plots
                 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
@@ -301,30 +290,41 @@ class ExperimentRunner:
                 # Plot predicted 7x7 view
                 ax1.imshow(predicted_reward_map_2d, cmap='viridis')
                 ax1.set_title(f'Predicted 7x7 View - Ep{episode} Step{step}')
-                ax1.plot(3, 6, 'ro', markersize=8, label='Agent')  # Agent at [3,6] in view
+                ax1.plot(3, 6, 'ro', markersize=8, label='Agent')
                 plt.colorbar(ax1.images[0], ax=ax1, fraction=0.046)
 
-                # Plot target 7x7 view (ground truth for what agent sees)
+                # Plot target 7x7 view
                 ax2.imshow(target_7x7, cmap='viridis')
                 ax2.set_title(f'Target 7x7 View (Ground Truth)')
-                ax2.plot(3, 6, 'ro', markersize=8, label='Agent')  # Agent at [3,6] in view
+                ax2.plot(3, 6, 'ro', markersize=8, label='Agent')
                 plt.colorbar(ax2.images[0], ax=ax2, fraction=0.046)
 
                 # Plot true 10x10 reward map
                 ax3.imshow(agent.true_reward_map, cmap='viridis')
                 ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_y})')
-                ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')  # Agent global position
+                ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')
                 plt.colorbar(ax3.images[0], ax=ax3, fraction=0.046)
 
                 plt.tight_layout()
                 plt.savefig(generate_save_path(f"vision_plots/maps_ep{episode}_step{step}.png"))
-                plt.show()
                 plt.close()
+
+                # Plot path integration accuracy
+                if episode > 0:
+                    plt.figure(figsize=(10, 5))
+                    plt.plot(path_integration_errors, alpha=0.7, label='Path integration errors per episode')
+                    plt.xlabel('Episode')
+                    plt.ylabel('Number of Position/Direction Errors')
+                    plt.title(f'Path Integration Accuracy (up to ep {episode})')
+                    plt.legend()
+                    plt.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    plt.savefig(generate_save_path(f'path_integration/errors_up_to_ep_{episode}.png'))
+                    plt.close()
 
                 # Plot AE triggers over episodes
                 plt.figure(figsize=(10, 5))
                 
-                # Smooth the data with a rolling average for better visualization
                 window_size = 50
                 if len(ae_triggers_per_episode) >= window_size:
                     smoothed_triggers = np.convolve(ae_triggers_per_episode, 
@@ -349,16 +349,23 @@ class ExperimentRunner:
                 plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
                 plt.close()
                 
-            
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
+
+        # Print final path integration statistics
+        total_errors = sum(path_integration_errors)
+        print(f"\nPath Integration Summary for seed {seed}:")
+        print(f"Total position/direction errors: {total_errors}")
+        print(f"Episodes with errors: {sum(1 for x in path_integration_errors if x > 0)}")
+        print(f"Average errors per episode: {total_errors / episodes:.4f}")
 
         return {
             "rewards": episode_rewards,
             "lengths": episode_lengths,
             "final_epsilon": epsilon,
-            "algorithm": "Masters Successor",
+            "algorithm": "Masters Successor w/ Path Integration",
+            "path_integration_errors": path_integration_errors,
         }
  
     def run_comparison_experiment(self, episodes=5000, max_steps=200):
@@ -368,11 +375,11 @@ class ExperimentRunner:
         for seed in range(self.num_seeds):
             print(f"\n=== Running experiments with seed {seed} ===")
 
-            # Run Masters successor
+            # Run Masters successor with path integration
             successor_results = self.run_successor_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
             
             # Store results
-            algorithms = ['Masters Successor']
+            algorithms = ['Masters Successor w/ Path Integration']
             results_list = [successor_results]
             
             for alg, result in zip(algorithms, results_list):
@@ -395,7 +402,7 @@ class ExperimentRunner:
             return
 
         # Create comparison plots
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        fig, axes = plt.subplots(2, 3, figsize=(20, 12))  # Added one more subplot for path integration
 
         # Plot 1: Learning curves (rewards)
         ax1 = axes[0, 0]
@@ -442,8 +449,31 @@ class ExperimentRunner:
         ax2.legend()
         ax2.grid(True)
 
-        # Plot 3: Final performance comparison (last 100 episodes)
-        ax3 = axes[1, 0]
+        # Plot 3: Path Integration Accuracy
+        ax3 = axes[0, 2]
+        for alg_name, runs in self.results.items():
+            if "path_integration_errors" in runs[0]:  # Check if this agent has path integration data
+                all_errors = np.array([run["path_integration_errors"] for run in runs])
+                mean_errors = np.mean(all_errors, axis=0)
+                std_errors = np.std(all_errors, axis=0)
+
+                mean_smooth = pd.Series(mean_errors).rolling(window).mean()
+                std_smooth = pd.Series(std_errors).rolling(window).mean()
+
+                x = range(len(mean_smooth))
+                ax3.plot(x, mean_smooth, label=f"{alg_name} (mean)", linewidth=2)
+                ax3.fill_between(
+                    x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3
+                )
+
+        ax3.set_xlabel("Episode")
+        ax3.set_ylabel("Path Integration Errors")
+        ax3.set_title("Path Integration Accuracy")
+        ax3.legend()
+        ax3.grid(True)
+
+        # Plot 4: Final performance comparison (last 100 episodes)
+        ax4 = axes[1, 0]
         final_rewards = {}
         for alg_name, runs in self.results.items():
             final_100 = []
@@ -451,42 +481,64 @@ class ExperimentRunner:
                 final_100.extend(run["rewards"][-100:])  # Last 100 episodes
             final_rewards[alg_name] = final_100
 
-        ax3.boxplot(final_rewards.values(), labels=final_rewards.keys())
-        ax3.set_ylabel("Reward")
-        ax3.set_title("Final Performance (Last 100 Episodes)")
-        ax3.grid(True)
+        ax4.boxplot(final_rewards.values(), labels=final_rewards.keys())
+        ax4.set_ylabel("Reward")
+        ax4.set_title("Final Performance (Last 100 Episodes)")
+        ax4.grid(True)
 
-        # Plot 4: Summary statistics
-        ax4 = axes[1, 1]
+        # Plot 5: Summary statistics
+        ax5 = axes[1, 1]
         summary_data = []
         for alg_name, runs in self.results.items():
             all_rewards = np.array([run["rewards"] for run in runs])
             final_performance = np.mean([np.mean(run["rewards"][-100:]) for run in runs])
             convergence_episode = self._find_convergence_episode(all_rewards, window)
+            
+            # Add path integration statistics if available
+            total_path_errors = 0
+            if "path_integration_errors" in runs[0]:
+                total_path_errors = np.sum([np.sum(run["path_integration_errors"]) for run in runs])
 
-            summary_data.append(
-                {
-                    "Algorithm": alg_name,
-                    "Final Performance": final_performance,
-                    "Convergence Episode": convergence_episode,
-                }
-            )
+            summary_data.append({
+                "Algorithm": alg_name,
+                "Final Performance": f"{final_performance:.3f}",
+                "Convergence Episode": convergence_episode,
+                "Total Path Errors": total_path_errors,
+            })
 
         summary_df = pd.DataFrame(summary_data)
-        ax4.axis("tight")
-        ax4.axis("off")
-        table = ax4.table(
+        ax5.axis("tight")
+        ax5.axis("off")
+        table = ax5.table(
             cellText=summary_df.values,
             colLabels=summary_df.columns,
             cellLoc="center",
             loc="center",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(10)
-        ax4.set_title("Summary Statistics")
+        table.set_fontsize(9)
+        ax5.set_title("Summary Statistics")
+
+        # Plot 6: Path integration error distribution
+        ax6 = axes[1, 2]
+        for alg_name, runs in self.results.items():
+            if "path_integration_errors" in runs[0]:
+                all_errors_flat = []
+                for run in runs:
+                    all_errors_flat.extend(run["path_integration_errors"])
+                
+                # Create histogram of error counts
+                unique_errors, counts = np.unique(all_errors_flat, return_counts=True)
+                ax6.bar(unique_errors, counts, alpha=0.7, label=alg_name)
+
+        ax6.set_xlabel("Errors per Episode")
+        ax6.set_ylabel("Frequency")
+        ax6.set_title("Path Integration Error Distribution")
+        ax6.legend()
+        ax6.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        save_path = generate_save_path("experiment_comparison.png")
+        save_path = generate_save_path("experiment_comparison_with_path_integration.png")
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"Comparison plot saved to: {save_path}")
 
@@ -518,7 +570,7 @@ class ExperimentRunner:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
         # Save raw results as JSON
-        results_file = generate_save_path(f"experiment_results_{timestamp}.json")
+        results_file = generate_save_path(f"experiment_results_path_integration_{timestamp}.json")
 
         # Convert numpy arrays to lists for JSON serialization
         json_results = {}
@@ -531,6 +583,10 @@ class ExperimentRunner:
                     "final_epsilon": float(run["final_epsilon"]),
                     "algorithm": run["algorithm"],
                 }
+                # Add path integration errors if available
+                if "path_integration_errors" in run:
+                    json_run["path_integration_errors"] = [int(e) for e in run["path_integration_errors"]]
+                
                 json_results[alg_name].append(json_run)
 
         with open(results_file, "w") as f:
@@ -539,10 +595,9 @@ class ExperimentRunner:
         print(f"Results saved to: {results_file}")
 
 
-
 def main():
-    """Run the experiment comparison"""
-    print("Starting baseline comparison experiment...")
+    """Run the experiment comparison with path integration"""
+    print("Starting baseline comparison experiment with path integration...")
 
     # Initialize experiment runner
     runner = ExperimentRunner(env_size=10, num_seeds=1)
