@@ -269,7 +269,7 @@ class ExperimentRunner:
             path_integration_errors.append(episode_path_errors)
             
             # Generate visualizations occasionally
-            if episode % 250 == 0:
+            if episode % 500 == 0:
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
                 # Saving the SR
@@ -603,7 +603,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5000, max_steps=200)
+    results = runner.run_comparison_experiment(episodes=20000, max_steps=200)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
