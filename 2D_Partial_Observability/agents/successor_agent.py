@@ -44,7 +44,7 @@ class SuccessorAgent:
         """Convert MiniGrid observation to state index - make consistent"""
         agent_pos = self.env.agent_pos
         x, y = agent_pos
-        return x * self.grid_size + y  # Use (y,x) consistently
+        return x * self.grid_size + y  # Use (x,y) consistently
     
     def sample_random_action(self, obs, goal=None, epsilon=0.0):
         """Sample an action uniformly at random"""

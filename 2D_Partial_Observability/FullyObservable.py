@@ -114,8 +114,17 @@ class ExperimentRunner:
                     predicted_reward_map_tensor = ae_model(ae_input_tensor)  # (1, 1, H, W)
                     predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
 
+                # Right after getting predicted_reward_map_2d
+                print(f"Episode {episode}, Step {step}:")
+                print(f"Predicted reward map shape: {predicted_reward_map_2d.shape}")
+
                 # Mark position as visited
                 agent.visited_positions[agent_position[0], agent_position[1]] = True
+
+                # After marking position as visited
+                print(f"Agent at global pos: {agent_position}")
+                print(f"Predicted value at agent pos: {predicted_reward_map_2d[agent_position[0], agent_position[1]]:.4f}")
+                print(f"True reward at agent pos: {agent.true_reward_map[agent_position[0], agent_position[1]]:.4f}")
 
                 # Learning Signal
                 if done and step < max_steps:
@@ -133,9 +142,63 @@ class ExperimentRunner:
                             else:
                                 agent.true_reward_map[x, y] = 0
 
+                
+                # agent_x, agent_y = [agent_position[0], agent_position[1]] # Agent's position in global coordinates
+                # agent_dir_actual = env.agent_dir  # Agent's facing direction (0=right, 1=down, 2=left, 3=up)
+                # def transpose_direction(agent_dir):
+                #     """
+                #     Transpose direction for when x and y axes are swapped
+                #     This swaps the meaning of horizontal and vertical movements
+                #     """
+                #     # Original: 0=right, 1=down, 2=left, 3=up
+                #     # After transpose: right becomes down, down becomes right, etc.
+                #     transpose_map = {0: 1, 1: 0, 2: 3, 3: 2}
+                #     return transpose_map[agent_dir]
+                
+                # agent_dir = transpose_direction(agent_dir_actual)
+
+                # # # Direction mapping for labels
+                # dir_labels = {0: 'Right', 1: 'Down', 2: 'Left', 3: 'Up'}
+
+                # plt.figure(figsize=(12, 4))
+                # plt.subplot(1, 3, 1)
+                # plt.imshow(predicted_reward_map_2d, cmap='viridis')
+                # plt.title(f'Predicted Rewards (7x7)\nAgent facing {dir_labels[agent_dir_actual]}')
+                # plt.colorbar()
+
+                # # Plot global reward map
+                # plt.subplot(1, 3, 2) 
+                # plt.imshow(agent.true_reward_map, cmap='viridis')
+                # plt.title(f'Global Reward Map\nAgent at ({agent_x}, {agent_y})')
+                # plt.colorbar()
+
+                # # Plot test map with agent marked and direction arrow
+                # test_map = agent.true_reward_map
+                # test_map[agent_x, agent_y] = 0.5
+                # plt.subplot(1, 3, 3)
+                # plt.imshow(test_map, cmap='viridis')
+                # plt.title(f'Global Map + Agent\nFacing {dir_labels[agent_dir_actual]}')
+
+                # # Add direction arrow on agent position
+                # arrow_dx = [1, 0, -1, 0][agent_dir]  # Right, Down, Left, Up
+                # arrow_dy = [0, 1, 0, -1][agent_dir]
+                # plt.arrow(agent_y, agent_x, arrow_dy*0.3, arrow_dx*0.3, 
+                #         head_width=0.15, head_length=0.1, fc='red', ec='red')
+
+                # plt.colorbar()
+                # plt.tight_layout()
+                # plt.savefig("TestingFullObs")
+                # sdsdds
+
                 # Train the vision model
                 trigger_ae_training = False
                 train_vision_threshold = 0.1
+
+                # Right before if trigger_ae_training:
+                # OR
+                print(f"Prediction error: {abs(predicted_reward_map_2d[agent_position[0], agent_position[1]] - agent.true_reward_map[agent_position[0], agent_position[1]]):.4f}")  # Full
+                print(f"Training triggered: {trigger_ae_training}")
+
                 if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]]) > train_vision_threshold):
                     trigger_ae_training = True
 
