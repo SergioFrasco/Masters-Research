@@ -48,6 +48,7 @@ class ExperimentRunner:
         optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
         loss_fn = nn.MSELoss()
 
+        ae_triggers_per_episode = [] 
         episode_rewards = []
         episode_lengths = []
         epsilon = 1
@@ -59,6 +60,7 @@ class ExperimentRunner:
             total_reward = 0
             steps = 0
             trajectory = []  # Track trajectory for failure analysis
+            ae_triggers_this_episode = 0  # Counter for this episode
 
             # Reset for new episode 
             agent.true_reward_map = np.zeros((env.size, env.size))
@@ -191,54 +193,54 @@ class ExperimentRunner:
                                 predicted_value = predicted_reward_map_2d[view_y, view_x]
                                 agent.true_reward_map[global_y, global_x] = predicted_value
    
+                # Extract the 7x7 target from the true reward map corresponding to agent's view
+                target_7x7 = np.zeros((7, 7), dtype=np.float32)
                 
-                # Train the vision model
+                agent_x, agent_y = agent_position
+                agent_dir = obs['direction']
+                
+                for view_y in range(7):
+                    for view_x in range(7):
+                        # Calculate offset from agent's position in ego view
+                        dx_ego = view_x - ego_center_x  # -3 to 3
+                        dy_ego = view_y - ego_center_y  # -6 to 0
+                        
+                        # Rotate the offset based on agent's direction to get world offsets
+                        if agent_dir == 3:  # Facing up (north)
+                            dx_world = dx_ego
+                            dy_world = dy_ego
+                        elif agent_dir == 0:  # Facing right (east)
+                            dx_world = -dy_ego
+                            dy_world = dx_ego
+                        elif agent_dir == 1:  # Facing down (south)
+                            dx_world = -dx_ego
+                            dy_world = -dy_ego
+                        elif agent_dir == 2:  # Facing left (west)
+                            dx_world = dy_ego
+                            dy_world = -dx_ego
+                        
+                        # Calculate global coordinates
+                        global_x = agent_x + dx_world
+                        global_y = agent_y + dy_world
+                        
+                        # Extract value from true reward map if within bounds
+                        if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
+                            target_7x7[view_y, view_x] = agent.true_reward_map[global_y, global_x]
+                        else:
+                            # Out of bounds positions get 0 (could also use wall value)
+                            target_7x7[view_y, view_x] = 0.0
+
                 trigger_ae_training = False
-                train_vision_threshold = 0.1
+                # Check if ANY position in the view has significant error
+                view_error = np.abs(predicted_reward_map_2d - target_7x7)
+                max_error = np.max(view_error)
+                mean_error = np.mean(view_error)
 
-
-                if (abs(predicted_reward_map_2d[ego_center_y, ego_center_x]- agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold):
+                if max_error > 0.05 or mean_error > 0.01:  # Trigger on any meaningful difference
                     trigger_ae_training = True
 
                 if trigger_ae_training:
-                        # Extract the 7x7 target from the true reward map corresponding to agent's view
-                    target_7x7 = np.zeros((7, 7), dtype=np.float32)
-                    
-                    agent_x, agent_y = agent_position
-                    agent_dir = obs['direction']
-                    
-                    for view_y in range(7):
-                        for view_x in range(7):
-                            # Calculate offset from agent's position in ego view
-                            dx_ego = view_x - ego_center_x  # -3 to 3
-                            dy_ego = view_y - ego_center_y  # -6 to 0
-                            
-                            # Rotate the offset based on agent's direction to get world offsets
-                            if agent_dir == 3:  # Facing up (north)
-                                dx_world = dx_ego
-                                dy_world = dy_ego
-                            elif agent_dir == 0:  # Facing right (east)
-                                dx_world = -dy_ego
-                                dy_world = dx_ego
-                            elif agent_dir == 1:  # Facing down (south)
-                                dx_world = -dx_ego
-                                dy_world = -dy_ego
-                            elif agent_dir == 2:  # Facing left (west)
-                                dx_world = dy_ego
-                                dy_world = -dx_ego
-                            
-                            # Calculate global coordinates
-                            global_x = agent_x + dx_world
-                            global_y = agent_y + dy_world
-                            
-                            # Extract value from true reward map if within bounds
-                            if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
-                                target_7x7[view_y, view_x] = agent.true_reward_map[global_y, global_x]
-                            else:
-                                # Out of bounds positions get 0 (could also use wall value)
-                                target_7x7[view_y, view_x] = 0.0
-
-
+                    ae_triggers_this_episode += 1 
                     target_tensor = torch.tensor(target_7x7[np.newaxis, ..., np.newaxis], dtype=torch.float32)
                     target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)  # (1, 1, H, W)
 
@@ -251,36 +253,6 @@ class ExperimentRunner:
                     
                     step_loss = loss.item()
 
-                    # # Create plots
-                    # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-
-                    # # Plot predicted 7x7 view
-                    # ax1.imshow(predicted_reward_map_2d, cmap='viridis')
-                    # ax1.set_title(f'Predicted 7x7 View - Ep{episode} Step{step}')
-                    # ax1.plot(3, 6, 'ro', markersize=8, label='Agent')  # Agent at [3,6] in view
-                    # plt.colorbar(ax1.images[0], ax=ax1, fraction=0.046)
-
-                    # # Plot target 7x7 view (ground truth for what agent sees)
-                    # ax2.imshow(target_7x7, cmap='viridis')
-                    # ax2.set_title(f'Target 7x7 View (Ground Truth)')
-                    # ax2.plot(3, 6, 'ro', markersize=8, label='Agent')  # Agent at [3,6] in view
-                    # plt.colorbar(ax2.images[0], ax=ax2, fraction=0.046)
-
-                    # # Plot true 10x10 reward map
-                    # ax3.imshow(agent.true_reward_map, cmap='viridis')
-                    # ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_y})')
-                    # ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')  # Agent global position
-                    # plt.colorbar(ax3.images[0], ax=ax3, fraction=0.046)
-
-                    # plt.tight_layout()
-                    # os.makedirs("plots", exist_ok=True)
-                    # plt.savefig(f"plots/maps_ep{episode}_step{step}.png", dpi=100, bbox_inches='tight')
-                    # plt.show()
-                    # plt.close()
-
-                    # plt.pause(1000)
-                    # sdsds
-
 
                 agent.reward_maps.fill(0)  # Reset all maps to zero
 
@@ -288,11 +260,7 @@ class ExperimentRunner:
                     for x in range(agent.grid_size):
                         curr_reward = agent.true_reward_map[y, x]
                         idx = y * agent.grid_size + x
-                        reward_threshold = 0.5
-                        if curr_reward > reward_threshold:
-                            agent.reward_maps[idx, y, x] = 1
-                        else:
-                            agent.reward_maps[idx, y, x] = 0
+                        agent.reward_maps[idx, y, x] = curr_reward
 
                 # Update agent WVF
                 M_flat = np.mean(agent.M, axis=0)
@@ -308,8 +276,9 @@ class ExperimentRunner:
                 if done:
                     break
 
+            ae_triggers_per_episode.append(ae_triggers_this_episode)
              # Generate visualizations occasionally
-            if episode % 100 == 0:
+            if episode % 250 == 0:
                 # save_all_reward_maps(agent, save_path=generate_save_path(f"reward_maps_episode_{episode}"))
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
@@ -326,9 +295,61 @@ class ExperimentRunner:
                 plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
                 plt.close()  # Close the figure to free memory
 
-                save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
-            
+                # Create vision plots
+                fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
+                # Plot predicted 7x7 view
+                ax1.imshow(predicted_reward_map_2d, cmap='viridis')
+                ax1.set_title(f'Predicted 7x7 View - Ep{episode} Step{step}')
+                ax1.plot(3, 6, 'ro', markersize=8, label='Agent')  # Agent at [3,6] in view
+                plt.colorbar(ax1.images[0], ax=ax1, fraction=0.046)
+
+                # Plot target 7x7 view (ground truth for what agent sees)
+                ax2.imshow(target_7x7, cmap='viridis')
+                ax2.set_title(f'Target 7x7 View (Ground Truth)')
+                ax2.plot(3, 6, 'ro', markersize=8, label='Agent')  # Agent at [3,6] in view
+                plt.colorbar(ax2.images[0], ax=ax2, fraction=0.046)
+
+                # Plot true 10x10 reward map
+                ax3.imshow(agent.true_reward_map, cmap='viridis')
+                ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_y})')
+                ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')  # Agent global position
+                plt.colorbar(ax3.images[0], ax=ax3, fraction=0.046)
+
+                plt.tight_layout()
+                plt.savefig(generate_save_path(f"vision_plots/maps_ep{episode}_step{step}.png"))
+                plt.show()
+                plt.close()
+
+                # Plot AE triggers over episodes
+                plt.figure(figsize=(10, 5))
+                
+                # Smooth the data with a rolling average for better visualization
+                window_size = 50
+                if len(ae_triggers_per_episode) >= window_size:
+                    smoothed_triggers = np.convolve(ae_triggers_per_episode, 
+                                                np.ones(window_size)/window_size, 
+                                                mode='valid')
+                    smooth_episodes = range(window_size//2, len(ae_triggers_per_episode) - window_size//2 + 1)
+                else:
+                    smoothed_triggers = ae_triggers_per_episode
+                    smooth_episodes = range(len(ae_triggers_per_episode))
+                
+                plt.plot(ae_triggers_per_episode, alpha=0.3, label='Raw triggers per episode')
+                if len(ae_triggers_per_episode) >= window_size:
+                    plt.plot(smooth_episodes, smoothed_triggers, color='red', linewidth=2, 
+                            label=f'Smoothed (window={window_size})')
+                
+                plt.xlabel('Episode')
+                plt.ylabel('Number of AE Training Triggers')
+                plt.title(f'AE Training Frequency Over Episodes (up to ep {episode})')
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
+                plt.close()
+                
+            
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)

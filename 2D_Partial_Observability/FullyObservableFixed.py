@@ -163,11 +163,8 @@ class ExperimentRunner:
                     for x in range(agent.grid_size):
                         curr_reward = agent.true_reward_map[y, x]
                         idx = y * agent.grid_size + x
-                        reward_threshold = 0.5
-                        if curr_reward > reward_threshold:
-                            agent.reward_maps[idx, y, x] = 1
-                        else:
-                            agent.reward_maps[idx, y, x] = 0
+                        agent.reward_maps[idx, y, x] = curr_reward
+
 
                 # Update agent WVF
                 M_flat = np.mean(agent.M, axis=0)
