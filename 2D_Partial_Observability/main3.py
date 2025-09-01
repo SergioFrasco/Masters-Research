@@ -600,10 +600,10 @@ def main():
     print("Starting baseline comparison experiment with path integration...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=1)
+    runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=50000, max_steps=200)
+    results = runner.run_comparison_experiment(episodes=20000, max_steps=200)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
