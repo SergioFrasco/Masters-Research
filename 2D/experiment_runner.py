@@ -429,13 +429,15 @@ class ExperimentRunner:
             "algorithm": "Honours Successor",
         }
     
+
     def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
         """Run Master agent experiment"""
         
         np.random.seed(seed)
+        from agents import SuccessorAgentFixed
 
         env = SimpleEnv(size=self.env_size)
-        agent = SuccessorAgent(env)
+        agent = SuccessorAgentFixed(env)
 
         # Setup torch
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -467,7 +469,7 @@ class ExperimentRunner:
 
             for step in range(max_steps):
                 # Record position and action for trajectory
-                agent_pos = tuple(env.agent_pos)
+                agent_pos = tuple(env.agent_pos) # x,y
                 trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
                 obs, reward, done, _, _ = env.step(current_action)
@@ -494,7 +496,7 @@ class ExperimentRunner:
                 agent_position = tuple(env.agent_pos)
 
                 # Get the current environment grid
-                grid = env.grid.encode()
+                grid = env.grid.encode() # x,y tranpose to y,x
                 normalized_grid = np.zeros_like(grid[..., 0], dtype=np.float32)  # Shape: (H, W)
 
                 # Setting up input for the AE to obtain it's prediction of the space
@@ -502,6 +504,7 @@ class ExperimentRunner:
                 normalized_grid[object_layer == 2] = 0.0  # Wall
                 normalized_grid[object_layer == 1] = 0.0  # Open space
                 normalized_grid[object_layer == 8] = 1.0  # Reward (e.g. goal object)
+                normalized_grid = normalized_grid.T # y,x
 
                 # Reshape for the autoencoder (add batch and channel dims)
                 input_grid = normalized_grid[np.newaxis, ..., np.newaxis]  # (1, H, W, 1)
@@ -513,28 +516,32 @@ class ExperimentRunner:
                     predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()  # (H, W)
 
                 # Mark position as visited
-                agent.visited_positions[agent_position[0], agent_position[1]] = True
+                agent.visited_positions[agent_position[1], agent_position[0]] = True #y,x
+
 
                 # Learning Signal
                 if done and step < max_steps:
-                    agent.true_reward_map[agent_position[0], agent_position[1]] = 1
+                    agent.true_reward_map[agent_position[1], agent_position[0]] = 1
                 else:
-                    agent.true_reward_map[agent_position[0], agent_position[1]] = 0
+                    agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
                 # Update the rest of the true_reward_map with AE predictions
-                for x in range(agent.true_reward_map.shape[0]):
-                    for y in range(agent.true_reward_map.shape[1]):
-                        if not agent.visited_positions[x, y]:
-                            predicted_value = predicted_reward_map_2d[x, y]
+                for y in range(agent.true_reward_map.shape[0]):
+                    for x in range(agent.true_reward_map.shape[1]):
+                        if not agent.visited_positions[y, x]:
+                            predicted_value = predicted_reward_map_2d[y, x]
                             if predicted_value > 0.001:
-                                agent.true_reward_map[x, y] = predicted_value
+                                agent.true_reward_map[y, x] = predicted_value
                             else:
-                                agent.true_reward_map[x, y] = 0
+                                agent.true_reward_map[y, x] = 0
 
+                
                 # Train the vision model
                 trigger_ae_training = False
                 train_vision_threshold = 0.1
-                if (abs(predicted_reward_map_2d[agent_position[0], agent_position[1]]- agent.true_reward_map[agent_position[0], agent_position[1]]) > train_vision_threshold):
+
+
+                if (abs(predicted_reward_map_2d[agent_position[1], agent_position[0]]- agent.true_reward_map[agent_position[1], agent_position[0]]) > train_vision_threshold):
                     trigger_ae_training = True
 
                 if trigger_ae_training:
@@ -552,15 +559,12 @@ class ExperimentRunner:
 
                 agent.reward_maps.fill(0)  # Reset all maps to zero
 
-                for x in range(agent.grid_size):
-                    for y in range(agent.grid_size):
-                        curr_reward = agent.true_reward_map[x, y]
-                        idx = x * agent.grid_size + y
-                        reward_threshold = 0.5
-                        if curr_reward > reward_threshold:
-                            agent.reward_maps[idx, x, y] = 1
-                        else:
-                            agent.reward_maps[idx, x, y] = 0
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        curr_reward = agent.true_reward_map[y, x]
+                        idx = y * agent.grid_size + x
+                        agent.reward_maps[idx, y, x] = curr_reward
+
 
                 # Update agent WVF
                 M_flat = np.mean(agent.M, axis=0)
@@ -575,7 +579,6 @@ class ExperimentRunner:
 
                 if done:
                     break
-
 
              # Generate visualizations occasionally
             if episode % 100 == 0:

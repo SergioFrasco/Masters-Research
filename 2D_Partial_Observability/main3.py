@@ -56,7 +56,7 @@ class ExperimentRunner:
             # Track path integration accuracy
             path_integration_errors = []
 
-            for episode in tqdm(range(episodes), desc=f"Masters Successor w/ Path Integration (seed {seed})"):
+            for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
                 obs = env.reset()
                 
                 # Reset agent for new episode
@@ -617,7 +617,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=1000, max_steps=300)
+    results = runner.run_comparison_experiment(episodes=10000, max_steps=200)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
