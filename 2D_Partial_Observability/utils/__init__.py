@@ -7,4 +7,4 @@ from .plotting import save_env_map_pred
 from .plotting import generate_save_path
 from .images_to_video import create_video_from_images
 from .images_to_video import get_latest_run_dir
-from .coordinate_system import CoordinateSystem
+

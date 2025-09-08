@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python main3.py
+python main.py
