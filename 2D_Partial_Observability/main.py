@@ -93,13 +93,13 @@ class ExperimentRunner:
                     # Update internal state based on action taken
                     agent.update_internal_state(current_action)
                     
-                    # Verify path integration accuracy (optional - can remove for performance)
-                    if episode % 100 == 0:  # Check every 100 episodes
-                        is_accurate, error_msg = agent.verify_path_integration(obs)
-                        if not is_accurate:
-                            episode_path_errors += 1
-                            if episode_path_errors == 1:  # Print first error of episode
-                                print(f"Episode {episode}, Step {step}: {error_msg}")
+                    # Verify path integration accuracy (remove for performance)
+                    # if episode % 100 == 0:  # Check every 100 episodes
+                    #     is_accurate, error_msg = agent.verify_path_integration(obs)
+                    #     if not is_accurate:
+                    #         episode_path_errors += 1
+                    #         if episode_path_errors == 1:  # Print first error of episode
+                    #             print(f"Episode {episode}, Step {step}: {error_msg}")
 
                     next_state_idx = agent.get_state_index(obs)
                     obs['image'] = obs['image'].T

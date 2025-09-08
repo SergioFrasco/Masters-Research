@@ -10,4 +10,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python experiment_runner.py
+python main_200_steps.py
