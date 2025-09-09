@@ -282,8 +282,44 @@ class ExperimentRunner:
                 ae_triggers_per_episode.append(ae_triggers_this_episode)
                 path_integration_errors.append(episode_path_errors)
                 
+                #  Create ground truth reward space based on environment for plotting
+                ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
+
+                # Get the actual goal position from the environment
+                # The goal position should be available from the environment
+                if hasattr(env, 'goal_pos'):
+                    goal_x, goal_y = env.goal_pos
+                    ground_truth_reward_space[goal_y, goal_x] = 1.0
+                elif hasattr(env, '_goal_pos'):
+                    goal_x, goal_y = env._goal_pos
+                    ground_truth_reward_space[goal_y, goal_x] = 1.0
+                else:
+                    # If goal position is not directly accessible, extract from observation
+                    # Look for the goal object (usually object type 8) in the full grid
+                    if hasattr(env, 'grid'):
+                        for y in range(env.size):
+                            for x in range(env.size):
+                                cell = env.grid.get(x, y)
+                                if cell is not None and hasattr(cell, 'type') and cell.type == 'goal':
+                                    ground_truth_reward_space[y, x] = 1.0
+                                    break
+
+                # Alternative method: scan the full observation for goal objects
+                # This is more reliable if the above methods don't work
+                # if np.sum(ground_truth_reward_space) == 0:  # If no goal found yet
+                #     # Get full observation to find goal location
+                #     full_obs = env.gen_obs()
+                #     if 'image' in full_obs:
+                #         full_image = full_obs['image']
+                #         # Look for goal objects (typically value 8 in MiniGrid)
+                #         goal_locations = np.where(full_image[:, :, 0] == 8)  # Object channel
+                #         if len(goal_locations[0]) > 0:
+                #             for i in range(len(goal_locations[0])):
+                #                 goal_y, goal_x = goal_locations[0][i], goal_locations[1][i]
+                #                 ground_truth_reward_space[goal_y, goal_x] = 1.0
+
                 # Generate visualizations occasionally
-                if episode % 250 == 0:
+                if episode % 100 == 0:
                     save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
                     # Saving the SR
@@ -301,26 +337,38 @@ class ExperimentRunner:
                     # Create vision plots
                     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
-                    # Plot predicted 7x7 view
-                    ax1.imshow(predicted_reward_map_2d, cmap='viridis')
+                    # Create 2x2 subplot layout
+                    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
+
+                    # Plot predicted 7x7 view (top-left)
+                    im1 = ax1.imshow(predicted_reward_map_2d, cmap='viridis')
                     ax1.set_title(f'Predicted 7x7 View - Ep{episode} Step{step}')
                     ax1.plot(3, 6, 'ro', markersize=8, label='Agent')
-                    plt.colorbar(ax1.images[0], ax=ax1, fraction=0.046)
+                    plt.colorbar(im1, ax=ax1, fraction=0.046)
 
-                    # Plot target 7x7 view
-                    ax2.imshow(target_7x7, cmap='viridis')
+                    # Plot target 7x7 view (top-right)
+                    im2 = ax2.imshow(target_7x7, cmap='viridis')
                     ax2.set_title(f'Target 7x7 View (Ground Truth)')
                     ax2.plot(3, 6, 'ro', markersize=8, label='Agent')
-                    plt.colorbar(ax2.images[0], ax=ax2, fraction=0.046)
+                    plt.colorbar(im2, ax=ax2, fraction=0.046)
 
-                    # Plot true 10x10 reward map
-                    ax3.imshow(agent.true_reward_map, cmap='viridis')
+                    # Plot true 10x10 reward map (bottom-left)
+                    im3 = ax3.imshow(agent.true_reward_map, cmap='viridis')
                     ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_y})')
                     ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')
-                    plt.colorbar(ax3.images[0], ax=ax3, fraction=0.046)
+                    plt.colorbar(im3, ax=ax3, fraction=0.046)
+
+                    # Plot ground truth reward space (bottom-right)
+                    # Assuming you have access to the full ground truth reward space
+                    # Replace 'ground_truth_reward_space' with your actual variable name
+                    im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis')
+                    ax4.set_title('Ground Truth Reward Space')
+                    # Optionally plot agent position if coordinates are available in this space
+                    # ax4.plot(agent_global_x, agent_global_y, 'ro', markersize=8, label='Agent')
+                    plt.colorbar(im4, ax=ax4, fraction=0.046)
 
                     plt.tight_layout()
-                    plt.savefig(generate_save_path(f"vision_plots/maps_ep{episode}_step{step}.png"))
+                    plt.savefig(generate_save_path(f"vision_plots/maps_ep{episode}_step{step}.png"), dpi=150, bbox_inches='tight')
                     plt.close()
 
                     # Plot path integration accuracy
@@ -617,7 +665,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=1, max_steps=200)
+    results = runner.run_comparison_experiment(episodes=1000, max_steps=200)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

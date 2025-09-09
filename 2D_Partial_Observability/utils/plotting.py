@@ -149,7 +149,7 @@ def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
     im = None  # Store the last imshow object for the colorbar anchor
     for idx in range(num_maps):
         ax = axes[idx]
-        im = ax.imshow(agent.wvf[idx], cmap='viridis', vmin=0, vmax=1)
+        im = ax.imshow(agent.wvf[idx], cmap='viridis')
         ax.set_title(f"State {idx}", fontsize=8)
         ax.axis('off')
     

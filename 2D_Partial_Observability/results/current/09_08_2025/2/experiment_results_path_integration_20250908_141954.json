@@ -1,0 +1,44 @@
+{
+  "Masters Successor w/ Path Integration": [
+    {
+      "rewards": [
+        0.95275,
+        2.30025,
+        1.61525,
+        2.6535,
+        1.4780000000000002,
+        2.5454999999999997,
+        2.604,
+        1.62425,
+        0.58375,
+        0.0
+      ],
+      "lengths": [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "final_epsilon": 0.9950112350131176,
+      "algorithm": "Masters Successor w/ Path Integration",
+      "path_integration_errors": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}
