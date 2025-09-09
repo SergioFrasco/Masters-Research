@@ -11,7 +11,7 @@ from utils.plotting import generate_save_path
 import json
 import time
 import gc
-from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path
+from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path, getch
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -29,13 +29,16 @@ class ExperimentRunner:
         self.num_seeds = num_seeds
         self.results = {}
 
-    def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20):
+    def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20, manual = False):
             """Run Master agent experiment with path integration"""
             
             np.random.seed(seed)
 
-            # env = SimpleEnv(size=self.env_size, render_mode='human')
-            env = SimpleEnv(size=self.env_size)
+            if manual:
+                print("Manual control mode activated. Use W/A/S/D keys to move, Enter to let agent act.")
+                env = SimpleEnv(size=self.env_size, render_mode='human')
+            else:
+                env = SimpleEnv(size=self.env_size)
 
             agent = SuccessorAgentFixedPartial(env)  # Use path integration agent
 
@@ -81,7 +84,7 @@ class ExperimentRunner:
                 # Track reward achievement for random steps
                 reward_achieved = False
                 random_steps_remaining = 0
-
+                
                 for step in range(max_steps):
                     # Record position and action for trajectory (using path integration)
                     agent_pos = agent.internal_pos
@@ -93,7 +96,7 @@ class ExperimentRunner:
                     # Update internal state based on action taken
                     agent.update_internal_state(current_action)
                     
-                    # Verify path integration accuracy (remove for performance)
+                    # Verify path integration accuracy 
                     # if episode % 100 == 0:  # Check every 100 episodes
                     #     is_accurate, error_msg = agent.verify_path_integration(obs)
                     #     if not is_accurate:
@@ -114,14 +117,40 @@ class ExperimentRunner:
                         reward_achieved = True
                         random_steps_remaining = 10
 
-                    # Choose next action - use random if in post-reward phase
-                    if random_steps_remaining > 0:
-                        next_action = agent.sample_random_action(obs, epsilon=1.0)  # Force random
-                        random_steps_remaining -= 1
-                    elif step == 0 or episode < 1:  # Warmup period
-                        next_action = agent.sample_random_action(obs, epsilon=epsilon)
+                    if manual:
+                        # env.render()
+                        print(f"Episode {episode}, Step {step}")
+                        # print("W=forward, A=turn left, D=turn right, S=toggle, Q=quit manual, ENTER=auto")
+                        
+                        key = getch().lower()
+                        
+                        if key == 'w':
+                            next_action = 2  # forward
+                        elif key == 'a':
+                            next_action = 0  # turn left
+                        elif key == 'd':
+                            next_action = 1  # turn right
+                        elif key == 's':
+                            next_action = 5  # toggle
+                        elif key == 'q':
+                            manual = False
+                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                        elif key == '\r' or key == '\n':  # Enter key
+                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                        else:
+                            # Any other key = auto action
+                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                        
+                    
                     else:
-                        next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                        # Choose next action - use random if in post-reward phase
+                        if random_steps_remaining > 0:
+                            next_action = agent.sample_random_action(obs, epsilon=1.0)  # Force random
+                            random_steps_remaining -= 1
+                        elif step == 0 or episode < 1:  # Warmup period
+                            next_action = agent.sample_random_action(obs, epsilon=epsilon)
+                        else:
+                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
                     next_exp = [next_state_idx, next_action, None, None, None]
 
@@ -304,20 +333,6 @@ class ExperimentRunner:
                                     ground_truth_reward_space[y, x] = 1.0
                                     break
 
-                # Alternative method: scan the full observation for goal objects
-                # This is more reliable if the above methods don't work
-                # if np.sum(ground_truth_reward_space) == 0:  # If no goal found yet
-                #     # Get full observation to find goal location
-                #     full_obs = env.gen_obs()
-                #     if 'image' in full_obs:
-                #         full_image = full_obs['image']
-                #         # Look for goal objects (typically value 8 in MiniGrid)
-                #         goal_locations = np.where(full_image[:, :, 0] == 8)  # Object channel
-                #         if len(goal_locations[0]) > 0:
-                #             for i in range(len(goal_locations[0])):
-                #                 goal_y, goal_x = goal_locations[0][i], goal_locations[1][i]
-                #                 ground_truth_reward_space[goal_y, goal_x] = 1.0
-
                 # Generate visualizations occasionally
                 if episode % 100 == 0:
                     save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
@@ -430,7 +445,7 @@ class ExperimentRunner:
                 "path_integration_errors": path_integration_errors,
             }
     
-    def run_comparison_experiment(self, episodes=5000, max_steps=200):
+    def run_comparison_experiment(self, episodes=5000, max_steps=200, manual = False):
         """Run comparison between all agents across multiple seeds"""
         all_results = {}
         
@@ -438,7 +453,7 @@ class ExperimentRunner:
             print(f"\n=== Running experiments with seed {seed} ===")
 
             # Run Masters successor with path integration
-            successor_results = self.run_successor_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
+            successor_results = self.run_successor_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
             
             # Store results
             algorithms = ['Masters Successor w/ Path Integration']
@@ -657,6 +672,7 @@ class ExperimentRunner:
         print(f"Results saved to: {results_file}")
 
 
+
 def main():
     """Run the experiment comparison with path integration"""
     print("Starting baseline comparison experiment with path integration...")
@@ -665,7 +681,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=1000, max_steps=200)
+    results = runner.run_comparison_experiment(episodes=1000, max_steps=200, manual = True)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

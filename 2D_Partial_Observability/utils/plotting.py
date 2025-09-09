@@ -2,6 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import math
+import sys
+import termios
+import tty
 
 
 import os
@@ -261,4 +264,15 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.title('Agent Trajectory on World Value Function')
     plt.savefig('results/agent_trajectory.png')
     plt.close()
+
+def getch():
+    """Get a single character without pressing enter"""
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        char = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return char
 
