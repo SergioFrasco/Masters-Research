@@ -96,9 +96,6 @@ class DQNExperimentRunner:
             if 'image' in obs:
                 obs['image'] = obs['image'].T
 
-            # Track reward achievement for random steps
-            reward_achieved = False
-            random_steps_remaining = 0
             
             for step in range(max_steps):
                 # Record position and action for trajectory (using path integration)
@@ -124,15 +121,9 @@ class DQNExperimentRunner:
                         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
                     else:
                         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
+
                 else:
-                    # Choose action based on episode phase
-                    if random_steps_remaining > 0:
-                        current_action = agent.sample_random_action(current_obs, epsilon=1.0)
-                        random_steps_remaining -= 1
-                    elif step == 0 or episode < 50:  # Warmup period
-                        current_action = agent.sample_random_action(current_obs, epsilon=agent.epsilon)
-                    else:
-                        current_action = agent.select_action_dqn(current_obs, agent.epsilon)
+                    current_action = agent.select_action_dqn(current_obs, agent.epsilon)
 
                 trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
@@ -167,12 +158,6 @@ class DQNExperimentRunner:
                 #     current_state = agent.get_dqn_state(current_obs)
                 #     print(f"DQN state size: {current_state.shape}")
 
-
-
-                # Check if reward was just achieved
-                if done and not reward_achieved:
-                    reward_achieved = True
-                    random_steps_remaining = 10
 
                 # === Vision Model Training (UNCHANGED) ===
                 agent_position = agent.internal_pos
@@ -299,9 +284,8 @@ class DQNExperimentRunner:
                 current_obs = next_obs
                 current_state = next_state
 
-                # No Early Temination
-                # if done:
-                #     break
+                if done:
+                    break
 
             # Decay epsilon
             agent.decay_epsilon()

@@ -28,6 +28,7 @@ class ExperimentRunner:
         self.env_size = env_size
         self.num_seeds = num_seeds
         self.results = {}
+        self.trajectory_buffer_size = 10 
 
     def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20, manual = False):
             """Run Master agent experiment with path integration"""
@@ -60,11 +61,15 @@ class ExperimentRunner:
             path_integration_errors = []
 
             for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
-                obs = env.reset()
+                obs, _ = env.reset()
+                obs['image'] = obs['image'].T
+                
                 
                 # Reset agent for new episode
                 agent.reset_path_integration()
                 agent.initialize_path_integration(obs)
+
+                trajectory_buffer = deque(maxlen=self.trajectory_buffer_size)
                 
                 total_reward = 0
                 steps = 0
@@ -80,16 +85,31 @@ class ExperimentRunner:
                 current_state_idx = agent.get_state_index(obs)
                 current_action = agent.sample_random_action(obs, epsilon=epsilon)
                 current_exp = [current_state_idx, current_action, None, None, None]
-
-                # Track reward achievement for random steps
-                reward_achieved = False
-                random_steps_remaining = 0
                 
                 for step in range(max_steps):
                     # Record position and action for trajectory (using path integration)
                     agent_pos = agent.internal_pos
                     trajectory.append((agent_pos[0], agent_pos[1], current_action))
                     
+                    # Make the normalized grid for step  info
+                    agent_view = obs['image'][0]  
+
+                    # Convert to channels last for easier processing
+                    normalized_grid = np.zeros((7, 7), dtype=np.float32)
+
+                    # Setting up input for the AE based on agent's partial view
+                    normalized_grid[agent_view == 2] = 0.0  # Wall
+                    normalized_grid[agent_view == 1] = 0.0  # Open space  
+                    normalized_grid[agent_view == 8] = 1.0 
+
+                    step_info = {
+                        'agent_view': obs['image'][0].copy(),  # 7x7 view
+                        'agent_pos': tuple(agent.internal_pos),
+                        'agent_dir': agent.internal_dir,
+                        'normalized_grid': normalized_grid.copy()  # The AE input
+                    }
+                    trajectory_buffer.append(step_info)
+
                     # Take action in environment
                     obs, reward, done, _, _ = env.step(current_action)
                     
@@ -111,11 +131,6 @@ class ExperimentRunner:
                     current_exp[2] = next_state_idx
                     current_exp[3] = reward
                     current_exp[4] = done
-
-                    # Check if reward was just achieved
-                    if done and not reward_achieved:
-                        reward_achieved = True
-                        random_steps_remaining = 10
 
                     if manual:
                         # env.render()
@@ -141,15 +156,8 @@ class ExperimentRunner:
                             # Any other key = auto action
                             next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
                         
-                    
+                    # Sample actions with WVF
                     else:
-                        # Choose next action - use random if in post-reward phase
-                        if random_steps_remaining > 0:
-                            next_action = agent.sample_random_action(obs, epsilon=1.0)  # Force random
-                            random_steps_remaining -= 1
-                        elif step == 0 or episode < 1:  # Warmup period
-                            next_action = agent.sample_random_action(obs, epsilon=epsilon)
-                        else:
                             next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
                     next_exp = [next_state_idx, next_action, None, None, None]
@@ -157,7 +165,8 @@ class ExperimentRunner:
                     # Update agent - always pass next_exp since we're not terminating early
                     agent.update(current_exp, next_exp)
 
-                    # Vision Model
+                    # ============================= Vision Model ====================================
+                
                     # Update the agent's true_reward_map based on current observation
                     agent_position = agent.internal_pos  # Use path integration position
 
@@ -186,6 +195,32 @@ class ExperimentRunner:
                     # Learning Signal
                     if done and step < max_steps:
                         agent.true_reward_map[agent_position[1], agent_position[0]] = 1
+
+                        # Added: Logic for training on past 10 steps (BATCH) when goal is reached
+
+                        if len(trajectory_buffer) > 1:  # Need at least 2 steps
+                            batch_inputs = []
+                            batch_targets = []
+                            
+                            for past_step in trajectory_buffer:
+                                # Get the reward location in global coordinates
+                                reward_global_pos = agent_position  # Current reward location
+                                
+                                # Create target 7x7 for this past step
+                                past_target_7x7 = self._create_target_view_with_reward(
+                                    past_step['agent_pos'], 
+                                    past_step['agent_dir'],
+                                    reward_global_pos,
+                                    agent.true_reward_map
+                                )
+                                
+                                batch_inputs.append(past_step['normalized_grid'])
+                                batch_targets.append(past_target_7x7)
+                            
+                            # Train autoencoder on batch
+                            self._train_ae_on_batch(ae_model, optimizer, loss_fn, 
+                                                batch_inputs, batch_targets, device)
+
                     else:
                         agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
@@ -286,6 +321,7 @@ class ExperimentRunner:
                         optimizer.step()
                         
                         step_loss = loss.item()
+                
 
                     agent.reward_maps.fill(0)  # Reset all maps to zero
 
@@ -306,7 +342,8 @@ class ExperimentRunner:
                     current_exp = next_exp
                     current_action = next_action
 
-                    # No early termination - always run full 200 steps
+                    if done:
+                        break
 
                 ae_triggers_per_episode.append(ae_triggers_this_episode)
                 path_integration_errors.append(episode_path_errors)
@@ -350,36 +387,39 @@ class ExperimentRunner:
                     plt.close()
 
                     # Create vision plots
-                    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-
-                    # Create 2x2 subplot layout
                     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
 
+                    # Calculate global vmin and vmax across all arrays
+                    all_values = np.concatenate([
+                        predicted_reward_map_2d.flatten(),
+                        target_7x7.flatten(),
+                        agent.true_reward_map.flatten(),
+                        ground_truth_reward_space.flatten()
+                    ])
+                    vmin = np.min(all_values)
+                    vmax = np.max(all_values)
+
                     # Plot predicted 7x7 view (top-left)
-                    im1 = ax1.imshow(predicted_reward_map_2d, cmap='viridis')
+                    im1 = ax1.imshow(predicted_reward_map_2d, cmap='viridis', vmin=vmin, vmax=vmax)
                     ax1.set_title(f'Predicted 7x7 View - Ep{episode} Step{step}')
                     ax1.plot(3, 6, 'ro', markersize=8, label='Agent')
                     plt.colorbar(im1, ax=ax1, fraction=0.046)
 
                     # Plot target 7x7 view (top-right)
-                    im2 = ax2.imshow(target_7x7, cmap='viridis')
+                    im2 = ax2.imshow(target_7x7, cmap='viridis', vmin=vmin, vmax=vmax)
                     ax2.set_title(f'Target 7x7 View (Ground Truth)')
                     ax2.plot(3, 6, 'ro', markersize=8, label='Agent')
                     plt.colorbar(im2, ax=ax2, fraction=0.046)
 
                     # Plot true 10x10 reward map (bottom-left)
-                    im3 = ax3.imshow(agent.true_reward_map, cmap='viridis')
+                    im3 = ax3.imshow(agent.true_reward_map, cmap='viridis', vmin=vmin, vmax=vmax)
                     ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_y})')
                     ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')
                     plt.colorbar(im3, ax=ax3, fraction=0.046)
 
                     # Plot ground truth reward space (bottom-right)
-                    # Assuming you have access to the full ground truth reward space
-                    # Replace 'ground_truth_reward_space' with your actual variable name
-                    im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis')
+                    im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis', vmin=vmin, vmax=vmax)
                     ax4.set_title('Ground Truth Reward Space')
-                    # Optionally plot agent position if coordinates are available in this space
-                    # ax4.plot(agent_global_x, agent_global_y, 'ro', markersize=8, label='Agent')
                     plt.colorbar(im4, ax=ax4, fraction=0.046)
 
                     plt.tight_layout()
@@ -671,6 +711,61 @@ class ExperimentRunner:
 
         print(f"Results saved to: {results_file}")
 
+    def _create_target_view_with_reward(self, past_agent_pos, past_agent_dir, reward_pos, reward_map):
+        """Create 7x7 target view from past agent position showing reward location"""
+        target_7x7 = np.zeros((7, 7), dtype=np.float32)
+        
+        ego_center_x, ego_center_y = 3, 6  # Agent position in 7x7 view
+        past_x, past_y = past_agent_pos
+        reward_x, reward_y = reward_pos
+        
+        for view_y in range(7):
+            for view_x in range(7):
+                # Calculate offset from agent's position in ego view
+                dx_ego = view_x - ego_center_x
+                dy_ego = view_y - ego_center_y
+                
+                # Rotate based on past agent direction
+                if past_agent_dir == 3:  # North
+                    dx_world, dy_world = dx_ego, dy_ego
+                elif past_agent_dir == 0:  # East
+                    dx_world, dy_world = -dy_ego, dx_ego
+                elif past_agent_dir == 1:  # South
+                    dx_world, dy_world = -dx_ego, -dy_ego
+                elif past_agent_dir == 2:  # West
+                    dx_world, dy_world = dy_ego, -dx_ego
+                
+                # Calculate global coordinates for this view cell
+                global_x = past_x + dx_world
+                global_y = past_y + dy_world
+                
+                # Check if this cell contains the reward
+                if (global_x == reward_x and global_y == reward_y):
+                    target_7x7[view_y, view_x] = 1.0
+                else:
+                    target_7x7[view_y, view_x] = 0.0
+        
+        return target_7x7
+
+    def _train_ae_on_batch(self, model, optimizer, loss_fn, inputs, targets, device):
+        """Train autoencoder on batch of trajectory data"""
+        # print("Done: Batch training triggered")
+        # Convert to tensors and stack
+        input_batch = np.stack([inp[np.newaxis, ..., np.newaxis] for inp in inputs])
+        target_batch = np.stack([tgt[np.newaxis, ..., np.newaxis] for tgt in targets])
+        
+        input_tensor = torch.tensor(input_batch, dtype=torch.float32).squeeze(1).permute(0, 3, 1, 2).to(device)
+        target_tensor = torch.tensor(target_batch, dtype=torch.float32).squeeze(1).permute(0, 3, 1, 2).to(device)
+        
+        model.train()
+        optimizer.zero_grad()
+        output = model(input_tensor)
+        loss = loss_fn(output, target_tensor)
+        loss.backward()
+        optimizer.step()
+        
+        return loss.item()
+
 
 
 def main():
@@ -681,7 +776,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=2000, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=1000, max_steps=200, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
