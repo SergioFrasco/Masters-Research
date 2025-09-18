@@ -5,7 +5,7 @@ import os
 from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
-from agents import SuccessorAgentFixedPartial  # Import the new path integration agent
+from agents import SuccessorAgentPartial  # Import the new path integration agent
 from models import Autoencoder
 from utils.plotting import generate_save_path
 import json
@@ -41,7 +41,7 @@ class ExperimentRunner:
             else:
                 env = SimpleEnv(size=self.env_size)
 
-            agent = SuccessorAgentFixedPartial(env)  # Use path integration agent
+            agent = SuccessorAgentPartial(env)  # Use path integration agent
 
             # Setup torch
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
