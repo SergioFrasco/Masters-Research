@@ -49,7 +49,7 @@ class DQNExperimentRunner:
             sequence_length=16,
             frame_stack_k=4,
             lstm_hidden_dim=128, 
-            learning_rate=0.001,
+            learning_rate=0.0001,
             gamma=0.99,
             epsilon_start=1.0,
             epsilon_end=0.05,
@@ -633,7 +633,7 @@ def main():
     runner = DQNExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=10000, max_steps=200, manual=False)
+    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual=False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
