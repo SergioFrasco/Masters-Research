@@ -17,7 +17,7 @@ class LSTM_DQN(nn.Module):
     """
     
     def __init__(self, frame_stack_size=4, cnn_output_dim=256, lstm_hidden_dim=128, 
-                 output_size=6, dropout_rate=0.1):
+                 output_size=3, dropout_rate=0.1):
         """
         Args:
             frame_stack_size: Number of frames to stack (usually 4)
@@ -243,7 +243,7 @@ class LSTM_DQN_Agent:
         - Stores and samples sequences instead of transitions
         """
         self.env = env
-        self.action_dim = 3  # MiniGrid action space
+        self.action_dim = 3 
         
         # Hyperparameters
         self.learning_rate = learning_rate

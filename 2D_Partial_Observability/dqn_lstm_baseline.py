@@ -46,7 +46,7 @@ class DQNExperimentRunner:
         # Initialize LSTM-DQN agent
         agent = LSTM_DQN_Agent(
             env,
-            sequence_length=32,
+            sequence_length=16,
             frame_stack_k=4,
             lstm_hidden_dim=128, 
             learning_rate=0.001,
@@ -56,7 +56,7 @@ class DQNExperimentRunner:
             epsilon_decay=0.9995,
             memory_size=5000,
             batch_size=8,
-            target_update_freq=100
+            target_update_freq=500
         )
 
         # Tracking variables
@@ -69,7 +69,7 @@ class DQNExperimentRunner:
             obs, _ = env.reset()
             obs["image"] = obs['image'].T
             
-            # IMPORTANT: Reset episode state in agent (frame stack and hidden state)
+            # Reset episode state in agent (frame stack and hidden state)
             agent.reset_episode(obs)
             
             total_reward = 0
@@ -77,12 +77,12 @@ class DQNExperimentRunner:
             episode_losses = []
             
             for step in range(max_steps):
-                # CRITICAL: Update frame stack ONCE per step
+                # Update frame stack ONCE per step
                 # Extract and push the current frame to the stack
                 frame = agent._extract_frame(obs)
                 agent.frame_stack.push(frame)
                 
-                # Now get the stacked state (without pushing again)
+                # Now get the stacked state 
                 stacked = agent.frame_stack.get_stack()
                 stacked = np.array(stacked, dtype=np.float32)
                 current_state = torch.FloatTensor(stacked).to(agent.device) / 10.0
@@ -633,7 +633,7 @@ def main():
     runner = DQNExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual=False)
+    results = runner.run_comparison_experiment(episodes=10000, max_steps=200, manual=False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
