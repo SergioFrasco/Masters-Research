@@ -905,7 +905,7 @@ class ExperimentRunner:
 
             dqn_results = self.run_dqn_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
 
-            dqn_lstm_results = self.run_dqn_lstm_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
+            dqn_lstm_results = self.run_lstm_dqn_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
             
             # Store results
             algorithms = ['Masters Successor', 'DQN', 'LSTM-DQN']
