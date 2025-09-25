@@ -337,7 +337,9 @@ class ExperimentRunner:
                         for x in range(agent.grid_size):
                             curr_reward = agent.true_reward_map[y, x]
                             idx = y * agent.grid_size + x
-                            agent.reward_maps[idx, y, x] = curr_reward
+                            # Threshold
+                            if agent.true_reward_map[y, x] >= 0.5:
+                                agent.reward_maps[idx, y, x] = curr_reward
 
                     # Update agent WVF
                     M_flat = np.mean(agent.M, axis=0)
@@ -784,7 +786,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=2000, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=20000, max_steps=200, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
