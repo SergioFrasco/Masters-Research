@@ -196,12 +196,12 @@ class ExperimentRunner:
                     if done and step < max_steps:
                         agent.true_reward_map[agent_position[1], agent_position[0]] = 1
 
-                        # Added: Logic for training on past 10 steps (BATCH) when goal is reached
-
-                        if len(trajectory_buffer) > 1:  # Need at least 2 steps
+                        # Added: Logic for training on past 10 steps (BATCH) + current step when goal is reached
+                        if len(trajectory_buffer) > 0:  # Changed from > 1 to > 0
                             batch_inputs = []
                             batch_targets = []
                             
+                            # Include all steps from trajectory buffer (past steps)
                             for past_step in trajectory_buffer:
                                 # Get the reward location in global coordinates
                                 reward_global_pos = agent_position  # Current reward location
@@ -217,12 +217,20 @@ class ExperimentRunner:
                                 batch_inputs.append(past_step['normalized_grid'])
                                 batch_targets.append(past_target_7x7)
                             
-                            # Train autoencoder on batch
+                            # ALSO include the current step (when agent is on goal)
+                            current_target_7x7 = self._create_target_view_with_reward(
+                                tuple(agent.internal_pos),  # Current position (on goal)
+                                agent.internal_dir,         # Current direction
+                                agent_position,             # Reward position (same as current position)
+                                agent.true_reward_map
+                            )
+                            
+                            batch_inputs.append(normalized_grid)  # Current step's input
+                            batch_targets.append(current_target_7x7)  # Current step's target
+                            
+                            # Train autoencoder on batch (now includes current step + up to 9 previous steps)
                             self._train_ae_on_batch(ae_model, optimizer, loss_fn, 
                                                 batch_inputs, batch_targets, device)
-
-                    else:
-                        agent.true_reward_map[agent_position[1], agent_position[0]] = 0
 
                     # Map the 7x7 predicted reward map to the 10x10 global map
                     agent_x, agent_y = agent_position
@@ -776,7 +784,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=2000, max_steps=200, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

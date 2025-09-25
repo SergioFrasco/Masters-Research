@@ -216,6 +216,17 @@ class ExperimentRunner:
                                 
                                 batch_inputs.append(past_step['normalized_grid'])
                                 batch_targets.append(past_target_7x7)
+
+                            # ALSO include the current step (when agent is on goal)
+                            current_target_7x7 = self._create_target_view_with_reward(
+                                tuple(agent.internal_pos),  # Current position (on goal)
+                                agent.internal_dir,         # Current direction
+                                agent_position,             # Reward position (same as current position)
+                                agent.true_reward_map
+                            )
+                            
+                            batch_inputs.append(normalized_grid)  # Current step's input
+                            batch_targets.append(current_target_7x7)  # Current step's target
                             
                             # Train autoencoder on batch
                             self._train_ae_on_batch(ae_model, optimizer, loss_fn, 
@@ -1188,7 +1199,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=30000, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=60000, max_steps=100, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
