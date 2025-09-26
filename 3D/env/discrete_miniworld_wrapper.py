@@ -46,6 +46,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
         obs, reward, terminated, truncated, info = super().step(action)
         return obs, reward, terminated, truncated, info
 
+# ================= Override placement methods to enforce discrete agent placement =======================
     def place_agent(
         self,
         room=None,
@@ -68,7 +69,8 @@ class DiscreteMiniWorldWrapper(OneRoom):
             pos=fixed_pos,
             dir=fixed_dir,
         )
-    
+
+# ================ Helper methods for discrete Goal placement =======================
     def snap_to_grid(self, pos):
         """Snap a continuous position to discrete grid coordinates"""
         # Use self.grid_size instead of self.size
