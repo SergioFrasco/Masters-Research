@@ -1,37 +1,11 @@
 import gymnasium as gym
 import miniworld
-import numpy as np
-import time
+from miniworld.manual_control import ManualControl
+from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 
-env = gym.make("MiniWorld-OneRoom-v0", render_mode="human")
-obs, info = env.reset()
+# Create your custom environment directly (NO base_env)
+env = DiscreteMiniWorldWrapper(size=10, render_mode="human")
 
-# Define a simple policy
-def simple_policy(step_count):
-    """Simple policy that explores the environment"""
-    if step_count % 20 < 10:
-        return env.unwrapped.actions.move_forward
-    elif step_count % 20 < 15:
-        return env.unwrapped.actions.turn_left
-    else:
-        return env.unwrapped.actions.turn_right
-
-step = 0
-for i in range(500):
-    # Use your agent's policy here instead
-    action = simple_policy(step)
-    
-    obs, reward, done, truncated, info = env.step(action)
-    
-    print(f"Step {step}: Reward={reward}, Obs shape={obs.shape}")
-    
-    if done or truncated:
-        print("Episode done, resetting...")
-        obs, info = env.reset()
-        step = 0
-    
-    step += 1
-    env.render()
-    time.sleep(0.05)  # Slow down for visibility
-
-env.close()
+# Use manual control
+manual_control = ManualControl(env, no_time_limit=True, domain_rand=False)
+manual_control.run()
