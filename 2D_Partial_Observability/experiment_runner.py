@@ -379,7 +379,7 @@ class ExperimentRunner:
                                 cell = env.grid.get(x, y)
                                 if cell is not None and hasattr(cell, 'type') and cell.type == 'goal':
                                     ground_truth_reward_space[y, x] = 1.0
-                                    break
+                                    
 
                 # Generate visualizations occasionally
                 if episode % 100 == 0:
