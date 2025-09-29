@@ -340,7 +340,8 @@ class ExperimentRunner:
                         for x in range(agent.grid_size):
                             curr_reward = agent.true_reward_map[y, x]
                             idx = y * agent.grid_size + x
-                            agent.reward_maps[idx, y, x] = curr_reward
+                            if agent.true_reward_map[y, x] >= 0.5: #Threshold
+                                agent.reward_maps[idx, y, x] = curr_reward
 
                     # Update agent WVF
                     M_flat = np.mean(agent.M, axis=0)
@@ -382,7 +383,7 @@ class ExperimentRunner:
                                     
 
                 # Generate visualizations occasionally
-                if episode % 100 == 0:
+                if episode % 500 == 0:
                     save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
                     # Saving the SR
@@ -605,7 +606,7 @@ class ExperimentRunner:
                 agent.update_internal_state(current_action)
                 
                 # Verify path integration accuracy periodically
-                if episode % 200 == 0:
+                if episode % 500 == 0:
                     is_accurate, error_msg = agent.verify_path_integration(obs)
                     if not is_accurate:
                         episode_path_errors += 1
@@ -650,7 +651,7 @@ class ExperimentRunner:
                 dqn_losses.append(0.0)
 
             # Generate visualizations occasionally
-            if episode % 250 == 0:
+            if episode % 500 == 0:
                 # Create ground truth reward space
                 ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
 
@@ -842,7 +843,7 @@ class ExperimentRunner:
             episode_lengths.append(steps)
             
             # Logging
-            if episode % 100 == 0:
+            if episode % 500 == 0:
                 avg_reward = np.mean(episode_rewards[-100:]) if len(episode_rewards) >= 100 else np.mean(episode_rewards)
                 avg_length = np.mean(episode_lengths[-100:]) if len(episode_lengths) >= 100 else np.mean(episode_lengths)
                 avg_loss = np.mean(lstm_losses[-100:]) if len(lstm_losses) >= 100 else np.mean(lstm_losses)
@@ -855,7 +856,7 @@ class ExperimentRunner:
                 print(f"  Replay buffer size: {len(agent.memory)} sequences")
             
             # Visualizations (keeping your existing visualization code)
-            if episode % 250 == 0 and episode > 0:
+            if episode % 500 == 0 and episode > 0:
                 # Loss plot
                 if len(lstm_losses) > 10:
                     plt.figure(figsize=(10, 5))
@@ -1196,10 +1197,10 @@ def main():
     print("Starting baseline comparison experiment with path integration...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=3)
+    runner = ExperimentRunner(env_size=15, num_seeds=2)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=60000, max_steps=100, manual = False)
+    results = runner.run_comparison_experiment(episodes=20001, max_steps=100, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
