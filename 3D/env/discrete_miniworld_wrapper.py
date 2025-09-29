@@ -44,6 +44,19 @@ class DiscreteMiniWorldWrapper(OneRoom):
     
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
+
+        # Calculate distance to goal (box object)
+        agent_pos = self.agent.pos
+        goal_pos = self.box.pos  # The rewarding object in OneRoom is self.box
+        
+        # Calculate Euclidean distance (2D, ignoring y-axis)
+        distance = np.sqrt((agent_pos[0] - goal_pos[0])**2 + (agent_pos[2] - goal_pos[2])**2)
+
+        # print("Distance to goal: ", distance)
+        
+        # Add distance to info dictionary
+        info['distance_to_goal'] = distance
+        
         return obs, reward, terminated, truncated, info
 
 # ================= Override placement methods to enforce discrete agent placement =======================
