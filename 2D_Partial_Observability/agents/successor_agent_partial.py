@@ -20,7 +20,7 @@ class SuccessorAgentPartial:
         
         # initialization of the SR
         self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
+        # self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
 
         self.w = np.zeros([self.state_size])
 

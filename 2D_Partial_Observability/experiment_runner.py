@@ -1200,7 +1200,7 @@ def main():
     runner = ExperimentRunner(env_size=15, num_seeds=2)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=20001, max_steps=100, manual = False)
+    results = runner.run_comparison_experiment(episodes=50001, max_steps=100, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
