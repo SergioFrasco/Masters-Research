@@ -843,7 +843,7 @@ class ExperimentRunner:
             episode_lengths.append(steps)
             
             # Logging
-            if episode % 500 == 0:
+            if episode % 2500 == 0:
                 avg_reward = np.mean(episode_rewards[-100:]) if len(episode_rewards) >= 100 else np.mean(episode_rewards)
                 avg_length = np.mean(episode_lengths[-100:]) if len(episode_lengths) >= 100 else np.mean(episode_lengths)
                 avg_loss = np.mean(lstm_losses[-100:]) if len(lstm_losses) >= 100 else np.mean(lstm_losses)
@@ -856,7 +856,7 @@ class ExperimentRunner:
                 print(f"  Replay buffer size: {len(agent.memory)} sequences")
             
             # Visualizations (keeping your existing visualization code)
-            if episode % 500 == 0 and episode > 0:
+            if episode % 2500 == 0 and episode > 0:
                 # Loss plot
                 if len(lstm_losses) > 10:
                     plt.figure(figsize=(10, 5))
