@@ -5,7 +5,7 @@ import os
 from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
-from agents import SuccessorAgentPartial  # Import the new path integration agent
+from agents import SuccessorAgentPartialQLearning  
 from models import Autoencoder
 from utils.plotting import generate_save_path
 import json
@@ -41,7 +41,7 @@ class ExperimentRunner:
             else:
                 env = SimpleEnv(size=self.env_size)
 
-            agent = SuccessorAgentPartial(env)  # Use path integration agent
+            agent = SuccessorAgentPartialQLearning(env) 
 
             # Setup torch
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -786,7 +786,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=20000, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

@@ -4,7 +4,7 @@ from utils.matrices import onehot
 from minigrid.core.world_object import Goal
 from gym import spaces
 
-class SuccessorAgentPartial:
+class SuccessorAgentPartialSARSA:
     # Changed gamma from 0.99
     def __init__(self, env, learning_rate=0.01, gamma=0.95):
         self.env = env

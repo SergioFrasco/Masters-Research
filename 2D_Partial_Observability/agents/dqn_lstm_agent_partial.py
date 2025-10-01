@@ -295,11 +295,11 @@ class LSTM_DQN_Agent:
         # Training counter
         self.update_counter = 0
         
-        print(f"LSTM-DQN Agent initialized")
-        print(f"Frame stack size: {frame_stack_k}")
-        print(f"Sequence length: {sequence_length}")
-        print(f"LSTM hidden dim: {lstm_hidden_dim}")
-        print(f"Using device: {self.device}")
+        # print(f"LSTM-DQN Agent initialized")
+        # print(f"Frame stack size: {frame_stack_k}")
+        # print(f"Sequence length: {sequence_length}")
+        # print(f"LSTM hidden dim: {lstm_hidden_dim}")
+        # print(f"Using device: {self.device}")
     
 
     def reset_episode(self, initial_obs):
