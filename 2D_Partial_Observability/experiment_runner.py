@@ -1404,16 +1404,14 @@ class ExperimentRunner:
         for seed in range(self.num_seeds):
             print(f"\n=== Running experiments with seed {seed} ===")
 
-            # Run Masters successor with path integration
             successor_results_sarsa = self.run_successor_experiment_sarsa(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
+
+            successor_results_q_learning = self.run_successor_experiment_q_learning(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
 
             dqn_results = self.run_dqn_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
 
             dqn_lstm_results = self.run_lstm_dqn_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
 
-            successor_results_q_learning = self.run_successor_experiment_q_learning(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
-
-            
             # Store results
             algorithms = ['Masters Successor SARSA', 'Masters Successor Q-Learning', 'DQN', 'LSTM-DQN']
             results_list = [successor_results_sarsa, successor_results_q_learning, dqn_results, dqn_lstm_results]
@@ -1692,10 +1690,10 @@ def main():
     print("Starting baseline comparison experiment with path integration...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=15, num_seeds=1)
+    runner = ExperimentRunner(env_size=15, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=15000, max_steps=100, manual = False)
+    results = runner.run_comparison_experiment(episodes=25000, max_steps=100, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

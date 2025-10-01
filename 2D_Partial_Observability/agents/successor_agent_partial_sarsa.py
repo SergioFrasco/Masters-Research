@@ -6,7 +6,7 @@ from gym import spaces
 
 class SuccessorAgentPartialSARSA:
     # Changed gamma from 0.99
-    def __init__(self, env, learning_rate=0.05, gamma=0.95):
+    def __init__(self, env, learning_rate=0.05, gamma=0.99):
         self.env = env
         self.learning_rate = learning_rate
         self.gamma = gamma

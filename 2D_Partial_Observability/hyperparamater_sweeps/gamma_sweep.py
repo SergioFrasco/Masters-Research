@@ -1,3 +1,5 @@
+# RESULTS: GAMMA = 0.99 IS BEST
+
 import submitit
 import numpy as np
 import torch
