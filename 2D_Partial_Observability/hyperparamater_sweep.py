@@ -35,7 +35,7 @@ def train_agent_with_config(sr_lr, vision_lr, gamma, seed, episodes=5000):
         torch.cuda.manual_seed_all(seed)
     
     # Setup environment
-    env_size = 15
+    env_size = 10
     env = SimpleEnv(size=env_size)
     
     # Initialize agent with specified SR learning rate and gamma
@@ -81,7 +81,7 @@ def train_agent_with_config(sr_lr, vision_lr, gamma, seed, episodes=5000):
         current_action = agent.sample_random_action(obs, epsilon=epsilon)
         current_exp = [current_state_idx, current_action, None, None, None]
         
-        for step in range(200):  # max_steps = 200
+        for step in range(100):  # max_steps
             agent_pos = agent.internal_pos
             
             # Create normalized grid
@@ -298,7 +298,7 @@ def main():
     
     # Test different gamma values
     gamma_values = [0.85, 0.90, 0.95, 0.97, 0.99]
-    seeds = [20, 42, 123]
+    seeds = [20, 42]
     
     # Setup submitit executor
     executor = submitit.AutoExecutor(folder="./submitit_logs")

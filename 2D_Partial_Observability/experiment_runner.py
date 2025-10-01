@@ -102,6 +102,9 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
 
+                    if step == 0:
+                        done = False
+
                     # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
                     if step > 0:
                         if done:
@@ -423,7 +426,7 @@ class ExperimentRunner:
                         plt.legend()
                         plt.grid(True, alpha=0.3)
                         plt.tight_layout()
-                        plt.savefig(generate_save_path(f'sarsapath_integration/errors_up_to_ep_{episode}.png'))
+                        plt.savefig(generate_save_path(f'sarsa/path_integration/errors_up_to_ep_{episode}.png'))
                         plt.close()
 
                     # Plot AE triggers over episodes
@@ -545,6 +548,8 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
 
+                    if step == 0:
+                        done = False
                     # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
                     if step > 0:
                         if done:
