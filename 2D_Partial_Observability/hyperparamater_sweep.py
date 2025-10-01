@@ -303,8 +303,6 @@ def main():
         name="hyperparam_sweep",
         timeout_min=4320,  # 3 days per job
         slurm_partition="bigbatch",  # Change to your partition name
-        cpus_per_task=4,
-        mem_gb=16,
         slurm_array_parallelism=4  # Run 4 jobs in parallel
     )
     
