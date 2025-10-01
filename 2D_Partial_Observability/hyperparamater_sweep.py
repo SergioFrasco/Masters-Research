@@ -12,20 +12,21 @@ from utils.plotting import generate_save_path
 import json
 import os
 
-def train_agent_with_config(sr_lr, vision_lr, seed, episodes=5000):
+def train_agent_with_config(sr_lr, vision_lr, gamma, seed, episodes=5000):
     """
-    Train a single agent with specific learning rates.
+    Train a single agent with specific learning rates and gamma.
     
     Args:
         sr_lr: Learning rate for successor representation
         vision_lr: Learning rate for vision model (autoencoder)
+        gamma: Discount factor
         seed: Random seed
         episodes: Number of training episodes
     
     Returns:
         dict: Results including rewards, lengths, and config
     """
-    print(f"\nTraining with SR_LR={sr_lr}, Vision_LR={vision_lr}, Seed={seed}")
+    print(f"\nTraining with SR_LR={sr_lr}, Vision_LR={vision_lr}, Gamma={gamma}, Seed={seed}")
     
     # Set seeds
     np.random.seed(seed)
@@ -34,20 +35,20 @@ def train_agent_with_config(sr_lr, vision_lr, seed, episodes=5000):
         torch.cuda.manual_seed_all(seed)
     
     # Setup environment
-    env_size = 10
+    env_size = 15
     env = SimpleEnv(size=env_size)
     
-    # Initialize agent with specified SR learning rate
+    # Initialize agent with specified SR learning rate and gamma
     agent = SuccessorAgentPartialQLearning(
         env, 
-        learning_rate=sr_lr,  # SR learning rate
-        gamma=0.95
+        learning_rate=sr_lr,
+        gamma=gamma  # Variable gamma
     )
     
     # Setup vision model with specified learning rate
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ae_model = Autoencoder(input_channels=1).to(device)
-    optimizer = optim.Adam(ae_model.parameters(), lr=vision_lr)  # Vision learning rate
+    optimizer = optim.Adam(ae_model.parameters(), lr=vision_lr)
     loss_fn = nn.MSELoss()
     
     # Training variables
@@ -58,7 +59,7 @@ def train_agent_with_config(sr_lr, vision_lr, seed, episodes=5000):
     epsilon_decay = 0.9995
     trajectory_buffer_size = 10
     
-    for episode in tqdm(range(episodes), desc=f"SR_LR={sr_lr}, Vision_LR={vision_lr}"):
+    for episode in tqdm(range(episodes), desc=f"Gamma={gamma}, Seed={seed}"):
         obs, _ = env.reset()
         obs['image'] = obs['image'].T
         
@@ -228,6 +229,7 @@ def train_agent_with_config(sr_lr, vision_lr, seed, episodes=5000):
     results = {
         'sr_lr': sr_lr,
         'vision_lr': vision_lr,
+        'gamma': gamma,
         'seed': seed,
         'rewards': episode_rewards,
         'lengths': episode_lengths,
@@ -288,34 +290,39 @@ def train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
 
 
 def main():
-    """Main function to run hyperparameter sweep using submitit"""
+    """Main function to run gamma hyperparameter sweep using submitit"""
     
-    # Define hyperparameter grid - FULL GRID
-    sr_learning_rates = [0.001, 0.005, 0.01, 0.05, 0.1]
-    vision_learning_rates = [0.0001, 0.0005, 0.001, 0.005, 0.01]
-    seeds = [20, 43]
+    # Fixed best learning rates from previous sweep
+    sr_lr = 0.05
+    vision_lr = 0.001
+    
+    # Test different gamma values
+    gamma_values = [0.85, 0.90, 0.95, 0.97, 0.99]
+    seeds = [20, 42, 123]
     
     # Setup submitit executor
     executor = submitit.AutoExecutor(folder="./submitit_logs")
     
     # Configure SLURM parameters
     executor.update_parameters(
-        name="hyperparam_sweep",
+        name="gamma_sweep",
         timeout_min=4320,  # 3 days per job
         slurm_partition="bigbatch",
     )
     
-    # Create all combinations (75 total: 5 x 5 x 3)
+    # Create all combinations (15 total: 5 gammas x 3 seeds)
     all_configs = []
-    for sr_lr in sr_learning_rates:
-        for vision_lr in vision_learning_rates:
-            for seed in seeds:
-                all_configs.append((sr_lr, vision_lr, seed))
+    for gamma in gamma_values:
+        for seed in seeds:
+            all_configs.append((sr_lr, vision_lr, gamma, seed))
     
-    print(f"Total configurations to test: {len(all_configs)}")
-    print(f"{len(sr_learning_rates)} SR learning rates × {len(vision_learning_rates)} vision learning rates × {len(seeds)} seeds")
+    print(f"Testing gamma values with fixed learning rates:")
+    print(f"  SR Learning Rate: {sr_lr}")
+    print(f"  Vision Learning Rate: {vision_lr}")
+    print(f"\nTotal configurations to test: {len(all_configs)}")
+    print(f"{len(gamma_values)} gamma values × {len(seeds)} seeds")
     
-    # Submit and process in batches of 5
+    # Submit and process in batches of 4
     batch_size = 5
     all_results = []
     
@@ -330,22 +337,22 @@ def main():
         
         # Submit all jobs in this batch
         jobs = []
-        for sr_lr, vision_lr, seed in batch:
-            print(f"  Submitting: SR_LR={sr_lr}, Vision_LR={vision_lr}, Seed={seed}")
-            job = executor.submit(train_agent_with_config, sr_lr, vision_lr, seed, episodes=5000)
-            jobs.append((job, sr_lr, vision_lr, seed))
+        for sr_lr_val, vision_lr_val, gamma, seed in batch:
+            print(f"  Submitting: Gamma={gamma}, Seed={seed}")
+            job = executor.submit(train_agent_with_config, sr_lr_val, vision_lr_val, gamma, seed, episodes=5000)
+            jobs.append((job, sr_lr_val, vision_lr_val, gamma, seed))
         
         print(f"\nWaiting for batch {batch_num} to complete...")
         
         # Wait for all jobs in this batch to complete
-        for job, sr_lr, vision_lr, seed in jobs:
+        for job, sr_lr_val, vision_lr_val, gamma, seed in jobs:
             try:
                 result = job.result()  # Blocks until this job completes
                 all_results.append(result)
-                print(f"  ✓ Completed: SR_LR={sr_lr}, Vision_LR={vision_lr}, Seed={seed}")
+                print(f"  ✓ Completed: Gamma={gamma}, Seed={seed}")
                 print(f"    Final 100 episodes - Reward: {result['final_100_reward']:.3f}, Length: {result['final_100_length']:.1f}")
             except Exception as e:
-                print(f"  ✗ Failed: SR_LR={sr_lr}, Vision_LR={vision_lr}, Seed={seed}")
+                print(f"  ✗ Failed: Gamma={gamma}, Seed={seed}")
                 print(f"    Error: {e}")
         
         print(f"Batch {batch_num} complete. Progress: {len(all_results)}/{len(all_configs)} jobs finished")
@@ -355,48 +362,48 @@ def main():
     print("ALL JOBS COMPLETE - SAVING RESULTS")
     print(f"{'='*80}")
     
-    results_file = "hyperparam_sweep_results.json"
+    results_file = "gamma_sweep_results.json"
     with open(results_file, 'w') as f:
         json.dump([{k: v for k, v in r.items() if k not in ['rewards', 'lengths']} for r in all_results], f, indent=2)
     
     print(f"Results saved to {results_file}")
     
-    # Analyze results - find best configuration
+    # Analyze results - find best gamma
     print("\n" + "="*80)
-    print("HYPERPARAMETER SWEEP ANALYSIS")
+    print("GAMMA SWEEP ANALYSIS")
     print("="*80)
     
-    # Group by configuration (average across seeds)
-    config_results = {}
+    # Group by gamma (average across seeds)
+    gamma_results = {}
     for result in all_results:
-        key = (result['sr_lr'], result['vision_lr'])
-        if key not in config_results:
-            config_results[key] = []
-        config_results[key].append(result['final_100_reward'])
+        gamma = result['gamma']
+        if gamma not in gamma_results:
+            gamma_results[gamma] = []
+        gamma_results[gamma].append(result['final_100_reward'])
     
-    # Calculate mean and std for each config
-    config_stats = []
-    for (sr_lr, vision_lr), rewards in config_results.items():
-        config_stats.append({
-            'sr_lr': sr_lr,
-            'vision_lr': vision_lr,
+    # Calculate mean and std for each gamma
+    gamma_stats = []
+    for gamma, rewards in gamma_results.items():
+        gamma_stats.append({
+            'gamma': gamma,
             'mean_reward': np.mean(rewards),
             'std_reward': np.std(rewards)
         })
     
     # Sort by mean reward
-    config_stats.sort(key=lambda x: x['mean_reward'], reverse=True)
+    gamma_stats.sort(key=lambda x: x['mean_reward'], reverse=True)
     
-    print("\nTop 10 configurations:")
-    print(f"{'Rank':<6} {'SR LR':<10} {'Vision LR':<12} {'Mean Reward':<15} {'Std Reward':<12}")
+    print("\nGamma values ranked by performance:")
+    print(f"{'Rank':<6} {'Gamma':<10} {'Mean Reward':<15} {'Std Reward':<12}")
     print("-" * 80)
-    for i, config in enumerate(config_stats[:10], 1):
-        print(f"{i:<6} {config['sr_lr']:<10.4f} {config['vision_lr']:<12.4f} {config['mean_reward']:<15.3f} {config['std_reward']:<12.3f}")
+    for i, config in enumerate(gamma_stats, 1):
+        print(f"{i:<6} {config['gamma']:<10.2f} {config['mean_reward']:<15.3f} {config['std_reward']:<12.3f}")
     
     print(f"\n\nBest configuration:")
-    best = config_stats[0]
-    print(f"  SR Learning Rate: {best['sr_lr']}")
-    print(f"  Vision Learning Rate: {best['vision_lr']}")
+    best = gamma_stats[0]
+    print(f"  SR Learning Rate: {sr_lr}")
+    print(f"  Vision Learning Rate: {vision_lr}")
+    print(f"  Gamma: {best['gamma']}")
     print(f"  Mean Reward (final 100 episodes): {best['mean_reward']:.3f} ± {best['std_reward']:.3f}")
 
 

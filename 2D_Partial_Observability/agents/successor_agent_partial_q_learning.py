@@ -5,7 +5,7 @@ from minigrid.core.world_object import Goal
 from gym import spaces
 
 class SuccessorAgentPartialQLearning:
-    def __init__(self, env, learning_rate=0.01, gamma=0.95):
+    def __init__(self, env, learning_rate=0.05, gamma=0.95):
         self.env = env
         self.learning_rate = learning_rate
         self.gamma = gamma
