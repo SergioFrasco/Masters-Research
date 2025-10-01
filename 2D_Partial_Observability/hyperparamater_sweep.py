@@ -69,6 +69,7 @@ def train_agent_with_config(sr_lr, vision_lr, seed, episodes=5000):
         
         total_reward = 0
         steps = 0
+        done = False
         
         # Reset maps
         agent.true_reward_map = np.zeros((env_size, env_size))
@@ -89,9 +90,8 @@ def train_agent_with_config(sr_lr, vision_lr, seed, episodes=5000):
             normalized_grid[agent_view == 1] = 0.0
             normalized_grid[agent_view == 8] = 1.0
             
-            if step > 0:
-                if done:
-                    normalized_grid[6, 3] = 1.0
+            if step > 0 and done:
+                normalized_grid[6, 3] = 1.0
             
             step_info = {
                 'agent_view': obs['image'][0].copy(),
@@ -290,10 +290,10 @@ def train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
 def main():
     """Main function to run hyperparameter sweep using submitit"""
     
-    # Define hyperparameter grid
+    # Define hyperparameter grid - FULL GRID
     sr_learning_rates = [0.001, 0.005, 0.01, 0.05, 0.1]
     vision_learning_rates = [0.0001, 0.0005, 0.001, 0.005, 0.01]
-    seeds = [20, 43]  # Multiple seeds for robustness
+    seeds = [20, 43]
     
     # Setup submitit executor
     executor = submitit.AutoExecutor(folder="./submitit_logs")
@@ -302,48 +302,68 @@ def main():
     executor.update_parameters(
         name="hyperparam_sweep",
         timeout_min=4320,  # 3 days per job
-        slurm_partition="bigbatch",  # Change to your partition name
-        slurm_array_parallelism=4  # Run 4 jobs in parallel
+        slurm_partition="bigbatch",
     )
     
-    # Create all combinations
-    jobs = []
-    configs = []
-    
+    # Create all combinations (75 total: 5 x 5 x 3)
+    all_configs = []
     for sr_lr in sr_learning_rates:
         for vision_lr in vision_learning_rates:
             for seed in seeds:
-                # Submit job
-                job = executor.submit(train_agent_with_config, sr_lr, vision_lr, seed, episodes=1000)
-                jobs.append(job)
-                configs.append({'sr_lr': sr_lr, 'vision_lr': vision_lr, 'seed': seed})
+                all_configs.append((sr_lr, vision_lr, seed))
     
-    print(f"Submitted {len(jobs)} jobs")
-    print(f"Testing {len(sr_learning_rates)} SR learning rates × {len(vision_learning_rates)} vision learning rates × {len(seeds)} seeds")
+    print(f"Total configurations to test: {len(all_configs)}")
+    print(f"{len(sr_learning_rates)} SR learning rates × {len(vision_learning_rates)} vision learning rates × {len(seeds)} seeds")
     
-    # Wait for all jobs to complete and collect results
-    print("\nWaiting for jobs to complete...")
+    # Submit and process in batches of 5
+    batch_size = 5
     all_results = []
     
-    for i, job in enumerate(jobs):
-        try:
-            result = job.result()  # Blocks until job completes
-            all_results.append(result)
-            print(f"Job {i+1}/{len(jobs)} completed: SR_LR={configs[i]['sr_lr']}, Vision_LR={configs[i]['vision_lr']}, Seed={configs[i]['seed']}")
-            print(f"  Final 100 episodes - Reward: {result['final_100_reward']:.3f}, Length: {result['final_100_length']:.1f}")
-        except Exception as e:
-            print(f"Job {i+1}/{len(jobs)} failed: {e}")
+    for i in range(0, len(all_configs), batch_size):
+        batch = all_configs[i:i+batch_size]
+        batch_num = i//batch_size + 1
+        total_batches = (len(all_configs) + batch_size - 1) // batch_size
+        
+        print(f"\n{'='*80}")
+        print(f"BATCH {batch_num}/{total_batches}: Submitting {len(batch)} jobs")
+        print(f"{'='*80}")
+        
+        # Submit all jobs in this batch
+        jobs = []
+        for sr_lr, vision_lr, seed in batch:
+            print(f"  Submitting: SR_LR={sr_lr}, Vision_LR={vision_lr}, Seed={seed}")
+            job = executor.submit(train_agent_with_config, sr_lr, vision_lr, seed, episodes=5000)
+            jobs.append((job, sr_lr, vision_lr, seed))
+        
+        print(f"\nWaiting for batch {batch_num} to complete...")
+        
+        # Wait for all jobs in this batch to complete
+        for job, sr_lr, vision_lr, seed in jobs:
+            try:
+                result = job.result()  # Blocks until this job completes
+                all_results.append(result)
+                print(f"  ✓ Completed: SR_LR={sr_lr}, Vision_LR={vision_lr}, Seed={seed}")
+                print(f"    Final 100 episodes - Reward: {result['final_100_reward']:.3f}, Length: {result['final_100_length']:.1f}")
+            except Exception as e:
+                print(f"  ✗ Failed: SR_LR={sr_lr}, Vision_LR={vision_lr}, Seed={seed}")
+                print(f"    Error: {e}")
+        
+        print(f"Batch {batch_num} complete. Progress: {len(all_results)}/{len(all_configs)} jobs finished")
     
     # Save all results
+    print(f"\n{'='*80}")
+    print("ALL JOBS COMPLETE - SAVING RESULTS")
+    print(f"{'='*80}")
+    
     results_file = "hyperparam_sweep_results.json"
     with open(results_file, 'w') as f:
         json.dump([{k: v for k, v in r.items() if k not in ['rewards', 'lengths']} for r in all_results], f, indent=2)
     
-    print(f"\nResults saved to {results_file}")
+    print(f"Results saved to {results_file}")
     
     # Analyze results - find best configuration
     print("\n" + "="*80)
-    print("HYPERPARAMETER SWEEP RESULTS")
+    print("HYPERPARAMETER SWEEP ANALYSIS")
     print("="*80)
     
     # Group by configuration (average across seeds)
