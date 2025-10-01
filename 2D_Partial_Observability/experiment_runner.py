@@ -102,6 +102,11 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
 
+                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
+                    if step > 0:
+                        if done:
+                            normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
+
                     step_info = {
                         'agent_view': obs['image'][0].copy(),  # 7x7 view
                         'agent_pos': tuple(agent.internal_pos),
@@ -115,14 +120,6 @@ class ExperimentRunner:
                     
                     # Update internal state based on action taken
                     agent.update_internal_state(current_action)
-                    
-                    # Verify path integration accuracy 
-                    # if episode % 100 == 0:  # Check every 100 episodes
-                    #     is_accurate, error_msg = agent.verify_path_integration(obs)
-                    #     if not is_accurate:
-                    #         episode_path_errors += 1
-                    #         if episode_path_errors == 1:  # Print first error of episode
-                    #             print(f"Episode {episode}, Step {step}: {error_msg}")
 
                     next_state_idx = agent.get_state_index(obs)
                     obs['image'] = obs['image'].T
@@ -131,34 +128,9 @@ class ExperimentRunner:
                     current_exp[2] = next_state_idx
                     current_exp[3] = reward
                     current_exp[4] = done
-
-                    if manual:
-                        # env.render()
-                        print(f"Episode {episode}, Step {step}")
-                        # print("W=forward, A=turn left, D=turn right, S=toggle, Q=quit manual, ENTER=auto")
-                        
-                        key = getch().lower()
-                        
-                        if key == 'w':
-                            next_action = 2  # forward
-                        elif key == 'a':
-                            next_action = 0  # turn left
-                        elif key == 'd':
-                            next_action = 1  # turn right
-                        elif key == 's':
-                            next_action = 5  # toggle
-                        elif key == 'q':
-                            manual = False
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                        elif key == '\r' or key == '\n':  # Enter key
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                        else:
-                            # Any other key = auto action
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
                         
                     # Sample actions with WVF
-                    else:
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                    next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
                     next_exp = [next_state_idx, next_action, None, None, None]
 
@@ -180,6 +152,10 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 2] = 0.0  # Wall
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
+
+                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
+                    if done:
+                        normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
 
                     # Reshape for the autoencoder (add batch and channel dims)
                     input_grid = normalized_grid[np.newaxis, ..., np.newaxis] 
@@ -569,6 +545,11 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
 
+                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
+                    if step > 0:
+                        if done:
+                            normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
+
                     step_info = {
                         'agent_view': obs['image'][0].copy(),  # 7x7 view
                         'agent_pos': tuple(agent.internal_pos),
@@ -582,14 +563,6 @@ class ExperimentRunner:
                     
                     # Update internal state based on action taken
                     agent.update_internal_state(current_action)
-                    
-                    # Verify path integration accuracy 
-                    # if episode % 100 == 0:  # Check every 100 episodes
-                    #     is_accurate, error_msg = agent.verify_path_integration(obs)
-                    #     if not is_accurate:
-                    #         episode_path_errors += 1
-                    #         if episode_path_errors == 1:  # Print first error of episode
-                    #             print(f"Episode {episode}, Step {step}: {error_msg}")
 
                     next_state_idx = agent.get_state_index(obs)
                     obs['image'] = obs['image'].T
@@ -599,33 +572,7 @@ class ExperimentRunner:
                     current_exp[3] = reward
                     current_exp[4] = done
 
-                    if manual:
-                        # env.render()
-                        print(f"Episode {episode}, Step {step}")
-                        # print("W=forward, A=turn left, D=turn right, S=toggle, Q=quit manual, ENTER=auto")
-                        
-                        key = getch().lower()
-                        
-                        if key == 'w':
-                            next_action = 2  # forward
-                        elif key == 'a':
-                            next_action = 0  # turn left
-                        elif key == 'd':
-                            next_action = 1  # turn right
-                        elif key == 's':
-                            next_action = 5  # toggle
-                        elif key == 'q':
-                            manual = False
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                        elif key == '\r' or key == '\n':  # Enter key
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                        else:
-                            # Any other key = auto action
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                        
-                    # Sample actions with WVF
-                    else:
-                            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                    next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
                     next_exp = [next_state_idx, next_action, None, None, None]
 
@@ -647,6 +594,10 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 2] = 0.0  # Wall
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
+
+                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
+                    if done:
+                        normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
 
                     # Reshape for the autoencoder (add batch and channel dims)
                     input_grid = normalized_grid[np.newaxis, ..., np.newaxis] 

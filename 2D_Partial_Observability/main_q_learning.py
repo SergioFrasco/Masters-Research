@@ -102,6 +102,11 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
 
+                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
+                    if step > 0:
+                        if done:
+                            normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
+
                     step_info = {
                         'agent_view': obs['image'][0].copy(),  # 7x7 view
                         'agent_pos': tuple(agent.internal_pos),
@@ -180,6 +185,10 @@ class ExperimentRunner:
                     normalized_grid[agent_view == 2] = 0.0  # Wall
                     normalized_grid[agent_view == 1] = 0.0  # Open space  
                     normalized_grid[agent_view == 8] = 1.0 
+
+                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
+                    if done:
+                        normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
 
                     # Reshape for the autoencoder (add batch and channel dims)
                     input_grid = normalized_grid[np.newaxis, ..., np.newaxis] 
