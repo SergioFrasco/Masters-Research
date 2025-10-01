@@ -1,0 +1,6 @@
+submitit INFO (2025-10-01 12:12:49,841) - Starting with JobEnvironment(job_id=159820, hostname=mscluster88.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-10-01 12:12:49,841) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/2D_Partial_Observability/submitit_logs/159820_submitted.pkl
+
+Training with SR_LR=0.001, Vision_LR=0.0005, Seed=43
+submitit WARNING (2025-10-01 12:13:38,334) - Bypassing signal SIGCONT
+submitit WARNING (2025-10-01 12:13:38,345) - Bypassing signal SIGTERM

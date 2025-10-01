@@ -1,0 +1,6 @@
+submitit INFO (2025-10-01 12:31:20,321) - Starting with JobEnvironment(job_id=159881, hostname=mscluster86.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-10-01 12:31:20,321) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/2D_Partial_Observability/submitit_logs/159881_submitted.pkl
+
+Training with SR_LR=0.005, Vision_LR=0.0005, Seed=20
+submitit INFO (2025-10-01 12:34:41,708) - Job completed successfully
+submitit INFO (2025-10-01 12:34:41,713) - Exiting after successful completion
