@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python hyperparamter_sweep.py
+python hyperparamater_sweep.py
