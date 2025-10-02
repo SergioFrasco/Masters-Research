@@ -21,7 +21,7 @@ class RandomAgentWithSR:
         # Initialize SR matrix: M[action, from_state, to_state]
         # M[a,s,s'] = expected future occupancy of state s' from state s under action a
         self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        self.M += np.random.normal(0, 0.01, self.M.shape)  # Small random initialization
+        # self.M += np.random.normal(0, 0.01, self.M.shape)  # Small random initialization
         
         # Path integration - track internal position for state indexing
         self.internal_pos = None  # (grid_x, grid_z)
@@ -92,9 +92,9 @@ class RandomAgentWithSR:
             if 0 <= new_x < self.grid_size and 0 <= new_z < self.grid_size:
                 self.internal_pos = (new_x, new_z)
     
-    def update_sr(self, s, action, s_next, done):
+    def update_sr(self, s, action, s_next, next_action, done):
         """
-        Update SR matrix using TD learning
+        Update SR matrix using TD learning with next action (SARSA-style)
         Only update on MOVE_FORWARD actions (actual state transitions)
         """
         # Skip turns - they don't change state
@@ -110,12 +110,17 @@ class RandomAgentWithSR:
         I[s] = 1.0
         
         if done:
-            # Terminal state: no future occupancy
+            # Terminal state: no future occupancy expected
             td_target = I
         else:
-            # TD target: immediate occupancy + discounted future occupancy
-            # Use the MOVE_FORWARD action for bootstrapping (policy-independent)
-            td_target = I + self.gamma * self.M[self.MOVE_FORWARD, s_next, :]
+            # Use the NEXT action for bootstrapping (SARSA-style)
+            if next_action == self.MOVE_FORWARD:
+                # Next action will transition states, use it for bootstrapping
+                td_target = I + self.gamma * self.M[next_action, s_next, :]
+            else:
+                # Next action is a turn - doesn't change state but takes time
+                # Use MOVE_FORWARD as default (no gamma discount for turns)
+                td_target = I + self.M[self.MOVE_FORWARD, s_next, :]
         
         # TD error and update
         td_error = td_target - self.M[action, s, :]
