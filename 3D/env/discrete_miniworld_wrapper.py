@@ -85,7 +85,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
                 max_z=max_z,
             )
 
-# ================ Helper methods for discrete Goal placement =======================
+# ================ Helper methods for discrete placement =======================
     def snap_to_grid(self, pos):
         """Snap a continuous position to discrete grid coordinates"""
         # Use self.grid_size instead of self.size
@@ -157,11 +157,17 @@ class DiscreteMiniWorldWrapper(OneRoom):
             hz = r.max_z if max_z is None else max_z
             
             # Use self.grid_size instead of self.size
-            min_grid_x = max(0, int((lx + ent.radius) // self.grid_size))
+            # min_grid_x = max(0, int((lx + ent.radius) // self.grid_size))
+            # max_grid_x = math.floor((hx - ent.radius) / self.grid_size)
+            # min_grid_z = max(0, int((lz + ent.radius) // self.grid_size))
+            # max_grid_z = math.floor((hz - ent.radius) / self.grid_size)
+
+            # Calculate grid indices that can accommodate the entity
+            min_grid_x = math.ceil((lx + ent.radius) / self.grid_size)
             max_grid_x = math.floor((hx - ent.radius) / self.grid_size)
-            min_grid_z = max(0, int((lz + ent.radius) // self.grid_size))
+            min_grid_z = math.ceil((lz + ent.radius) / self.grid_size)
             max_grid_z = math.floor((hz - ent.radius) / self.grid_size)
-            
+                        
             if min_grid_x > max_grid_x or min_grid_z > max_grid_z:
                 continue
                 
