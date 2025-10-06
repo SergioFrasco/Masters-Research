@@ -18,7 +18,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
         # Store custom step sizes
         self.custom_forward_step = forward_step
         self.custom_turn_step = turn_step
-        self.grid_size = grid_size  # Add this line
+        self.grid_size = grid_size
 
         super().__init__(size=size, max_episode_steps=max_steps, **kwargs)
         

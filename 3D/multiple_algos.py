@@ -114,8 +114,8 @@ def run_successor_agent(env, agent):
 
 if __name__ == "__main__":
     # Create environment
-    # env = DiscreteMiniWorldWrapper(size=10, render_mode="human")
-    env = DiscreteMiniWorldWrapper(size=10)
+    env = DiscreteMiniWorldWrapper(size=10, render_mode="human")
+    # env = DiscreteMiniWorldWrapper(size=10)
 
     
     # Choose mode

@@ -232,13 +232,13 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         
         # Episode ended 
         episode += 1
-        print(f"\n=== Episode {episode}/{max_episodes} ended after {step} steps! ===")
-        print(f"Episode reward: {episode_reward:.2f}")
-        print(f"Cubes detected this episode: {episode_cubes}")
-        print(f"Total cubes detected: {total_cubes_detected}")
-        print(f"Reward map sum: {reward_map.sum()}")
-        print(f"SR Matrix stats: mean={agent.M.mean():.4f}, std={agent.M.std():.4f}")
-        print(f"Total steps so far: {total_steps}")
+        # print(f"\n=== Episode {episode}/{max_episodes} ended after {step} steps! ===")
+        # print(f"Episode reward: {episode_reward:.2f}")
+        # print(f"Cubes detected this episode: {episode_cubes}")
+        # print(f"Total cubes detected: {total_cubes_detected}")
+        # print(f"Reward map sum: {reward_map.sum()}")
+        # print(f"SR Matrix stats: mean={agent.M.mean():.4f}, std={agent.M.std():.4f}")
+        # print(f"Total steps so far: {total_steps}")
         
         # Compose and plot WVF every 1000 episodes or on last episode
         if episode % 100 == 0 or episode == max_episodes:
@@ -271,6 +271,6 @@ if __name__ == "__main__":
     run_successor_agent(
         env, 
         agent, 
-        max_episodes=2000,        
+        max_episodes=500,        
         max_steps_per_episode=200 
     )

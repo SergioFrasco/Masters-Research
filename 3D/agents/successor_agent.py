@@ -64,6 +64,9 @@ class RandomAgentWithSR:
             self.initialize_path_integration()
         
         x, z = self.internal_pos
+        # Clamp to valid range [0, grid_size-1]
+        x = np.clip(x, 0, self.grid_size - 1)
+        z = np.clip(z, 0, self.grid_size - 1)
         return z * self.grid_size + x
     
     def update_internal_state(self, action):
