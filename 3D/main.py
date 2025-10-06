@@ -1,3 +1,5 @@
+import os
+os.environ['PYGLET_HEADLESS'] = '1'
 import gymnasium as gym
 import miniworld
 from miniworld.manual_control import ManualControl
