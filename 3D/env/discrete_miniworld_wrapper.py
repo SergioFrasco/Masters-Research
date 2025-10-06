@@ -1,6 +1,7 @@
 from miniworld.envs.oneroom import OneRoom
 import numpy as np
 import math
+from miniworld.entity import Box
 
 class DiscreteMiniWorldWrapper(OneRoom):
     def __init__(
@@ -21,11 +22,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
         self.grid_size = grid_size
 
         super().__init__(size=size, max_episode_steps=max_steps, **kwargs)
-
-        if hasattr(self, 'agent'):
-            self.agent.radius = 0  
-        if hasattr(self, 'box'):
-            self.box.radius = 0
+        
         
         # Override the max_forward_step (this affects forward/backward movement)
         self.max_forward_step = forward_step
@@ -61,6 +58,12 @@ class DiscreteMiniWorldWrapper(OneRoom):
         info['distance_to_goal'] = distance
         
         return obs, reward, terminated, truncated, info
+
+    def _gen_world(self):
+        self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
+
+        self.box = self.place_entity(Box(color="red"))
+        self.place_agent()
 
 # ================= Override placement methods to enforce discrete agent placement =======================
     def place_agent(
