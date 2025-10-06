@@ -22,8 +22,6 @@ class DiscreteMiniWorldWrapper(OneRoom):
 
         super().__init__(size=size, max_episode_steps=max_steps, **kwargs)
         
-
-        
         # Override the max_forward_step (this affects forward/backward movement)
         self.max_forward_step = forward_step
         
