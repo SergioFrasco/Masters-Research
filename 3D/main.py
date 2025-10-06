@@ -5,6 +5,7 @@ import miniworld
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 from agents import RandomAgent, RandomAgentWithSR
+import math
 from utils import plot_sr_matrix, generate_save_path
 import time
 import torch
@@ -114,26 +115,34 @@ def compose_wvf(agent, reward_map):
     
     return wvf
 
-def plot_wvf(wvf, episode, grid_size):
-    """Plot world value functions"""
-    # Find the goal state (the one with highest self-value)
-    max_goal_idx = 0
-    max_val = -float('inf')
-    for i in range(wvf.shape[0]):
-        if wvf[i].max() > max_val:
-            max_val = wvf[i].max()
-            max_goal_idx = i
+def plot_wvf(wvf, episode, grid_size, maps_per_row=10):
+    """Plot all world value functions in a grid"""
+    num_maps = wvf.shape[0]  # state_size
+    num_rows = math.ceil(num_maps / maps_per_row)
     
-    plt.figure(figsize=(10, 8))
-    plt.imshow(wvf[max_goal_idx], cmap='hot', interpolation='nearest')
-    plt.colorbar(label='Value')
-    plt.title(f'World Value Function - Episode {episode}\n(Goal State {max_goal_idx})')
-    plt.xlabel('X Position')
-    plt.ylabel('Z Position')
-    plt.tight_layout()
-    plt.savefig(f'wvf_episode_{episode}.png')
+    fig, axes = plt.subplots(num_rows, maps_per_row, figsize=(maps_per_row * 2, num_rows * 2))
+    axes = axes.flatten()
+    
+    im = None
+    for idx in range(num_maps):
+        ax = axes[idx]
+        im = ax.imshow(wvf[idx], cmap='viridis')
+        ax.set_title(f"State {idx}", fontsize=8)
+        ax.axis('off')
+    
+    # Hide any unused subplots
+    for idx in range(num_maps, len(axes)):
+        axes[idx].axis('off')
+
+    fig.tight_layout()
+    if im is not None:
+        fig.colorbar(im, ax=axes[:num_maps], shrink=0.6, label="WVF Value")
+
+    save_path = generate_save_path(f'wvf_episode_{episode}.png')
+    fig.savefig(save_path, dpi=100)
     plt.close()
-    print(f"✓ WVF plot saved: wvf_episode_{episode}.png")
+    print(f"✓ WVF plot saved: {save_path}")
+    
 
 def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200):
     """Run with random agent that learns SR and detects cubes"""
@@ -232,7 +241,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         print(f"Total steps so far: {total_steps}")
         
         # Compose and plot WVF every 1000 episodes or on last episode
-        if episode % 1000 == 0 or episode == max_episodes:
+        if episode % 100 == 0 or episode == max_episodes:
             if reward_map.sum() > 0:  # Only if we've detected rewards
                 wvf = compose_wvf(agent, reward_map)
                 plot_wvf(wvf, episode, agent.grid_size)
@@ -262,6 +271,6 @@ if __name__ == "__main__":
     run_successor_agent(
         env, 
         agent, 
-        max_episodes=4000,        
+        max_episodes=2000,        
         max_steps_per_episode=200 
     )
