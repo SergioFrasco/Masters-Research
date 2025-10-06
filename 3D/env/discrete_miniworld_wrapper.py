@@ -61,27 +61,31 @@ class DiscreteMiniWorldWrapper(OneRoom):
 
 # ================= Override placement methods to enforce discrete agent placement =======================
     def place_agent(
-        self,
-        room=None,
-        pos=None,
-        dir=None,
-        min_x=None,
-        max_x=None,
-        min_z=None,
-        max_z=None,
-    ):
-        """
-        Override place_agent to always place agent at (1,1) facing angle 0
-        """
-        fixed_pos = np.array([1.0, 0.0, 1.0])  # x=1, y=0, z=1
-        fixed_dir = 0.0  # Facing angle 0
-        
-        return self.place_entity(
-            self.agent,
-            room=room,
-            pos=fixed_pos,
-            dir=fixed_dir,
-        )
+            self,
+            room=None,
+            pos=None,
+            dir=None,
+            min_x=None,
+            max_x=None,
+            min_z=None,
+            max_z=None,
+        ):
+            """
+            Override place_agent to randomly place agent at discrete grid positions
+            with random cardinal directions
+            """
+            # Let place_entity handle random placement (pos=None, dir=None)
+            # This will snap to grid and use cardinal directions
+            return self.place_entity(
+                self.agent,
+                room=room,
+                pos=pos,  # None by default, triggers random placement
+                dir=dir,  # None by default, triggers random cardinal direction
+                min_x=min_x,
+                max_x=max_x,
+                min_z=min_z,
+                max_z=max_z,
+            )
 
 # ================ Helper methods for discrete Goal placement =======================
     def snap_to_grid(self, pos):

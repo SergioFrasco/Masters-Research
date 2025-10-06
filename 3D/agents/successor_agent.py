@@ -92,6 +92,7 @@ class RandomAgentWithSR:
             if 0 <= new_x < self.grid_size and 0 <= new_z < self.grid_size:
                 self.internal_pos = (new_x, new_z)
     
+    
     def update_sr(self, s, action, s_next, next_action, done):
         """
         Update SR matrix using TD learning with next action (SARSA-style)
