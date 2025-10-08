@@ -367,7 +367,7 @@ class ExperimentRunner:
                                     
 
                 # Generate visualizations occasionally
-                if episode % 500 == 0:
+                if episode % 1000 == 0:
                     save_all_wvf(agent, save_path=generate_save_path(f"sarsa/wvfs/wvf_episode_{episode}"))
 
                     # Saving the SR
@@ -816,7 +816,7 @@ class ExperimentRunner:
                                     
 
                 # Generate visualizations occasionally
-                if episode % 100 == 0:
+                if episode % 1000 == 0:
                     save_all_wvf(agent, save_path=generate_save_path(f"qlearning/wvfs/wvf_episode_{episode}"))
 
                     # Saving the SR
@@ -1084,7 +1084,7 @@ class ExperimentRunner:
                 dqn_losses.append(0.0)
 
             # Generate visualizations occasionally
-            if episode % 500 == 0:
+            if episode % 1000 == 0:
                 # Create ground truth reward space
                 ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
 
@@ -1360,7 +1360,7 @@ class ExperimentRunner:
             #     print(f"  Replay buffer size: {len(agent.memory)} sequences")
             
             # Visualizations 
-            if episode % 2500 == 0:
+            if episode % 1000 == 0:
 
                 # Loss plot
                 plt.figure(figsize=(10, 5))
@@ -1702,10 +1702,10 @@ def main():
     print("Starting baseline comparison experiment with path integration...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=15, num_seeds=3)
+    runner = ExperimentRunner(env_size=15, num_seeds=2)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=25000, max_steps=100, manual = False)
+    results = runner.run_comparison_experiment(episodes=15000, max_steps=100, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
