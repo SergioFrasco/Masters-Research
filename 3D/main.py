@@ -5,6 +5,7 @@ import miniworld
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 from agents import RandomAgent, RandomAgentWithSR
+import tqdm
 import math
 from utils import plot_sr_matrix, generate_save_path
 import time
@@ -174,7 +175,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     total_steps = 0
     total_cubes_detected = 0
     
-    while episode < max_episodes:
+    for episode in tqdm(range(max_episodes), desc="Training 3D Successor Agent"):
         step = 0
         episode_reward = 0
         episode_cubes = 0
@@ -182,6 +183,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         # Initialize first action
         current_state = agent.get_state_index()
         current_action = agent.select_action()
+        reward_map = np.zeros((env.size, env.size))
         
         while step < max_steps_per_episode:
             # env.render()
@@ -241,7 +243,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         # print(f"Total steps so far: {total_steps}")
         
         # Compose and plot WVF every 1000 episodes or on last episode
-        if episode % 100 == 0 or episode == max_episodes:
+        if episode % 50 == 0 or episode == max_episodes:
             if reward_map.sum() > 0:  # Only if we've detected rewards
                 wvf = compose_wvf(agent, reward_map)
                 plot_wvf(wvf, episode, agent.grid_size)

@@ -43,7 +43,7 @@ class RandomAgentWithSR:
             # Convert angle to cardinal direction
             self.internal_dir = self._angle_to_cardinal(self.env.agent.dir)
             self.initialized = True
-            print(f"Initialized: pos={self.internal_pos}, dir={self.internal_dir}")
+            # print(f"Initialized: pos={self.internal_pos}, dir={self.internal_dir}")
     
     def _angle_to_cardinal(self, angle):
         """Convert MiniWorld angle (radians) to cardinal direction"""
