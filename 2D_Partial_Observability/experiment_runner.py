@@ -1702,10 +1702,10 @@ def main():
     print("Starting baseline comparison experiment with path integration...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=15, num_seeds=2)
+    runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=15000, max_steps=100, manual = False)
+    results = runner.run_comparison_experiment(episodes=30000, max_steps=150, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
