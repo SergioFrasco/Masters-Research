@@ -351,9 +351,16 @@ class ExperimentRunner:
                                 agent.reward_maps[idx, y, x] = curr_reward
 
                     # Update agent WVF
-                    M_flat = np.mean(agent.M, axis=0)
+                    # M_flat = np.mean(agent.M, axis=0)
+                    # R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                    # V_all = M_flat @ R_flat_all.T
+                    # agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+
+                    # NEW:
+                    MOVE_FORWARD = 2
+                    M_forward = agent.M[MOVE_FORWARD, :, :]  # Use only forward action SR
                     R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                    V_all = M_flat @ R_flat_all.T
+                    V_all = M_forward @ R_flat_all.T
                     agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
                     total_reward += reward

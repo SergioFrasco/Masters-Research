@@ -9,7 +9,7 @@ import random
 class DQN(nn.Module):
     """Deep Q-Network for partial observability with vision integration"""
     
-    def __init__(self, input_size, hidden_size=128, output_size=6):
+    def __init__(self, input_size, hidden_size=128, output_size=3):
         super(DQN, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
@@ -34,7 +34,7 @@ class DQNAgentPartial:
         
         self.env = env
         self.grid_size = env.size
-        self.action_dim = 3  # MiniGrid action space
+        self.action_dim = 3  # action space
         
         # Path integration components
         self.internal_pos = None
