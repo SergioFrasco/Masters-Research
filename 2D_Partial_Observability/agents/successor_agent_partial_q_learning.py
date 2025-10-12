@@ -190,8 +190,8 @@ class SuccessorAgentPartialQLearning:
             return 0.0
         
         # Additional safety check: ensure we actually transitioned states
-        if s == s_1 and not done:
-            return 0.0
+        # if s == s_1 and not done:
+        #     return 0.0
         
         I = self._onehot(s, self.state_size)
         

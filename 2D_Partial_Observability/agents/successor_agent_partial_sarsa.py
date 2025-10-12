@@ -20,7 +20,7 @@ class SuccessorAgentPartialSARSA:
         
         # initialization of the SR
         self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        # self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
+        self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
 
         self.w = np.zeros([self.state_size])
 
@@ -202,8 +202,8 @@ class SuccessorAgentPartialSARSA:
             return 0.0  # No update, return zero TD error
         
         # Additional safety check: ensure we actually transitioned states
-        if s == s_1 and not done:
-            return 0.0  # No actual state transition occurred
+        # if s == s_1 and not done:
+        #     return 0.0  # No actual state transition occurred
         
         I = self._onehot(s, self.state_size)
         
