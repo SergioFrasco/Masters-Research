@@ -20,7 +20,7 @@ class SuccessorAgentPartialSARSA:
         
         # initialization of the SR
         self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
+        # self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
 
         self.w = np.zeros([self.state_size])
 
@@ -197,18 +197,18 @@ class SuccessorAgentPartialSARSA:
         TURN_RIGHT = 1
         MOVE_FORWARD = 2
         
-        # Only update SR for move forward actions (actual state transitions)
+        # update SR for move forward actions (actual state transitions)
         if s_a != MOVE_FORWARD:
             return 0.0  # No update, return zero TD error
         
-        # Additional safety check: ensure we actually transitioned states
+        # safety check: ensure we actually transitioned states
         # if s == s_1 and not done:
-        #     return 0.0  # No actual state transition occurred
+        #     return 0.0  # No state transition occurred
         
         I = self._onehot(s, self.state_size)
         
         if done:
-            # Terminal state: no future state occupancy expected
+            # terminal: no future state occupancy expected
             td_target = I
         else:
             # For continuing states, we need to handle the temporal discount properly
@@ -216,13 +216,13 @@ class SuccessorAgentPartialSARSA:
                 s_a_1 = next_exp[1]  # actual next action
                 
                 if s_a_1 == MOVE_FORWARD:
-                    # Next action transitions states, use normal discount
+                    # next action transitions states, use normal discount
                     td_target = I + self.gamma * self.M[s_a_1, s_1, :]
                 else:
-                    # Next action is a turn - it doesn't change state but takes time
+                    # next action is a turn - it doesn't change state but takes time
                     td_target = I + self.M[MOVE_FORWARD, s_1, :]  # No gamma discount for turns
             else:
-                # Fallback case
+                # Fallback
                 td_target = I
         
         td_error = td_target - self.M[s_a, s, :]
