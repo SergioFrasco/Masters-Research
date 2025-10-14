@@ -271,13 +271,10 @@ class SuccessorAgentPartialSARSA:
         I_s = np.zeros(self.state_size)
         I_s[state] = 1.0
 
-        # Defensive guard — if next_exp is malformed or terminal
-        if (
-            done 
-            or next_exp is None 
-            or next_exp[1] is None 
-            or next_exp[2] is None
-        ):
+        # Check next_exp is None FIRST before accessing its elements
+        if next_exp is None or done:
+            td_target = I_s
+        elif next_exp[1] is None or next_exp[2] is None:
             td_target = I_s
         else:
             next_action = int(next_exp[1])
@@ -294,11 +291,8 @@ class SuccessorAgentPartialSARSA:
         """Update both reward weights and successor features."""
         # Always update reward weights when we observe a reward
         error_w = self.update_w(current_exp)
-        
-        # Only update SR for actual state transitions (move forward)
-        error_sr = 0
-        if next_exp is not None:
-            error_sr = self.update_sr(current_exp, next_exp)
+    
+        error_sr = self.update_sr(current_exp, next_exp)
 
         
         return error_w, error_sr
