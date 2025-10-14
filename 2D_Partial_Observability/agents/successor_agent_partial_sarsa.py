@@ -247,18 +247,18 @@ class SuccessorAgentPartialSARSA:
         if s == s_1 and not done:
             return 0.0
         
-        I = self._onehot(s, self.state_size)
-        
-        if done:
-            td_target = I
-        else:
-            # Since we only track forward actions, always use forward SR for bootstrap
-            # Apply gamma because even though we're only tracking forward moves,
-            # time still passes between them
-            td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
-        
-        td_error = td_target - self.M[MOVE_FORWARD, s, :]
-        self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
+        # Only update SR on forward movements
+        # This models place cell representations
+        if s_a == MOVE_FORWARD:
+            I = self._onehot(s, self.state_size)
+            if done:
+                td_target = I
+            else:
+                # Only bootstrap from forward SR
+                td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
+            
+            td_error = td_target - self.M[MOVE_FORWARD, s, :]
+            self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
         
         return np.mean(np.abs(td_error))
 
