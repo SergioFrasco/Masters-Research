@@ -77,8 +77,7 @@ class ExperimentRunner:
                 ae_triggers_this_episode = 0
                 episode_path_errors = 0
 
-                # Counter of forward steps taken, so we know how much to discount gamma by
-                num_forward_steps = 0
+        
 
                 # Reset maps for new episode 
                 agent.true_reward_map = np.zeros((env.size, env.size))
@@ -170,11 +169,8 @@ class ExperimentRunner:
 
                     next_exp = [next_state_idx, next_action, None, None, None]
 
-                    if next_action == 2:
-                        num_forward_steps += 1
-
                     # Update agent - always pass next_exp since we're not terminating early
-                    agent.update(num_forward_steps,current_exp, next_exp)
+                    agent.update(current_exp, next_exp)
 
                     # ============================= Vision Model ====================================
                 

@@ -263,14 +263,11 @@ class SuccessorAgentPartialSARSA:
     #     return np.mean(np.abs(td_error))
 
     def update_sr(self, current_exp, next_exp):
-        """
-        Full SARSA Successor Representation update (all actions),
-        compatible with M shape (action_size, state_size, state_size)
-        """
+        """Full SARSA SR update, with shape safety for (action_size, state_size, state_size)."""
         # Unpack experience
-        state = current_exp[0]
-        action = current_exp[1]
-        next_state = current_exp[2]
+        state = int(current_exp[0])
+        action = int(current_exp[1])
+        next_state = int(current_exp[2])
         done = current_exp[4]
 
         # One-hot vector for current state
@@ -281,20 +278,20 @@ class SuccessorAgentPartialSARSA:
         if done or next_exp is None:
             td_target = I_s
         else:
-            next_action = next_exp[1]
-            next_state = next_exp[2]
+            next_action = int(next_exp[1])
+            next_state = int(next_exp[2])
             td_target = I_s + self.gamma * self.M[next_action, next_state, :]
 
         # TD error
         td_error = td_target - self.M[action, state, :]
+
         # Update SR
         self.M[action, state, :] += self.learning_rate * td_error
 
         return np.mean(np.abs(td_error))
 
 
-
-    def update(self, num_forward_steps, current_exp, next_exp=None):
+    def update(self, current_exp, next_exp=None):
         """Update both reward weights and successor features."""
         # Always update reward weights when we observe a reward
         error_w = self.update_w(current_exp)
