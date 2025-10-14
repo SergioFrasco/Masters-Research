@@ -229,71 +229,39 @@ class SuccessorAgentPartialSARSA:
     #     self.M[s_a, s, :] += self.learning_rate * td_error
         
     #     return np.mean(np.abs(td_error))
-    
-    # def update_sr(self, num_forward_steps, current_exp, next_exp):
-    #     """Update successor features for forward actions only."""
-    #     s = current_exp[0]    # current state index
-    #     s_a = current_exp[1]  # current action
-    #     s_1 = current_exp[2]  # next state index
-    #     done = current_exp[4] # terminal flag
-        
-    #     MOVE_FORWARD = 2
-        
-    #     # Only update SR for forward actions
-    #     if s_a != MOVE_FORWARD:
-    #         return 0.0
-        
-    #     # Safety check for actual state transition
-    #     if s == s_1 and not done:
-    #         return 0.0
-        
-    #     # Only update SR on forward movements
-    #     # This models place cell representations
-    #     if s_a == MOVE_FORWARD:
-    #         I = self._onehot(s, self.state_size)
-    #         if done:
-    #             td_target = I
-    #         else:
-    #             # Only bootstrap from forward SR
-    #             td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
-            
-    #         td_error = td_target - self.M[MOVE_FORWARD, s, :]
-    #         self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
-        
-    #     return np.mean(np.abs(td_error))
 
     def update_sr(self, current_exp, next_exp):
-        """Full SARSA SR update (all actions) with safe handling of None states."""
-        state = int(current_exp[0])
-        action = int(current_exp[1])
-        done = current_exp[4]
-
-        I_s = np.zeros(self.state_size)
-        I_s[state] = 1.0
-
-        # Check next_exp is None FIRST before accessing its elements
-        if next_exp is None or done:
-            td_target = I_s
-        elif next_exp[1] is None or next_exp[2] is None:
-            td_target = I_s
+        """Update successor features for all actions using SARSA."""
+        s = current_exp[0]    # current state index
+        s_a = current_exp[1]  # current action
+        s_1 = current_exp[2]  # next state index
+        done = current_exp[4] # terminal flag
+        
+        I = self._onehot(s, self.state_size)
+        
+        if done:
+            td_target = I
+        elif next_exp is not None:
+            s_a_1 = next_exp[1]  # next action (SARSA)
+            td_target = I + self.gamma * self.M[s_a_1, s_1, :]
         else:
-            next_action = int(next_exp[1])
-            next_state = int(next_exp[2])
-            td_target = I_s + self.gamma * self.M[next_action, next_state, :]
-
-        td_error = td_target - self.M[action, state, :]
-        self.M[action, state, :] += self.learning_rate * td_error
-
+            # Fallback - shouldn't happen with proper SARSA
+            td_target = I
+        
+        td_error = td_target - self.M[s_a, s, :]
+        self.M[s_a, s, :] += self.learning_rate * td_error
+        
         return np.mean(np.abs(td_error))
 
-
-    def update(self, current_exp, next_exp=None):
+    def update(self , current_exp, next_exp=None):
         """Update both reward weights and successor features."""
         # Always update reward weights when we observe a reward
         error_w = self.update_w(current_exp)
-    
-        error_sr = self.update_sr(current_exp, next_exp)
-
+        
+        # Only update SR for actual state transitions (move forward)
+        error_sr = 0
+        if next_exp is not None:
+            error_sr = self.update_sr(current_exp, next_exp)
         
         return error_w, error_sr
 
