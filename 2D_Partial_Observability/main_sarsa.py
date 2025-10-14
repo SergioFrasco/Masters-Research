@@ -77,6 +77,9 @@ class ExperimentRunner:
                 ae_triggers_this_episode = 0
                 episode_path_errors = 0
 
+                # Counter of forward steps taken, so we know how much to discount gamma by
+                num_forward_steps = 0
+
                 # Reset maps for new episode 
                 agent.true_reward_map = np.zeros((env.size, env.size))
                 agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
@@ -167,8 +170,11 @@ class ExperimentRunner:
 
                     next_exp = [next_state_idx, next_action, None, None, None]
 
+                    if next_action == 2:
+                        num_forward_steps += 1
+
                     # Update agent - always pass next_exp since we're not terminating early
-                    agent.update(current_exp, next_exp)
+                    agent.update(num_forward_steps,current_exp, next_exp)
 
                     # ============================= Vision Model ====================================
                 
@@ -401,17 +407,31 @@ class ExperimentRunner:
                 if episode % 500 == 0:
                     save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
-                    # Saving the SR
-                    averaged_M = np.mean(agent.M, axis=0)
+                    # # Saving the Averaged SR
+                    # averaged_M = np.mean(agent.M, axis=0)
+
+                    # # Create a figure
+                    # plt.figure(figsize=(6, 5))
+                    # im = plt.imshow(averaged_M, cmap='hot')
+                    # plt.title(f"Averaged SR Matrix (Episode {episode})")
+                    # plt.colorbar(im, label="SR Value")
+                    # plt.tight_layout()
+                    # plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
+                    # plt.close()
+
+                    # Saving the Move Forward SR
+                    forward_M = agent.M[MOVE_FORWARD, :, :]
 
                     # Create a figure
                     plt.figure(figsize=(6, 5))
-                    im = plt.imshow(averaged_M, cmap='hot')
+                    im = plt.imshow(forward_M, cmap='hot')
                     plt.title(f"Averaged SR Matrix (Episode {episode})")
                     plt.colorbar(im, label="SR Value")
                     plt.tight_layout()
                     plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
                     plt.close()
+
+
 
                     # Create vision plots
                     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))

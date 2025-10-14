@@ -185,7 +185,7 @@ class SuccessorAgentPartialSARSA:
         
         return 2  # fallback: move forward
 
-    def update_sr(self, current_exp, next_exp):
+    def update_sr(self, num_forward_steps,current_exp, next_exp):
         """Update successor features using policy-independent learning."""
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action
@@ -202,8 +202,8 @@ class SuccessorAgentPartialSARSA:
             return 0.0  # No update, return zero TD error
         
         # safety check: ensure we actually transitioned states
-        # if s == s_1 and not done:
-        #     return 0.0  # No state transition occurred
+        if s == s_1 and not done:
+            return 0.0  # No state transition occurred
         
         I = self._onehot(s, self.state_size)
         
@@ -230,7 +230,7 @@ class SuccessorAgentPartialSARSA:
         
         return np.mean(np.abs(td_error))
 
-    def update(self, current_exp, next_exp=None):
+    def update(self, num_forward_steps, current_exp, next_exp=None):
         """Update both reward weights and successor features."""
         # Always update reward weights when we observe a reward
         error_w = self.update_w(current_exp)
@@ -238,7 +238,7 @@ class SuccessorAgentPartialSARSA:
         # Only update SR for actual state transitions (move forward)
         error_sr = 0
         if next_exp is not None:
-            error_sr = self.update_sr(current_exp, next_exp)
+            error_sr = self.update_sr(num_forward_steps,current_exp, next_exp)
         
         return error_w, error_sr
 
