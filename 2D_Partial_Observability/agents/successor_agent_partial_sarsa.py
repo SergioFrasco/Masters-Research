@@ -263,29 +263,28 @@ class SuccessorAgentPartialSARSA:
     #     return np.mean(np.abs(td_error))
 
     def update_sr(self, current_exp, next_exp):
-        """Full SARSA SR update, with shape safety for (action_size, state_size, state_size)."""
-        # Unpack experience
+        """Full SARSA SR update (all actions) with safe handling of None states."""
         state = int(current_exp[0])
         action = int(current_exp[1])
-        next_state = int(current_exp[2])
         done = current_exp[4]
 
-        # One-hot vector for current state
         I_s = np.zeros(self.state_size)
         I_s[state] = 1.0
 
-        # Compute TD target
-        if done or next_exp is None:
+        # Defensive guard — if next_exp is malformed or terminal
+        if (
+            done 
+            or next_exp is None 
+            or next_exp[1] is None 
+            or next_exp[2] is None
+        ):
             td_target = I_s
         else:
             next_action = int(next_exp[1])
             next_state = int(next_exp[2])
             td_target = I_s + self.gamma * self.M[next_action, next_state, :]
 
-        # TD error
         td_error = td_target - self.M[action, state, :]
-
-        # Update SR
         self.M[action, state, :] += self.learning_rate * td_error
 
         return np.mean(np.abs(td_error))
