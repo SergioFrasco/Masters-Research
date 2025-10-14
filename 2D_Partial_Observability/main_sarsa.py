@@ -369,7 +369,8 @@ class ExperimentRunner:
 
                     total_reward += reward
                     steps += 1
-                    current_exp = next_exp
+                    previous_exp = current_exp
+                    current_state_idx = next_state_idx
                     current_action = next_action
 
                     if done:
