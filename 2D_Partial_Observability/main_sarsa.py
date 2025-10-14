@@ -425,7 +425,7 @@ class ExperimentRunner:
                     # Create a figure
                     plt.figure(figsize=(6, 5))
                     im = plt.imshow(forward_M, cmap='hot')
-                    plt.title(f"Averaged SR Matrix (Episode {episode})")
+                    plt.title(f"Forward SR Matrix (Episode {episode})")
                     plt.colorbar(im, label="SR Value")
                     plt.tight_layout()
                     plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))

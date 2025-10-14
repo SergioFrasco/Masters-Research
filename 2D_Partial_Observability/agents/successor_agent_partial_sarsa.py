@@ -185,48 +185,80 @@ class SuccessorAgentPartialSARSA:
         
         return 2  # fallback: move forward
 
-    def update_sr(self, num_forward_steps,current_exp, next_exp):
-        """Update successor features using policy-independent learning."""
+    # def update_sr(self, num_forward_steps,current_exp, next_exp):
+    #     """Update successor features using policy-independent learning."""
+    #     s = current_exp[0]    # current state index
+    #     s_a = current_exp[1]  # current action
+    #     s_1 = current_exp[2]  # next state index
+    #     done = current_exp[4] # terminal flag
+        
+    #     # MiniGrid action constants
+    #     TURN_LEFT = 0
+    #     TURN_RIGHT = 1
+    #     MOVE_FORWARD = 2
+        
+    #     # update SR for move forward actions (actual state transitions)
+    #     if s_a != MOVE_FORWARD:
+    #         return 0.0  # No update, return zero TD error
+        
+    #     # safety check: ensure we actually transitioned states
+    #     if s == s_1 and not done:
+    #         return 0.0  # No state transition occurred
+        
+    #     I = self._onehot(s, self.state_size)
+        
+    #     if done:
+    #         # terminal: no future state occupancy expected
+    #         td_target = I
+    #     else:
+    #         # For continuing states, we need to handle the temporal discount properly
+    #         if next_exp is not None:
+    #             s_a_1 = next_exp[1]  # actual next action
+                
+    #             if s_a_1 == MOVE_FORWARD:
+    #                 # next action transitions states, use normal discount
+    #                 td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+    #             else:
+    #                 # next action is a turn - it doesn't change state but takes time
+    #                 td_target = I + self.M[MOVE_FORWARD, s_1, :]  # No gamma discount for turns
+    #         else:
+    #             # Fallback
+    #             td_target = I
+        
+    #     td_error = td_target - self.M[s_a, s, :]
+    #     self.M[s_a, s, :] += self.learning_rate * td_error
+        
+    #     return np.mean(np.abs(td_error))
+    
+    def update_sr(self, num_forward_steps, current_exp, next_exp):
+        """Update successor features for forward actions only."""
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action
         s_1 = current_exp[2]  # next state index
         done = current_exp[4] # terminal flag
         
-        # MiniGrid action constants
-        TURN_LEFT = 0
-        TURN_RIGHT = 1
         MOVE_FORWARD = 2
         
-        # update SR for move forward actions (actual state transitions)
+        # Only update SR for forward actions
         if s_a != MOVE_FORWARD:
-            return 0.0  # No update, return zero TD error
+            return 0.0
         
-        # safety check: ensure we actually transitioned states
+        # Safety check for actual state transition
         if s == s_1 and not done:
-            return 0.0  # No state transition occurred
+            return 0.0
         
         I = self._onehot(s, self.state_size)
         
         if done:
-            # terminal: no future state occupancy expected
             td_target = I
         else:
-            # For continuing states, we need to handle the temporal discount properly
-            if next_exp is not None:
-                s_a_1 = next_exp[1]  # actual next action
-                
-                if s_a_1 == MOVE_FORWARD:
-                    # next action transitions states, use normal discount
-                    td_target = I + self.gamma * self.M[s_a_1, s_1, :]
-                else:
-                    # next action is a turn - it doesn't change state but takes time
-                    td_target = I + self.M[MOVE_FORWARD, s_1, :]  # No gamma discount for turns
-            else:
-                # Fallback
-                td_target = I
+            # Since we only track forward actions, always use forward SR for bootstrap
+            # Apply gamma because even though we're only tracking forward moves,
+            # time still passes between them
+            td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
         
-        td_error = td_target - self.M[s_a, s, :]
-        self.M[s_a, s, :] += self.learning_rate * td_error
+        td_error = td_target - self.M[MOVE_FORWARD, s, :]
+        self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
         
         return np.mean(np.abs(td_error))
 
