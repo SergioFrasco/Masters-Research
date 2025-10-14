@@ -86,8 +86,8 @@ class ExperimentRunner:
 
                 current_state_idx = agent.get_state_index(obs)
                 current_action = agent.sample_random_action(obs, epsilon=epsilon)
-                current_exp = [current_state_idx, current_action, None, None, None]
-                
+                previous_exp = None  # Track previous experience for delayed update
+
                 for step in range(max_steps):
                     # Record position and action for trajectory (using path integration)
                     agent_pos = agent.internal_pos
@@ -134,11 +134,6 @@ class ExperimentRunner:
                     next_state_idx = agent.get_state_index(obs)
                     obs['image'] = obs['image'].T
 
-                    # Complete experience
-                    current_exp[2] = next_state_idx
-                    current_exp[3] = reward
-                    current_exp[4] = done
-
                     if manual:
                         # env.render()
                         print(f"Episode {episode}, Step {step}")
@@ -167,11 +162,17 @@ class ExperimentRunner:
                     else:
                             next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
-                    next_exp = [next_state_idx, next_action, None, None, None]
-
-                    # Update agent - always pass next_exp since we're not terminating early
-                    agent.update(current_exp, next_exp)
-
+                    # Create complete current experience
+                    current_exp = [current_state_idx, current_action, next_state_idx, reward, done]
+                    
+                    # Update agent with delayed update (so next_exp is complete)
+                    if previous_exp is not None:
+                        agent.update(previous_exp, current_exp)
+                    
+                    # Handle terminal state
+                    if done:
+                        # Final update with no next experience
+                        agent.update(current_exp, None)
                     # ============================= Vision Model ====================================
                 
                     # Update the agent's true_reward_map based on current observation
