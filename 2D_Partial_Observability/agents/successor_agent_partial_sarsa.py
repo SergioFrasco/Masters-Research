@@ -230,37 +230,69 @@ class SuccessorAgentPartialSARSA:
         
     #     return np.mean(np.abs(td_error))
     
-    def update_sr(self, num_forward_steps, current_exp, next_exp):
-        """Update successor features for forward actions only."""
-        s = current_exp[0]    # current state index
-        s_a = current_exp[1]  # current action
-        s_1 = current_exp[2]  # next state index
-        done = current_exp[4] # terminal flag
+    # def update_sr(self, num_forward_steps, current_exp, next_exp):
+    #     """Update successor features for forward actions only."""
+    #     s = current_exp[0]    # current state index
+    #     s_a = current_exp[1]  # current action
+    #     s_1 = current_exp[2]  # next state index
+    #     done = current_exp[4] # terminal flag
         
-        MOVE_FORWARD = 2
+    #     MOVE_FORWARD = 2
         
-        # Only update SR for forward actions
-        if s_a != MOVE_FORWARD:
-            return 0.0
+    #     # Only update SR for forward actions
+    #     if s_a != MOVE_FORWARD:
+    #         return 0.0
         
-        # Safety check for actual state transition
-        if s == s_1 and not done:
-            return 0.0
+    #     # Safety check for actual state transition
+    #     if s == s_1 and not done:
+    #         return 0.0
         
-        # Only update SR on forward movements
-        # This models place cell representations
-        if s_a == MOVE_FORWARD:
-            I = self._onehot(s, self.state_size)
-            if done:
-                td_target = I
-            else:
-                # Only bootstrap from forward SR
-                td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
+    #     # Only update SR on forward movements
+    #     # This models place cell representations
+    #     if s_a == MOVE_FORWARD:
+    #         I = self._onehot(s, self.state_size)
+    #         if done:
+    #             td_target = I
+    #         else:
+    #             # Only bootstrap from forward SR
+    #             td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
             
-            td_error = td_target - self.M[MOVE_FORWARD, s, :]
-            self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
+    #         td_error = td_target - self.M[MOVE_FORWARD, s, :]
+    #         self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
         
+    #     return np.mean(np.abs(td_error))
+
+    def update_sr(self, current_exp, next_exp):
+        """
+        Full SARSA Successor Representation update (all actions),
+        compatible with M shape (action_size, state_size, state_size)
+        """
+        # Unpack experience
+        state = current_exp[0]
+        action = current_exp[1]
+        next_state = current_exp[2]
+        done = current_exp[4]
+
+        # One-hot vector for current state
+        I_s = np.zeros(self.state_size)
+        I_s[state] = 1.0
+
+        # Compute TD target
+        if done or next_exp is None:
+            td_target = I_s
+        else:
+            next_action = next_exp[1]
+            next_state = next_exp[2]
+            td_target = I_s + self.gamma * self.M[next_action, next_state, :]
+
+        # TD error
+        td_error = td_target - self.M[action, state, :]
+        # Update SR
+        self.M[action, state, :] += self.learning_rate * td_error
+
         return np.mean(np.abs(td_error))
+
+
 
     def update(self, num_forward_steps, current_exp, next_exp=None):
         """Update both reward weights and successor features."""
@@ -270,7 +302,8 @@ class SuccessorAgentPartialSARSA:
         # Only update SR for actual state transitions (move forward)
         error_sr = 0
         if next_exp is not None:
-            error_sr = self.update_sr(num_forward_steps,current_exp, next_exp)
+            error_sr = self.update_sr(current_exp, next_exp)
+
         
         return error_w, error_sr
 

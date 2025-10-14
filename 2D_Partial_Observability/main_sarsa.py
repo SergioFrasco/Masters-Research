@@ -358,17 +358,17 @@ class ExperimentRunner:
                                 agent.reward_maps[idx, y, x] = curr_reward
 
                     # Update agent WVF
-                    # M_flat = np.mean(agent.M, axis=0)
-                    # R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                    # V_all = M_flat @ R_flat_all.T
-                    # agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+                    M_flat = np.mean(agent.M, axis=0)
+                    R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                    V_all = M_flat @ R_flat_all.T
+                    agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
                     # NEW:
-                    MOVE_FORWARD = 2
-                    M_forward = agent.M[MOVE_FORWARD, :, :]  # Use only forward action SR
-                    R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                    V_all = M_forward @ R_flat_all.T
-                    agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+                    # MOVE_FORWARD = 2
+                    # M_forward = agent.M[MOVE_FORWARD, :, :]  # Use only forward action SR
+                    # R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                    # V_all = M_forward @ R_flat_all.T
+                    # agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
                     total_reward += reward
                     steps += 1
@@ -408,28 +408,28 @@ class ExperimentRunner:
                     save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
                     # # Saving the Averaged SR
-                    # averaged_M = np.mean(agent.M, axis=0)
-
-                    # # Create a figure
-                    # plt.figure(figsize=(6, 5))
-                    # im = plt.imshow(averaged_M, cmap='hot')
-                    # plt.title(f"Averaged SR Matrix (Episode {episode})")
-                    # plt.colorbar(im, label="SR Value")
-                    # plt.tight_layout()
-                    # plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
-                    # plt.close()
-
-                    # Saving the Move Forward SR
-                    forward_M = agent.M[MOVE_FORWARD, :, :]
+                    averaged_M = np.mean(agent.M, axis=0)
 
                     # Create a figure
                     plt.figure(figsize=(6, 5))
-                    im = plt.imshow(forward_M, cmap='hot')
-                    plt.title(f"Forward SR Matrix (Episode {episode})")
+                    im = plt.imshow(averaged_M, cmap='hot')
+                    plt.title(f"Averaged SR Matrix (Episode {episode})")
                     plt.colorbar(im, label="SR Value")
                     plt.tight_layout()
                     plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
                     plt.close()
+
+                    # Saving the Move Forward SR
+                    # forward_M = agent.M[MOVE_FORWARD, :, :]
+
+                    # # Create a figure
+                    # plt.figure(figsize=(6, 5))
+                    # im = plt.imshow(forward_M, cmap='hot')
+                    # plt.title(f"Forward SR Matrix (Episode {episode})")
+                    # plt.colorbar(im, label="SR Value")
+                    # plt.tight_layout()
+                    # plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
+                    # plt.close()
 
 
 
