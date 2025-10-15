@@ -151,8 +151,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     print("Agent will take random actions and learn SR matrix")
     print(f"Max episodes: {max_episodes}")
     print(f"Max steps per episode: {max_steps_per_episode}\n")
-    
-    # Load cube detector (force CPU mode for home pc)
     print("Loading cube detector model...")
     cube_model, device = load_cube_detector('models/cube_detector.pth', force_cpu=False)
     

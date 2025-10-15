@@ -185,73 +185,73 @@ class SuccessorAgentPartialSARSA:
         
         return 2  # fallback: move forward
 
-    # def update_sr(self, num_forward_steps,current_exp, next_exp):
-    #     """Update successor features using policy-independent learning."""
-    #     s = current_exp[0]    # current state index
-    #     s_a = current_exp[1]  # current action
-    #     s_1 = current_exp[2]  # next state index
-    #     done = current_exp[4] # terminal flag
-        
-    #     # MiniGrid action constants
-    #     TURN_LEFT = 0
-    #     TURN_RIGHT = 1
-    #     MOVE_FORWARD = 2
-        
-    #     # update SR for move forward actions (actual state transitions)
-    #     if s_a != MOVE_FORWARD:
-    #         return 0.0  # No update, return zero TD error
-        
-    #     # safety check: ensure we actually transitioned states
-    #     if s == s_1 and not done:
-    #         return 0.0  # No state transition occurred
-        
-    #     I = self._onehot(s, self.state_size)
-        
-    #     if done:
-    #         # terminal: no future state occupancy expected
-    #         td_target = I
-    #     else:
-    #         # For continuing states, we need to handle the temporal discount properly
-    #         if next_exp is not None:
-    #             s_a_1 = next_exp[1]  # actual next action
-                
-    #             if s_a_1 == MOVE_FORWARD:
-    #                 # next action transitions states, use normal discount
-    #                 td_target = I + self.gamma * self.M[s_a_1, s_1, :]
-    #             else:
-    #                 # next action is a turn - it doesn't change state but takes time
-    #                 td_target = I + self.M[MOVE_FORWARD, s_1, :]  # No gamma discount for turns
-    #         else:
-    #             # Fallback
-    #             td_target = I
-        
-    #     td_error = td_target - self.M[s_a, s, :]
-    #     self.M[s_a, s, :] += self.learning_rate * td_error
-        
-    #     return np.mean(np.abs(td_error))
-
-    def update_sr(self, current_exp, next_exp):
-        """Update successor features for all actions using SARSA."""
+    def update_sr(self,current_exp, next_exp):
+        """Update successor features using policy-independent learning."""
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action
         s_1 = current_exp[2]  # next state index
         done = current_exp[4] # terminal flag
         
+        # MiniGrid action constants
+        TURN_LEFT = 0
+        TURN_RIGHT = 1
+        MOVE_FORWARD = 2
+        
+        # update SR for move forward actions (actual state transitions)
+        if s_a != MOVE_FORWARD:
+            return 0.0  # No update, return zero TD error
+        
+        # safety check: ensure we actually transitioned states
+        if s == s_1 and not done:
+            return 0.0  # No state transition occurred
+        
         I = self._onehot(s, self.state_size)
         
         if done:
+            # terminal: no future state occupancy expected
             td_target = I
-        elif next_exp is not None:
-            s_a_1 = next_exp[1]  # next action (SARSA)
-            td_target = I + self.gamma * self.M[s_a_1, s_1, :]
         else:
-            # Fallback - shouldn't happen with proper SARSA
-            td_target = I
+            # For continuing states, we need to handle the temporal discount properly
+            if next_exp is not None:
+                s_a_1 = next_exp[1]  # actual next action
+                
+                if s_a_1 == MOVE_FORWARD:
+                    # next action transitions states, use normal discount
+                    td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+                else:
+                    # next action is a turn - it doesn't change state but takes time
+                    td_target = I + self.M[MOVE_FORWARD, s_1, :]  # No gamma discount for turns
+            else:
+                # Fallback
+                td_target = I
         
         td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
         
         return np.mean(np.abs(td_error))
+
+    # def update_sr(self, current_exp, next_exp):
+    #     """Update successor features for all actions using SARSA."""
+    #     s = current_exp[0]    # current state index
+    #     s_a = current_exp[1]  # current action
+    #     s_1 = current_exp[2]  # next state index
+    #     done = current_exp[4] # terminal flag
+        
+    #     I = self._onehot(s, self.state_size)
+        
+    #     if done:
+    #         td_target = I
+    #     elif next_exp is not None:
+    #         s_a_1 = next_exp[1]  # next action (SARSA)
+    #         td_target = I + self.gamma * self.M[s_a_1, s_1, :]
+    #     else:
+    #         # Fallback - shouldn't happen with proper SARSA
+    #         td_target = I
+        
+    #     td_error = td_target - self.M[s_a, s, :]
+    #     self.M[s_a, s, :] += self.learning_rate * td_error
+        
+    #     return np.mean(np.abs(td_error))
 
     def update(self , current_exp, next_exp=None):
         """Update both reward weights and successor features."""
