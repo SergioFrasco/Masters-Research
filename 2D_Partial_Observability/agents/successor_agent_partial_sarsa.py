@@ -127,6 +127,7 @@ class SuccessorAgentPartialSARSA:
         cell = self.env.grid.get(x, y)
         from minigrid.core.world_object import Wall
         return cell is None or not isinstance(cell, Wall)
+    
 
     def sample_action_with_wvf(self, obs, epsilon=0.0):
         """Sample action using WVF with path integration"""
@@ -139,18 +140,21 @@ class SuccessorAgentPartialSARSA:
         x, y = self.internal_pos
         current_dir = self.internal_dir
         
+        # Fixed: neighbors in (x, y) format
         neighbors = [
-            ((y, x + 1), 0), ((y + 1, x), 1), 
-            ((y, x - 1), 2), ((y - 1, x), 3)
+            ((x + 1, y), 0),  # Right
+            ((x, y + 1), 1),  # Down
+            ((x - 1, y), 2),  # Left
+            ((x, y - 1), 3)   # Up
         ]
         
         valid_actions = []
         valid_values = []
         
         for neighbor_pos, target_dir in neighbors:
-            if self._is_valid_position(neighbor_pos):
-                next_y, next_x = neighbor_pos
-                max_value_across_maps = np.max(self.wvf[:, next_y, next_x])
+            if self._is_valid_position(neighbor_pos):  # Now passing (x, y)
+                next_x, next_y = neighbor_pos  # Unpack as (x, y)
+                max_value_across_maps = np.max(self.wvf[:, next_y, next_x])  # Index as [y, x]
                 action_to_take = self._get_action_toward_direction(current_dir, target_dir)
                 
                 valid_actions.append(action_to_take)

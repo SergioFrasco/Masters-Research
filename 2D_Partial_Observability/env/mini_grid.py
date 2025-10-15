@@ -67,49 +67,49 @@ class SimpleEnv(MiniGridEnv):
             **kwargs,
         )
 
-    def _select_goal_positions(self):
-        """Select goal positions without replacement from available positions."""
-        # Reset pool if empty
-        if not self.available_positions:
-            self.available_positions = self.all_positions.copy()
-            # print("Position pool reset - all positions available again")
+    # def _select_goal_positions(self):
+    #     """Select goal positions without replacement from available positions."""
+    #     # Reset pool if empty
+    #     if not self.available_positions:
+    #         self.available_positions = self.all_positions.copy()
+    #         # print("Position pool reset - all positions available again")
         
-        # Randomly decide how many goals for this episode (1 to 5)
-        # num_goals = random.randint(1, 5)
-        num_goals = 1
+    #     # Randomly decide how many goals for this episode (1 to 5)
+    #     num_goals = random.randint(1, 5)
+    #     # num_goals = 1
         
-        # Make sure we don't try to select more positions than available
-        num_goals = min(num_goals, len(self.available_positions))
+    #     # Make sure we don't try to select more positions than available
+    #     num_goals = min(num_goals, len(self.available_positions))
         
-        # Sample positions without replacement
-        selected_positions = sample(self.available_positions, num_goals)
+    #     # Sample positions without replacement
+    #     selected_positions = sample(self.available_positions, num_goals)
         
-        # Remove selected positions from available pool
-        for pos in selected_positions:
-            self.available_positions.remove(pos)
+    #     # Remove selected positions from available pool
+    #     for pos in selected_positions:
+    #         self.available_positions.remove(pos)
         
         # print(f"Selected {num_goals} goal positions: {selected_positions}")
         # print(f"Remaining available positions: {len(self.available_positions)}")
         
-        return selected_positions
+        # return selected_positions
     
-    def _select_agent_position(self):
-        """Select goal positions without replacement from available positions."""
-        # Reset pool if empty
-        if not self.available_agent_position:
-            self.available_agent_position = self.all_agent_positions.copy()
-            # print("Position pool reset - all positions available again")
+    # def _select_agent_position(self):
+    #     """Select goal positions without replacement from available positions."""
+    #     # Reset pool if empty
+    #     if not self.available_agent_position:
+    #         self.available_agent_position = self.all_agent_positions.copy()
+    #         # print("Position pool reset - all positions available again")
         
-        # Sample positions without replacement
-        selected_agent_position = sample(self.available_agent_position, 1)[0]
+    #     # Sample positions without replacement
+    #     selected_agent_position = sample(self.available_agent_position, 1)[0]
         
-        # Remove selected positions from available pool
-        self.available_agent_position.remove(selected_agent_position)
+    #     # Remove selected positions from available pool
+    #     self.available_agent_position.remove(selected_agent_position)
         
-        # print(f"Selected {num_goals} goal positions: {selected_positions}")
-        # print(f"Remaining available positions: {len(self.available_positions)}")
+    #     # print(f"Selected {num_goals} goal positions: {selected_positions}")
+    #     # print(f"Remaining available positions: {len(self.available_positions)}")
         
-        return selected_agent_position
+    #     return selected_agent_position
 
 
     @staticmethod
@@ -124,7 +124,7 @@ class SimpleEnv(MiniGridEnv):
 
         # Number of goals to place
         # num_goals = self._rand_int(1,5)
-        num_goals = 1
+        num_goals = 3
 
         # Place goals at completely random positions (with replacement)
         for _ in range(num_goals):

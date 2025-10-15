@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python main_sarsa.py
+python experiment_runner.py
