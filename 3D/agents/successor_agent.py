@@ -145,3 +145,116 @@ class RandomAgentWithSR:
         self.internal_dir = None
         self.prev_state = None
         self.prev_action = None
+
+    # Egocentric view (agent always at center facing up)
+    def get_egocentric_obs_matrix(self, env, agent_pos, agent_dir, obs_size=11):
+        """
+        Get an egocentric observation matrix where agent is always at center bottom
+        facing upward in the matrix, regardless of actual world direction.
+        
+        Returns:
+            obs_matrix: 10x10 array where agent is at position (5, 9) facing up
+        """
+        obs_matrix = np.zeros((obs_size, obs_size), dtype=np.float32)
+        agent_x, agent_z = agent_pos
+        
+        # Agent position in observation (bottom center)
+        agent_obs_x = obs_size // 2
+        agent_obs_z = obs_size - 1  # Bottom of matrix
+        
+        # Rotation matrices for each direction to align view
+        for obs_z in range(obs_size):
+            for obs_x in range(obs_size):
+                # Relative position in observation space
+                rel_x = obs_x - agent_obs_x
+                rel_z = obs_z - agent_obs_z
+                
+                # Don't look behind (positive z is behind in ego view)
+                if rel_z > 0:
+                    continue
+                
+                # Rotate based on agent direction to get world coordinates
+                if agent_dir == 3:  # North - no rotation needed
+                    world_dx = rel_x
+                    world_dz = -rel_z
+                elif agent_dir == 0:  # East - rotate 90 CCW
+                    world_dx = -rel_z
+                    world_dz = -rel_x
+                elif agent_dir == 1:  # South - rotate 180
+                    world_dx = -rel_x
+                    world_dz = rel_z
+                elif agent_dir == 2:  # West - rotate 90 CW  
+                    world_dx = rel_z
+                    world_dz = rel_x
+                
+                world_x = agent_x + world_dx
+                world_z = agent_z + world_dz
+                
+                # Check bounds
+                if world_x < 0 or world_x >= env.size or world_z < 0 or world_z >= env.size:
+                    continue
+                
+                # Check visibility
+                if not self.is_visible(env, agent_x, agent_z, world_x, world_z):
+                    continue
+                
+                # Check for obstacles
+                if hasattr(env, 'grid') and env.grid[world_z, world_x] == 2:
+                    obs_matrix[obs_z, obs_x] = 1
+                
+                # Check entities
+                if hasattr(env, 'entities'):
+                    for entity in env.entities:
+                        entity_x = int(round(entity.pos[0]))
+                        entity_z = int(round(entity.pos[2]))
+                        if entity_x == world_x and entity_z == world_z:
+                            obs_matrix[obs_z, obs_x] = 1
+        
+        return obs_matrix
+    
+
+    def is_visible(self, env, x1, z1, x2, z2):
+        """
+        Check if cell (x2, z2) is visible from (x1, z1).
+        Returns False if there's a wall blocking the view.
+        """
+        # Don't check the starting position
+        if x1 == x2 and z1 == z2:
+            return True
+        
+        # Get all points along the line
+        points = self.bresenham_line(x1, z1, x2, z2)
+        
+        # Check each point along the line (except start and end)
+        for x, z in points[1:-1]:
+            if hasattr(env, 'grid'):
+                if 0 <= x < env.size and 0 <= z < env.size:
+                    if env.grid[z, x] == 2:  # Wall blocks view
+                        return False
+        
+        return True
+    
+    def bresenham_line(self, x1, z1, x2, z2):
+        """Get all points along a line using Bresenham's algorithm"""
+        points = []
+        dx = abs(x2 - x1)
+        dz = abs(z2 - z1)
+        sx = 1 if x1 < x2 else -1
+        sz = 1 if z1 < z2 else -1
+        err = dx - dz
+        
+        x, z = x1, z1
+        
+        while True:
+            points.append((x, z))
+            if x == x2 and z == z2:
+                break
+            e2 = 2 * err
+            if e2 > -dz:
+                err -= dz
+                x += sx
+            if e2 < dx:
+                err += dx
+                z += sz
+        
+        return points
