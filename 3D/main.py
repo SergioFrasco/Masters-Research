@@ -215,12 +215,13 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             total_steps += 1
             episode_reward += reward
 
-            frame = env.render()
+            
             
             # CUBE DETECTION: Run model on observation
             cube_detected = detect_cube(cube_model, obs, device, transform)
 
             # Save the frame - ensure render mode is "rgb_array"
+            # frame = env.render()
             # if frame is not None:
             #     if isinstance(frame, np.ndarray):
             #         img = Image.fromarray(frame)
@@ -291,19 +292,11 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
 
             # ============================= VISION MODEL ====================================
                 
-            # # Get current agent position (using path integration)
-            # agent_position = agent.internal_pos
+            # # Get current agent position
+            agent_position = agent._get_agent_pos_from_env()
 
             # # Get the agent's 7x7 view from observation
-            # agent_view = obs['image'][0]
-
-            # # Convert to channels last for easier processing
-            # normalized_grid = np.zeros((7, 7), dtype=np.float32)
-
-            # # Setting up input for the AE based on agent's partial view
-            # normalized_grid[agent_view == 2] = 0.0  # Wall
-            # normalized_grid[agent_view == 1] = 0.0  # Open space  
-            # normalized_grid[agent_view == 8] = 1.0  # Goal
+            agent_view = ego_obs
 
             # # If agent is on goal, force the agent's position in view to show reward
             # if done:
