@@ -18,7 +18,6 @@ from models import Autoencoder
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
-
 class CubeDetector(nn.Module):
     """Lightweight CNN for cube detection using MobileNetV2"""
     def __init__(self, pretrained=False):
@@ -198,64 +197,8 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         
         while step < max_steps_per_episode:
             # Save RGB frame from environment
-            frame = env.render()
-            if frame is not None:
-                if isinstance(frame, np.ndarray):
-                    img = Image.fromarray(frame)
-                else:
-                    img = frame
-                
-                # Save RGB frame
-                save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:04d}.png')
-                img.save(save_frame_path)
-                print(f"  Saved frame: {save_frame_path}")
+            
 
-            # Update internal state BEFORE stepping (prediction)
-            agent.update_internal_state(current_action)
-
-            # Get egocentric observation (agent always faces up in the matrix)
-            ego_obs = agent.get_egocentric_obs_matrix(
-                env,
-                tuple(agent.internal_pos), 
-                agent.internal_dir,
-                obs_size=11
-            )
-            
-            # Print the ego observation matrix
-            print(f"\n=== Episode {episode}, Step {step} ===")
-            print(f"Agent at {agent.internal_pos}, facing {agent.internal_dir}")
-            print("Egocentric observation (1=obstacle, 0=empty/not visible):")
-            print(ego_obs)
-            
-            # Save the ego observation as text file
-            ego_text_path = generate_save_path(f'ego_obs_ep{episode:03d}_step{step:04d}.txt')
-            np.savetxt(ego_text_path, ego_obs, fmt='%.0f')
-            
-            # Save the ego observation as image visualization
-            fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-            im = ax.imshow(ego_obs, cmap='gray', vmin=0, vmax=1, interpolation='nearest')
-            
-            # Add grid lines
-            ax.set_xticks(np.arange(-0.5, ego_obs.shape[1], 1), minor=True)
-            ax.set_yticks(np.arange(-0.5, ego_obs.shape[0], 1), minor=True)
-            ax.grid(which='minor', color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
-            
-            # Mark agent position (bottom center in ego view)
-            agent_obs_x = ego_obs.shape[1] // 2
-            agent_obs_z = ego_obs.shape[0] - 1
-            ax.plot(agent_obs_x, agent_obs_z, 'r^', markersize=15, label='Agent')
-            ax.arrow(agent_obs_x, agent_obs_z, 0, -1.5, 
-                     head_width=0.3, head_length=0.2, fc='red', ec='red', alpha=0.7)
-            
-            dir_names = {0: 'East', 1: 'South', 2: 'West', 3: 'North'}
-            ax.set_title(f'Ego Obs - Ep {episode}, Step {step} | '
-                        f'Pos: {agent.internal_pos}, Facing: {dir_names[agent.internal_dir]}')
-            plt.colorbar(im, ax=ax, label='0=Empty, 1=Obstacle')
-            
-            ego_img_path = generate_save_path(f'ego_obs_ep{episode:03d}_step{step:04d}.png')
-            fig.savefig(ego_img_path, dpi=100, bbox_inches='tight')
-            plt.close(fig)
-            print(f"  Saved ego observation: {ego_img_path}")
             
             # Store step info BEFORE taking action
             # step_info = {
@@ -271,11 +214,25 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             step += 1
             total_steps += 1
             episode_reward += reward
+
+            frame = env.render()
             
             # CUBE DETECTION: Run model on observation
             cube_detected = detect_cube(cube_model, obs, device, transform)
+
+            # Save the frame
+            if frame is not None:
+                if isinstance(frame, np.ndarray):
+                    img = Image.fromarray(frame)
+                else:
+                    img = frame
+                
+                # Save RGB frame
+                save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
+                img.save(save_frame_path)
+                print(f"  Saved frame: {save_frame_path}")
+            
             if cube_detected:
-                # print("Cube Detected!")
                 episode_cubes += 1
                 total_cubes_detected += 1
                 
@@ -285,7 +242,40 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     goal_x, goal_z = goal_pos
                     if 0 <= goal_x < env.size and 0 <= goal_z < env.size:
                         reward_map[goal_z, goal_x] = 1
-                        # print(f"  Reward map updated at goal position ({goal_x}, {goal_z})")
+
+                    # Create egocentric observation matrix
+                    ego_obs = agent.create_egocentric_observation(
+                        goal_global_pos=(goal_x, goal_z),
+                        matrix_size=13
+                    )
+                    
+                    # ANALYZE FIRST DETECTION
+                    print("\n" + "="*80)
+                    print("🎯 CUBE DETECTED - SAVING AND EXITING FOR ANALYSIS")
+                    print("="*80)
+                    print(f"Episode: {episode}, Step: {step}")
+                    print(f"Agent position: {agent._get_agent_pos_from_env()}")
+                    print(f"Agent direction: {agent._get_agent_dir_from_env()}")
+                    print(f"Goal position: ({goal_x}, {goal_z})")
+                    print("\nEgocentric Observation Matrix (15x15):")
+                    print(ego_obs)
+                    print("\nAgent is at [14, 7] (bottom-middle) facing upward")
+                    
+                    
+                    print("\n" + "="*80)
+                    print("Exiting program for analysis...")
+                    print("="*80)
+                    
+                    # Exit the program
+                    import sys
+                    sys.exit(0)
+
+            else:
+                # No cube detected - create empty egocentric observation
+                ego_obs = agent.create_egocentric_observation(
+                    goal_global_pos=None,
+                    matrix_size=13
+                )
                     
             # print(reward_map)
             
@@ -500,7 +490,8 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
 
 if __name__ == "__main__":
     # create environment
-    env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
+    # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
+    env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
     # env = DiscreteMiniWorldWrapper(size=10)
     
     # create agent
