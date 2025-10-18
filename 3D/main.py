@@ -220,17 +220,17 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             # CUBE DETECTION: Run model on observation
             cube_detected = detect_cube(cube_model, obs, device, transform)
 
-            # Save the frame
-            if frame is not None:
-                if isinstance(frame, np.ndarray):
-                    img = Image.fromarray(frame)
-                else:
-                    img = frame
+            # Save the frame - ensure render mode is "rgb_array"
+            # if frame is not None:
+            #     if isinstance(frame, np.ndarray):
+            #         img = Image.fromarray(frame)
+            #     else:
+            #         img = frame
                 
-                # Save RGB frame
-                save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
-                img.save(save_frame_path)
-                print(f"  Saved frame: {save_frame_path}")
+            #     # Save RGB frame
+            #     save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
+            #     img.save(save_frame_path)
+            #     print(f"  Saved frame: {save_frame_path}")
             
             if cube_detected:
                 episode_cubes += 1
@@ -249,26 +249,26 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                         matrix_size=13
                     )
                     
-                    # ANALYZE FIRST DETECTION
-                    print("\n" + "="*80)
-                    print("🎯 CUBE DETECTED - SAVING AND EXITING FOR ANALYSIS")
-                    print("="*80)
-                    print(f"Episode: {episode}, Step: {step}")
-                    print(f"Agent position: {agent._get_agent_pos_from_env()}")
-                    print(f"Agent direction: {agent._get_agent_dir_from_env()}")
-                    print(f"Goal position: ({goal_x}, {goal_z})")
-                    print("\nEgocentric Observation Matrix (15x15):")
-                    print(ego_obs)
-                    print("\nAgent is at [14, 7] (bottom-middle) facing upward")
+                    # # ANALYZE FIRST DETECTION
+                    # print("\n" + "="*80)
+                    # print("🎯 CUBE DETECTED - SAVING AND EXITING FOR ANALYSIS")
+                    # print("="*80)
+                    # print(f"Episode: {episode}, Step: {step}")
+                    # print(f"Agent position: {agent._get_agent_pos_from_env()}")
+                    # print(f"Agent direction: {agent._get_agent_dir_from_env()}")
+                    # print(f"Goal position: ({goal_x}, {goal_z})")
+                    # print("\nEgocentric Observation Matrix (15x15):")
+                    # print(ego_obs)
+                    # print("\nAgent is at [14, 7] (bottom-middle) facing upward")
                     
                     
-                    print("\n" + "="*80)
-                    print("Exiting program for analysis...")
-                    print("="*80)
+                    # print("\n" + "="*80)
+                    # print("Exiting program for analysis...")
+                    # print("="*80)
                     
-                    # Exit the program
-                    import sys
-                    sys.exit(0)
+                    # # Exit the program
+                    # import sys
+                    # sys.exit(0)
 
             else:
                 # No cube detected - create empty egocentric observation
