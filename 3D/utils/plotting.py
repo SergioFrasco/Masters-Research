@@ -178,4 +178,30 @@ def visualize_agent_trajectory(env, wvf_grid, n_steps=100):
     plt.savefig('results/agent_trajectory.png')
     plt.close()
 
+def save_all_wvf(agent, maps_per_row=10, save_path="results/wvf.png"):
+    num_maps = agent.state_size
+    grid_size = agent.grid_size
+    num_rows = math.ceil(num_maps / maps_per_row)
+    
+    fig, axes = plt.subplots(num_rows, maps_per_row, figsize=(maps_per_row * 2, num_rows * 2))
+    axes = axes.flatten()
+    
+    im = None  # Store the last imshow object for the colorbar anchor
+    for idx in range(num_maps):
+        ax = axes[idx]
+        im = ax.imshow(agent.wvf[idx], cmap='viridis')
+        ax.set_title(f"State {idx}", fontsize=8)
+        ax.axis('off')
+    
+    # Hide any unused subplots
+    for idx in range(num_maps, len(axes)):
+        axes[idx].axis('off')
+
+    fig.tight_layout()
+    if im is not None:
+        fig.colorbar(im, ax=axes[:num_maps], shrink=0.6, label="WVF Value")
+
+    fig.savefig(save_path)
+    plt.close()
+
 

@@ -28,6 +28,15 @@ class RandomAgentWithSR:
         # Store previous experience for TD update
         self.prev_state = None
         self.prev_action = None
+
+        # Initialize the true map to track discovered reward locations and predictions
+        self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
+
+        # World Value Function - Mappings of values to each state goal pair
+        self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
+
+        # Initialize individual reward maps: one per state
+        self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
     
     def _get_agent_pos_from_env(self):
         """Get agent position directly from environment"""

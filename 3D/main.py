@@ -1,5 +1,10 @@
 import os
 os.environ['PYGLET_HEADLESS'] = '1'
+os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use non-GUI backend
+
+import matplotlib
+matplotlib.use('Agg')  # Must be called before importing pyplot
+
 import gymnasium as gym
 import miniworld
 from miniworld.manual_control import ManualControl
@@ -7,7 +12,7 @@ from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 from agents import RandomAgent, RandomAgentWithSR
 from tqdm import tqdm
 import math
-from utils import plot_sr_matrix, generate_save_path
+from utils import plot_sr_matrix, generate_save_path, save_all_wvf
 import time
 import torch
 import torch.nn as nn
@@ -16,7 +21,7 @@ from torchvision import transforms, models
 from PIL import Image
 from models import Autoencoder
 import numpy as np
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # This must come AFTER matplotlib.use('Agg')
 from collections import deque
 class CubeDetector(nn.Module):
     """Lightweight CNN for cube detection using MobileNetV2"""
@@ -145,6 +150,62 @@ def plot_wvf(wvf, episode, grid_size, maps_per_row=10):
     fig.savefig(save_path, dpi=100)
     plt.close()
     print(f"✓ WVF plot saved: {save_path}")
+
+def _create_target_view_with_reward(past_agent_pos, past_agent_dir, reward_pos, reward_map):
+    """Create 13x13 target view from past agent position showing reward location"""
+    target_13x13 = np.zeros((13, 13), dtype=np.float32)
+    
+    ego_center_x, ego_center_z = 6, 12  # Agent position in 13x13 view
+    past_x, past_z = past_agent_pos
+    reward_x, reward_z = reward_pos
+    
+    for view_z in range(13):
+        for view_x in range(13):
+            # Calculate offset from agent's position in ego view
+            dx_ego = view_x - ego_center_x
+            dz_ego = view_z - ego_center_z
+            
+            # Rotate based on past agent direction
+            if past_agent_dir == 3:  # North
+                dx_world, dz_world = dx_ego, dz_ego
+            elif past_agent_dir == 0:  # East
+                dx_world, dz_world = -dz_ego, dx_ego
+            elif past_agent_dir == 1:  # South
+                dx_world, dz_world = -dx_ego, -dz_ego
+            elif past_agent_dir == 2:  # West
+                dx_world, dz_world = dz_ego, -dx_ego
+            
+            # Calculate global coordinates for this view cell
+            global_x = past_x + dx_world
+            global_z = past_z + dz_world
+            
+            # Check if this cell contains the reward
+            if (global_x == reward_x and global_z == reward_z):
+                target_13x13[view_z, view_x] = 1.0
+            else:
+                target_13x13[view_z, view_x] = 0.0
+    
+    return target_13x13
+
+def _train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
+    """Train autoencoder on batch of trajectory data"""
+    # print("Done: Batch training triggered")
+    # Convert to tensors and stack
+    input_batch = np.stack([inp[np.newaxis, ..., np.newaxis] for inp in inputs])
+    target_batch = np.stack([tgt[np.newaxis, ..., np.newaxis] for tgt in targets])
+    
+    input_tensor = torch.tensor(input_batch, dtype=torch.float32).squeeze(1).permute(0, 3, 1, 2).to(device)
+    target_tensor = torch.tensor(target_batch, dtype=torch.float32).squeeze(1).permute(0, 3, 1, 2).to(device)
+    
+    model.train()
+    optimizer.zero_grad()
+    output = model(input_tensor)
+    loss = loss_fn(output, target_tensor)
+    loss.backward()
+    optimizer.step()
+    
+    return loss.item()
+
     
 def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200):
     """Run with random agent that learns SR and detects cubes"""
@@ -174,6 +235,9 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     
     # Initialize reward map
     reward_map = np.zeros((env.size, env.size))
+
+    # Tracking ae triggers
+    ae_triggers_per_episode = [] 
     
     obs, info = env.reset()
     agent.reset()
@@ -186,28 +250,61 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         step = 0
         episode_reward = 0
         episode_cubes = 0
+        ae_triggers_this_episode = 0
         
         # Initialize first action
         current_state = agent.get_state_index()
         current_action = agent.select_action()
         reward_map = np.zeros((env.size, env.size))
+
+        # Reset maps for new episode 
+        agent.true_reward_map = np.zeros((env.size, env.size))
+        agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
+        agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
         
         # Memory to train vision on
         trajectory_buffer = deque(maxlen=10)
+        trajectory = []
         
         while step < max_steps_per_episode:
-            # Save RGB frame from environment
             
+            agent_pos = agent._get_agent_pos_from_env()
+            trajectory.append((agent_pos[0], agent_pos[1], current_action))
 
+            cube_detected = detect_cube(cube_model, obs, device, transform)
+
+            if cube_detected:
+                episode_cubes += 1
+                total_cubes_detected += 1
+                
+                # Get ground truth goal position from environment
+                goal_pos = get_goal_position(env)
+                if goal_pos is not None:
+                    goal_x, goal_z = goal_pos
+                    if 0 <= goal_x < env.size and 0 <= goal_z < env.size:
+                        reward_map[goal_z, goal_x] = 1
+
+                    # Create egocentric observation matrix
+                    ego_obs = agent.create_egocentric_observation(
+                        goal_global_pos=(goal_x, goal_z),
+                        matrix_size=13
+                    )
             
+            else:
+                # No cube detected - create empty egocentric observation
+                ego_obs = agent.create_egocentric_observation(
+                    goal_global_pos=None,
+                    matrix_size=13
+                )
+
             # Store step info BEFORE taking action
-            # step_info = {
-            #     'agent_view': obs['image'][0].copy(),
-            #     'agent_pos': tuple(agent.internal_pos),
-            #     'agent_dir': agent.internal_dir,
-            #     'normalized_grid': normalized_grid.copy()
-            # }
-            # trajectory_buffer.append(step_info)
+            step_info = {
+                'agent_view': ego_obs.copy(),
+                'agent_pos': tuple(agent._get_agent_pos_from_env()),
+                'agent_dir': agent._get_agent_dir_from_env(),
+                'normalized_grid': ego_obs.copy()
+            }
+            trajectory_buffer.append(step_info)
             
             # Step environment
             obs, reward, terminated, truncated, info = env.step(current_action)
@@ -215,8 +312,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             total_steps += 1
             episode_reward += reward
 
-            
-            
             # CUBE DETECTION: Run model on observation
             cube_detected = detect_cube(cube_model, obs, device, transform)
 
@@ -245,10 +340,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                         reward_map[goal_z, goal_x] = 1
 
                     # Create egocentric observation matrix
-                    ego_obs = agent.create_egocentric_observation(
-                        goal_global_pos=(goal_x, goal_z),
-                        matrix_size=13
-                    )
+                    ego_obs = agent.create_egocentric_observation(goal_global_pos=(goal_x, goal_z),matrix_size=13)
                     
                     # # ANALYZE FIRST DETECTION
                     # print("\n" + "="*80)
@@ -273,10 +365,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
 
             else:
                 # No cube detected - create empty egocentric observation
-                ego_obs = agent.create_egocentric_observation(
-                    goal_global_pos=None,
-                    matrix_size=13
-                )
+                ego_obs = agent.create_egocentric_observation(goal_global_pos=None,matrix_size=13)
                     
             # print(reward_map)
             
@@ -295,154 +384,160 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             # # Get current agent position
             agent_position = agent._get_agent_pos_from_env()
 
-            # # Get the agent's 7x7 view from observation
+            # # Get the agent's 13x13 view from observation
             agent_view = ego_obs
 
             # # If agent is on goal, force the agent's position in view to show reward
-            # if done:
-            #     normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
+            if done:
+                x,z = agent_position
+                agent_view[12, 6] = 1.0  # Agent position in egocentric view
 
-            # # Reshape for the autoencoder (add batch and channel dims)
-            # input_grid = normalized_grid[np.newaxis, ..., np.newaxis] 
+            # Reshape for the autoencoder (add batch and channel dims)
+            input_grid = agent_view[np.newaxis, ..., np.newaxis] 
 
-            # with torch.no_grad():
-            #     ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
-            #     predicted_reward_map_tensor = ae_model(ae_input_tensor)
-            #     predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
+            with torch.no_grad():
+                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                predicted_reward_map_tensor = ae_model(ae_input_tensor)
+                predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
 
-            # # Mark position as visited (using path integration)
-            # agent.visited_positions[agent_position[1], agent_position[0]] = True
+            # Mark position as visited (using path integration)
+            agent.visited_positions[agent_position[1], agent_position[0]] = True
 
-            # # Learning Signal - Batch training when goal is reached
-            # if done and step < max_steps_per_episode:
-            #     agent.true_reward_map[agent_position[1], agent_position[0]] = 1
+            # Learning Signal - Batch training when goal is reached
+            if done and step < max_steps_per_episode:
+                agent.true_reward_map[agent_position[1], agent_position[0]] = 1
 
-            #     if len(trajectory_buffer) > 0:
-            #         batch_inputs = []
-            #         batch_targets = []
+                if len(trajectory_buffer) > 0:
+                    batch_inputs = []
+                    batch_targets = []
                     
-            #         # Include all steps from trajectory buffer (past steps)
-            #         for past_step in trajectory_buffer:
-            #             reward_global_pos = agent_position
+                    # Include all steps from trajectory buffer (past steps)
+                    for past_step in trajectory_buffer:
+                        reward_global_pos = agent_position
                         
-            #             past_target_7x7 = self._create_target_view_with_reward(
-            #                 past_step['agent_pos'], 
-            #                 past_step['agent_dir'],
-            #                 reward_global_pos,
-            #                 agent.true_reward_map
-            #             )
+                        past_target_13x13 = _create_target_view_with_reward(
+                            past_step['agent_pos'], 
+                            past_step['agent_dir'],
+                            reward_global_pos,
+                            agent.true_reward_map
+                        )
                         
-            #             batch_inputs.append(past_step['normalized_grid'])
-            #             batch_targets.append(past_target_7x7)
+                        batch_inputs.append(past_step['normalized_grid'])
+                        batch_targets.append(past_target_13x13)
                     
-            #         # ALSO include the current step (when agent is on goal)
-            #         current_target_7x7 = self._create_target_view_with_reward(
-            #             tuple(agent.internal_pos),
-            #             agent.internal_dir,
-            #             agent_position,
-            #             agent.true_reward_map
-            #         )
+                    # ALSO include the current step (when agent is on goal)
+                    current_target_13x13 =_create_target_view_with_reward(
+                        tuple(agent._get_agent_pos_from_env()),
+                        agent._get_agent_dir_from_env(),
+                        agent_position,
+                        agent.true_reward_map
+                    )
                     
-            #         batch_inputs.append(normalized_grid)
-            #         batch_targets.append(current_target_7x7)
+                    batch_inputs.append(ego_obs)
+                    batch_targets.append(current_target_13x13)
                     
-            #         # Train autoencoder on batch
-            #         self._train_ae_on_batch(ae_model, optimizer, loss_fn, 
-            #                             batch_inputs, batch_targets, device)
+                    # Train autoencoder on batch
+                    _train_ae_on_batch(ae_model, optimizer, loss_fn, batch_inputs, batch_targets, device)
 
-            # # Map the 7x7 predicted reward map to the 10x10 global map
-            # agent_x, agent_y = agent_position
-            # ego_center_x = 3
-            # ego_center_y = 6
-            # agent_dir = agent.internal_dir
+            # Map the 13x13 predicted reward map to the 10x10 global map
+            agent_x, agent_z = agent_position
+            ego_center_x = 6
+            ego_center_z = 12
+            agent_dir = agent._get_agent_dir_from_env()
             
-            # for view_y in range(7):
-            #     for view_x in range(7):
-            #         dx_ego = view_x - ego_center_x
-            #         dy_ego = view_y - ego_center_y
+            for view_z in range(13):
+                for view_x in range(13):
+                    dx_ego = view_x - ego_center_x
+                    dz_ego = view_z - ego_center_z
                     
-            #         if agent_dir == 3:  # North
-            #             dx_world = dx_ego
-            #             dy_world = dy_ego
-            #         elif agent_dir == 0:  # East
-            #             dx_world = -dy_ego
-            #             dy_world = dx_ego
-            #         elif agent_dir == 1:  # South
-            #             dx_world = -dx_ego
-            #             dy_world = -dy_ego
-            #         elif agent_dir == 2:  # West
-            #             dx_world = dy_ego
-            #             dy_world = -dx_ego
+                    if agent_dir == 3:  # North
+                        dx_world = dx_ego
+                        dz_world = dz_ego
+                    elif agent_dir == 0:  # East
+                        dx_world = -dz_ego
+                        dz_world = dx_ego
+                    elif agent_dir == 1:  # South
+                        dx_world = -dx_ego
+                        dz_world = -dz_ego
+                    elif agent_dir == 2:  # West
+                        dx_world = dz_ego
+                        dz_world = -dx_ego
                     
-            #         global_x = agent_x + dx_world
-            #         global_y = agent_y + dy_world
+                    global_x = agent_x + dx_world
+                    global_z = agent_z + dz_world
                     
-            #         if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
-            #             if not agent.visited_positions[global_y, global_x]:
-            #                 predicted_value = predicted_reward_map_2d[view_y, view_x]
-            #                 agent.true_reward_map[global_y, global_x] = predicted_value
+                    if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_z < agent.true_reward_map.shape[0]:
+                        if not agent.visited_positions[global_z, global_x]:
+                            predicted_value = predicted_reward_map_2d[view_z, view_x]
+                            agent.true_reward_map[global_z, global_x] = predicted_value
 
-            # # Extract the 7x7 target from the true reward map
-            # target_7x7 = np.zeros((7, 7), dtype=np.float32)
+            # Extract the 13x13 target from the true reward map
+            target_13x13 = np.zeros((13, 13), dtype=np.float32)
             
-            # for view_y in range(7):
-            #     for view_x in range(7):
-            #         dx_ego = view_x - ego_center_x
-            #         dy_ego = view_y - ego_center_y
+            for view_z in range(13):
+                for view_x in range(13):
+                    dx_ego = view_x - ego_center_x
+                    dz_ego = view_z - ego_center_z
                     
-            #         if agent_dir == 3:
-            #             dx_world = dx_ego
-            #             dy_world = dy_ego
-            #         elif agent_dir == 0:
-            #             dx_world = -dy_ego
-            #             dy_world = dx_ego
-            #         elif agent_dir == 1:
-            #             dx_world = -dx_ego
-            #             dy_world = -dy_ego
-            #         elif agent_dir == 2:
-            #             dx_world = dy_ego
-            #             dy_world = -dx_ego
+                    if agent_dir == 3:
+                        dx_world = dx_ego
+                        dz_world = dz_ego
+                    elif agent_dir == 0:
+                        dx_world = -dz_ego
+                        dz_world = dx_ego
+                    elif agent_dir == 1:
+                        dx_world = -dx_ego
+                        dz_world = -dz_ego
+                    elif agent_dir == 2:
+                        dx_world = dz_ego
+                        dz_world = -dx_ego
                     
-            #         global_x = agent_x + dx_world
-            #         global_y = agent_y + dy_world
+                    global_x = agent_x + dx_world
+                    global_z = agent_z + dz_world
                     
-            #         if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
-            #             target_7x7[view_y, view_x] = agent.true_reward_map[global_y, global_x]
-            #         else:
-            #             target_7x7[view_y, view_x] = 0.0
+                    if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_z < agent.true_reward_map.shape[0]:
+                        target_13x13[view_z, view_x] = agent.true_reward_map[global_z, global_x]
+                    else:
+                        target_13x13[view_z, view_x] = 0.0
 
             # # Check for prediction errors and trigger training if needed
-            # trigger_ae_training = False
-            # view_error = np.abs(predicted_reward_map_2d - target_7x7)
-            # max_error = np.max(view_error)
-            # mean_error = np.mean(view_error)
+            trigger_ae_training = False
+            view_error = np.abs(predicted_reward_map_2d - target_13x13)
+            max_error = np.max(view_error)
+            mean_error = np.mean(view_error)
 
-            # if max_error > 0.05 or mean_error > 0.01:
-            #     trigger_ae_training = True
+            if max_error > 0.05 or mean_error > 0.01:
+                trigger_ae_training = True
 
-            # if trigger_ae_training:
-            #     ae_triggers_this_episode += 1 
-            #     target_tensor = torch.tensor(target_7x7[np.newaxis, ..., np.newaxis], dtype=torch.float32)
-            #     target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)
+            if trigger_ae_training:
+                ae_triggers_this_episode += 1 
+                target_tensor = torch.tensor(target_13x13[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)
 
-            #     ae_model.train()
-            #     optimizer.zero_grad()
-            #     output = ae_model(ae_input_tensor)
-            #     loss = loss_fn(output, target_tensor)
-            #     loss.backward()
-            #     optimizer.step()
+                ae_model.train()
+                optimizer.zero_grad()
+                output = ae_model(ae_input_tensor)
+                loss = loss_fn(output, target_tensor)
+                loss.backward()
+                optimizer.step()
                 
-            #     step_loss = loss.item()
+                step_loss = loss.item()
 
-            # # Update reward maps
-            # agent.reward_maps.fill(0)
+            # Update reward maps
+            agent.reward_maps.fill(0)
 
-            # for y in range(agent.grid_size):
-            #     for x in range(agent.grid_size):
-            #         curr_reward = agent.true_reward_map[y, x]
-            #         idx = y * agent.grid_size + x
-            #         if agent.true_reward_map[y, x] >= 0.25:
-            #             agent.reward_maps[idx, y, x] = curr_reward
+            for y in range(agent.grid_size):
+                for x in range(agent.grid_size):
+                    curr_reward = agent.true_reward_map[y, x]
+                    idx = y * agent.grid_size + x
+                    if agent.true_reward_map[y, x] >= 0.25:
+                        agent.reward_maps[idx, y, x] = curr_reward
+
+            MOVE_FORWARD = 2
+            M_forward = agent.M[MOVE_FORWARD, :, :]
+            R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+            V_all = M_forward @ R_flat_all.T
+            agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
             
             # Move to next step
@@ -463,11 +558,111 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         # print(f"Total steps so far: {total_steps}")
         
         # Compose and plot WVF every 50 episodes or on last episode
-        if episode % 50 == 0 or episode == max_episodes:
+        if episode % 10 == 0 or episode == max_episodes:
             if reward_map.sum() > 0:  # Only if we've detected rewards
                 wvf = compose_wvf(agent, reward_map)
                 plot_wvf(wvf, episode, agent.grid_size)
             plot_sr_matrix(agent, episode)
+
+        ae_triggers_per_episode.append(ae_triggers_this_episode)
+            
+        # Create ground truth reward space
+        ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
+
+        if hasattr(env, 'goal_pos'):
+            goal_x, goal_z = env.goal_pos
+            ground_truth_reward_space[goal_z, goal_x] = 1.0
+        elif hasattr(env, '_goal_pos'):
+            goal_x, goal_z = env._goal_pos
+            ground_truth_reward_space[goal_z, goal_x] = 1.0
+        else:
+            if hasattr(env, 'grid'):
+                for z in range(env.size):
+                    for x in range(env.size):
+                        cell = env.grid.get(x, z)
+                        if cell is not None and hasattr(cell, 'type') and cell.type == 'goal':
+                            ground_truth_reward_space[z, x] = 1.0
+        
+
+        # Generate visualizations occasionally
+        if episode % 10 == 0 or episode == max_episodes or episode == 0:
+            save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
+
+            # Saving the Move Forward SR
+            forward_M = agent.M[MOVE_FORWARD, :, :]
+
+            plt.figure(figsize=(6, 5))
+            im = plt.imshow(forward_M, cmap='hot')
+            plt.title(f"Forward SR Matrix (Episode {episode})")
+            plt.colorbar(im, label="SR Value")
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
+            plt.close()
+
+            # Create vision plots
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
+
+            all_values = np.concatenate([
+                predicted_reward_map_2d.flatten(),
+                target_13x13.flatten(),
+                agent.true_reward_map.flatten(),
+                ground_truth_reward_space.flatten()
+            ])
+            vmin = np.min(all_values)
+            vmax = np.max(all_values)
+
+            im1 = ax1.imshow(predicted_reward_map_2d, cmap='viridis', vmin=vmin, vmax=vmax)
+            ax1.set_title(f'Predicted 13x13 View - Ep{episode} Step{step}')
+            ax1.plot(6, 12, 'ro', markersize=8, label='Agent')
+            plt.colorbar(im1, ax=ax1, fraction=0.046)
+
+            im2 = ax2.imshow(target_13x13, cmap='viridis', vmin=vmin, vmax=vmax)
+            ax2.set_title(f'Target 7x7 View (Ground Truth)')
+            ax2.plot(6, 12, 'ro', markersize=8, label='Agent')
+            plt.colorbar(im2, ax=ax2, fraction=0.046)
+
+            im3 = ax3.imshow(agent.true_reward_map, cmap='viridis', vmin=vmin, vmax=vmax)
+            ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_z})')
+            ax3.plot(agent_x, agent_z, 'ro', markersize=8, label='Agent')
+            plt.colorbar(im3, ax=ax3, fraction=0.046)
+
+            im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis', vmin=vmin, vmax=vmax)
+            ax4.set_title('Ground Truth Reward Space')
+            plt.colorbar(im4, ax=ax4, fraction=0.046)
+
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f"vision_plots/maps_ep{episode}_step{step}.png"), dpi=150, bbox_inches='tight')
+            plt.close()
+
+            # Plot AE triggers over episodes
+            plt.figure(figsize=(10, 5))
+            
+            window_size = 50
+            if len(ae_triggers_per_episode) >= window_size:
+                smoothed_triggers = np.convolve(ae_triggers_per_episode, np.ones(window_size)/window_size,  mode='valid')
+                smooth_episodes = range(window_size//2, len(ae_triggers_per_episode) - window_size//2 + 1)
+            else:
+                smoothed_triggers = ae_triggers_per_episode
+                smooth_episodes = range(len(ae_triggers_per_episode))
+            
+            plt.plot(ae_triggers_per_episode, alpha=0.3, label='Raw triggers per episode')
+            if len(ae_triggers_per_episode) >= window_size:
+                plt.plot(smooth_episodes, smoothed_triggers, color='red', linewidth=2, 
+                        label=f'Smoothed (window={window_size})')
+            
+            plt.xlabel('Episode')
+            plt.ylabel('Number of AE Training Triggers')
+            plt.title(f'AE Training Frequency Over Episodes (up to ep {episode})')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
+            plt.close()
+                
+        # epsilon = max(epsilon_end, epsilon * epsilon_decay)
+        # episode_rewards.append(total_reward)
+        # episode_lengths.append(steps)
+
         
         # Reset environment for next episode
         obs, info = env.reset()
@@ -484,8 +679,8 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
 if __name__ == "__main__":
     # create environment
     # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
-    env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
-    # env = DiscreteMiniWorldWrapper(size=10)
+    # env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
+    env = DiscreteMiniWorldWrapper(size=10)
     
     # create agent
     agent = RandomAgentWithSR(env)
