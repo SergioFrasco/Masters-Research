@@ -23,6 +23,9 @@ from models import Autoencoder
 import numpy as np
 import matplotlib.pyplot as plt  # This must come AFTER matplotlib.use('Agg')
 from collections import deque
+import gc
+import pandas as pd
+
 class CubeDetector(nn.Module):
     """Lightweight CNN for cube detection using MobileNetV2"""
     def __init__(self, pretrained=False):
@@ -92,36 +95,36 @@ def get_goal_position(env):
                 return goal_x, goal_z
     return None
 
-def compose_wvf(agent, reward_map):
-    """Compose world value functions from SR and reward map"""
-    grid_size = agent.grid_size
-    state_size = agent.state_size
+# def compose_wvf(agent, reward_map):
+#     """Compose world value functions from SR and reward map"""
+#     grid_size = agent.grid_size
+#     state_size = agent.state_size
     
-    # Initialize reward maps for each state
-    reward_maps = np.zeros((state_size, grid_size, grid_size))
+#     # Initialize reward maps for each state
+#     reward_maps = np.zeros((state_size, grid_size, grid_size))
     
-    # Fill reward maps based on threshold
-    for z in range(grid_size):
-        for x in range(grid_size):
-            curr_reward = reward_map[z, x]
-            idx = z * grid_size + x
-            # Threshold
-            if reward_map[z, x] >= 0.5:
-                reward_maps[idx, z, x] = curr_reward
+#     # Fill reward maps based on threshold
+#     for z in range(grid_size):
+#         for x in range(grid_size):
+#             curr_reward = reward_map[z, x]
+#             idx = z * grid_size + x
+#             # Threshold
+#             if reward_map[z, x] >= 0.5:
+#                 reward_maps[idx, z, x] = curr_reward
     
-    MOVE_FORWARD = 2
-    M_forward = agent.M[MOVE_FORWARD, :, :]
+#     MOVE_FORWARD = 2
+#     M_forward = agent.M[MOVE_FORWARD, :, :]
     
-    # Flatten reward maps
-    R_flat_all = reward_maps.reshape(state_size, -1)
+#     # Flatten reward maps
+#     R_flat_all = reward_maps.reshape(state_size, -1)
     
-    # Compute WVF: V = M @ R^T
-    V_all = M_forward @ R_flat_all.T
+#     # Compute WVF: V = M @ R^T
+#     V_all = M_forward @ R_flat_all.T
     
-    # Reshape back to grid
-    wvf = V_all.T.reshape(state_size, grid_size, grid_size)
+#     # Reshape back to grid
+#     wvf = V_all.T.reshape(state_size, grid_size, grid_size)
     
-    return wvf
+#     return wvf
 
 def plot_wvf(wvf, episode, grid_size, maps_per_row=10):
     """Plot all world value functions in a grid"""
@@ -241,6 +244,14 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     
     obs, info = env.reset()
     agent.reset()
+
+    total_reward = 0
+    steps = 0
+    episode_rewards = []
+    episode_lengths = []
+    epsilon = 1
+    epsilon_end = 0.05
+    epsilon_decay = 0.9995
     
     episode = 0
     total_steps = 0
@@ -254,7 +265,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         
         # Initialize first action
         current_state = agent.get_state_index()
-        current_action = agent.select_action()
+        current_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
         reward_map = np.zeros((env.size, env.size))
 
         # Reset maps for new episode 
@@ -373,7 +384,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             next_state = agent.get_state_index()
             
             # Select NEXT action (SARSA)
-            next_action = agent.select_action()
+            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
             done = terminated or truncated
             
             # Update SR matrix with current and next action
@@ -544,6 +555,9 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             current_state = next_state
             current_action = next_action
             
+            total_reward += reward
+            steps += 1
+            
             if terminated or truncated:
                 break
         
@@ -558,34 +572,26 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         # print(f"Total steps so far: {total_steps}")
         
         # Compose and plot WVF every 50 episodes or on last episode
-        if episode % 10 == 0 or episode == max_episodes:
-            if reward_map.sum() > 0:  # Only if we've detected rewards
-                wvf = compose_wvf(agent, reward_map)
-                plot_wvf(wvf, episode, agent.grid_size)
-            plot_sr_matrix(agent, episode)
+        # if episode % 1000 == 0 or episode == max_episodes:
+        #     if reward_map.sum() > 0:  # Only if we've detected rewards
+        #         wvf = compose_wvf(agent, reward_map)
+        #         plot_wvf(wvf, episode, agent.grid_size)
+        #     plot_sr_matrix(agent, episode)
 
         ae_triggers_per_episode.append(ae_triggers_this_episode)
             
         # Create ground truth reward space
         ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
 
-        if hasattr(env, 'goal_pos'):
-            goal_x, goal_z = env.goal_pos
-            ground_truth_reward_space[goal_z, goal_x] = 1.0
-        elif hasattr(env, '_goal_pos'):
-            goal_x, goal_z = env._goal_pos
-            ground_truth_reward_space[goal_z, goal_x] = 1.0
-        else:
-            if hasattr(env, 'grid'):
-                for z in range(env.size):
-                    for x in range(env.size):
-                        cell = env.grid.get(x, z)
-                        if cell is not None and hasattr(cell, 'type') and cell.type == 'goal':
-                            ground_truth_reward_space[z, x] = 1.0
-        
+        # Get ground truth goal position from environment - for plotting
+        goal_pos = get_goal_position(env)
+        if goal_pos is not None:
+            goal_x, goal_z = goal_pos
+            if 0 <= goal_x < env.size and 0 <= goal_z < env.size:
+                ground_truth_reward_space[goal_z, goal_x] = 1
 
         # Generate visualizations occasionally
-        if episode % 10 == 0 or episode == max_episodes or episode == 0:
+        if episode % 100 == 0 or episode == max_episodes or episode == 0:
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
             # Saving the Move Forward SR
@@ -659,9 +665,9 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
             plt.close()
                 
-        # epsilon = max(epsilon_end, epsilon * epsilon_decay)
-        # episode_rewards.append(total_reward)
-        # episode_lengths.append(steps)
+        epsilon = max(epsilon_end, epsilon * epsilon_decay)
+        episode_rewards.append(episode_reward)
+        episode_lengths.append(step)
 
         
         # Reset environment for next episode
@@ -673,9 +679,33 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     print(f"✓ Total steps: {total_steps}")
     print(f"✓ Total cubes detected: {total_cubes_detected}")
     print(f"✓ Final SR Matrix stats: mean={agent.M.mean():.4f}, std={agent.M.std():.4f}")
-    print(f"\nFinal Reward Map:")
-    print(reward_map)
 
+    return {
+    "rewards": episode_rewards,
+    "lengths": episode_lengths,
+    "final_epsilon": epsilon,
+    "algorithm": "Masters Successor w/ Path Integration",
+}
+
+
+def _find_convergence_episode(all_rewards, window):
+        """Find approximate convergence episode"""
+        mean_rewards = np.mean(all_rewards, axis=0)
+        smoothed = pd.Series(mean_rewards).rolling(window).mean()
+
+        # Simple heuristic: convergence when slope becomes small
+        if len(smoothed) < window * 2:
+            return len(smoothed)
+
+        slopes = np.diff(smoothed[window:])
+        convergence_threshold = 0.001
+
+        for i, slope in enumerate(slopes):
+            if abs(slope) < convergence_threshold:
+                return i + window
+
+        return len(smoothed)
+    
 if __name__ == "__main__":
     # create environment
     # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
@@ -685,10 +715,133 @@ if __name__ == "__main__":
     # create agent
     agent = RandomAgentWithSR(env)
     
+    all_results = {}
+    window=100
+
     # Run training with limits
-    run_successor_agent(
+    successor_results = run_successor_agent(
         env, 
         agent, 
-        max_episodes=500,        
+        max_episodes=2000,        
         max_steps_per_episode=200 
     )
+
+    # Store results
+    algorithms = ['3D Masters Successor']
+    results_list = [successor_results]
+    
+    for alg, result in zip(algorithms, results_list):
+        if alg not in all_results:
+            all_results[alg] = []
+        all_results[alg].append(result)
+
+    # Force cleanup between seeds
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    results = all_results
+
+    """Analyze and plot comparison results"""
+    if not results:
+        print("No results to analyze. Run experiments first.")
+        
+
+    # Create comparison plots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))  
+    # Plot 1: Learning curves (rewards)
+    ax1 = axes[0, 0]
+    for alg_name, runs in results.items():
+        all_rewards = np.array([run["rewards"] for run in runs])
+        mean_rewards = np.mean(all_rewards, axis=0)
+        std_rewards = np.std(all_rewards, axis=0)
+
+        # Rolling average
+        mean_smooth = pd.Series(mean_rewards).rolling(window).mean()
+        std_smooth = pd.Series(std_rewards).rolling(window).mean()
+
+        x = range(len(mean_smooth))
+        ax1.plot(x, mean_smooth, label=f"{alg_name} (mean)", linewidth=2)
+        ax1.fill_between(
+            x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3
+        )
+
+    ax1.set_xlabel("Episode")
+    ax1.set_ylabel("Average Reward")
+    ax1.set_title("Learning Curves (Rewards)")
+    ax1.legend()
+    ax1.grid(True)
+
+    # Plot 2: Episode lengths
+    ax2 = axes[0, 1]
+    for alg_name, runs in results.items():
+        all_lengths = np.array([run["lengths"] for run in runs])
+        mean_lengths = np.mean(all_lengths, axis=0)
+        std_lengths = np.std(all_lengths, axis=0)
+
+        mean_smooth = pd.Series(mean_lengths).rolling(window).mean()
+        std_smooth = pd.Series(std_lengths).rolling(window).mean()
+
+        x = range(len(mean_smooth))
+        ax2.plot(x, mean_smooth, label=f"{alg_name} (mean)", linewidth=2)
+        ax2.fill_between(
+            x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3
+        )
+
+    ax2.set_xlabel("Episode")
+    ax2.set_ylabel("Episode Length (Steps)")
+    ax2.set_title("Learning Efficiency (Steps to Goal)")
+    ax2.legend()
+    ax2.grid(True)
+
+    # Plot 4: Final performance comparison (last 100 episodes)
+    ax4 = axes[1, 0]
+    final_rewards = {}
+    for alg_name, runs in results.items():
+        final_100 = []
+        for run in runs:
+            final_100.extend(run["rewards"][-100:])  # Last 100 episodes
+        final_rewards[alg_name] = final_100
+
+    ax4.boxplot(final_rewards.values(), labels=final_rewards.keys())
+    ax4.set_ylabel("Reward")
+    ax4.set_title("Final Performance (Last 100 Episodes)")
+    ax4.grid(True)
+
+    # Plot 5: Summary statistics
+    ax5 = axes[1, 1]
+    summary_data = []
+    for alg_name, runs in results.items():
+        all_rewards = np.array([run["rewards"] for run in runs])
+        final_performance = np.mean([np.mean(run["rewards"][-100:]) for run in runs])
+        convergence_episode = _find_convergence_episode(all_rewards, window)
+
+        summary_data.append({
+            "Algorithm": alg_name,
+            "Final Performance": f"{final_performance:.3f}",
+            "Convergence Episode": convergence_episode,
+        })
+
+    summary_df = pd.DataFrame(summary_data)
+    ax5.axis("tight")
+    ax5.axis("off")
+    table = ax5.table(
+        cellText=summary_df.values,
+        colLabels=summary_df.columns,
+        cellLoc="center",
+        loc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    ax5.set_title("Summary Statistics")
+
+    plt.tight_layout()
+    save_path = generate_save_path("experiment_comparison.png")
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"Comparison plot saved to: {save_path}")
+
+    # Save numerical results
+    # self.save_results()
+
+    # return summary_df
+ 

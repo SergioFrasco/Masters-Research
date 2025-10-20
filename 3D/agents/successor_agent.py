@@ -38,6 +38,100 @@ class RandomAgentWithSR:
         # Initialize individual reward maps: one per state
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
     
+    def sample_action_with_wvf(self, obs, epsilon=0.0):
+
+        """Sample action using WVF"""
+        # if not self.initialized:
+        #     self.initialize_path_integration(obs)
+            
+        if np.random.uniform(0, 1) < epsilon:
+            return np.random.randint(self.action_size)
+        
+        x, z = self._get_agent_pos_from_env()
+        current_dir = self._get_agent_dir_from_env()
+        
+        # Fixed: neighbors in (x, y) format
+        neighbors = [
+            ((x + 1, z), 0),  # Right
+            ((x, z + 1), 1),  # Down
+            ((x - 1, z), 2),  # Left
+            ((x, z - 1), 3)   # Up
+        ]
+        
+        valid_actions = []
+        valid_values = []
+        
+        for neighbor_pos, target_dir in neighbors:
+            if self._is_valid_position(neighbor_pos):  # Now passing (x, y)
+                next_x, next_y = neighbor_pos  # Unpack as (x, y)
+                max_value_across_maps = np.max(self.wvf[:, next_y, next_x])  # Index as [y, x]
+                action_to_take = self._get_action_toward_direction(current_dir, target_dir)
+                
+                valid_actions.append(action_to_take)
+                valid_values.append(max_value_across_maps)
+        
+        if not valid_actions:
+            return np.random.randint(self.action_size)
+        
+        # Find the best value among valid actions
+        best_value = max(valid_values)
+        best_indices = [i for i, v in enumerate(valid_values) if v == best_value]
+        
+        # If multiple actions have the same best value, choose randomly among them
+        chosen_index = np.random.choice(best_indices)
+        return valid_actions[chosen_index]
+    
+    def _is_valid_position(self, pos):
+        """Check if position is valid by simulating movement"""
+        import numpy as np
+        
+        x, z = pos[0], pos[1]
+        
+        # Store original agent position
+        original_pos = self._get_agent_pos_from_env()
+        original_dir = self._get_agent_dir_from_env()
+        
+        # Calculate direction vector to new position
+        dx = x - original_pos[0]
+        dz = z - original_pos[1]
+        
+        # Try to move the agent to the new position
+        # Set a temporary position
+        new_pos = np.array([x, original_pos[1], z])
+        
+        # Check boundaries first
+        boundary = 9  # Adjust based on your environment
+        if abs(x) > boundary or abs(z) > boundary:
+            return False
+        
+        # Simple distance-based collision check
+        agent_radius = 0.18
+        for entity in self.env.entities:
+            if hasattr(entity, 'pos') and hasattr(entity, 'radius'):
+                dist = np.linalg.norm(new_pos - entity.pos)
+                if dist < agent_radius + entity.radius:
+                    return False
+        
+        return True
+    
+    def _get_action_toward_direction(self, current_dir, target_dir):
+        """Get the action needed to face the target direction from current direction"""
+        if current_dir == target_dir:
+            return 2  # move forward
+        
+        # Calculate the shortest rotation
+        diff = (target_dir - current_dir) % 4
+        
+        if diff == 1:  # need to turn right once
+            return 1  # turn right
+        elif diff == 3:  # need to turn left once (or right 3 times)
+            return 0  # turn left  
+        elif diff == 2:  # need to turn around (180 degrees)
+            # Choose randomly between left and right (both take 2 steps)
+            return np.random.choice([0, 1])
+        
+        return 2  # fallback: move forward
+    
     def _get_agent_pos_from_env(self):
         """Get agent position directly from environment"""
         x = int(round(self.env.agent.pos[0]))
