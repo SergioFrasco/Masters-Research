@@ -55,7 +55,8 @@ class ExperimentRunner:
         episode_lengths = []
         epsilon = 1
         epsilon_end = 0.05
-        epsilon_decay = 0.9995
+        epsilon_decay = 0.9998
+        # epsilon_decay = 1
 
         path_integration_errors = []
 
@@ -80,8 +81,8 @@ class ExperimentRunner:
             agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
             agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
 
+            obs, current_action, manual = execute_turns_until_forward(agent, obs, epsilon, env, manual)
             current_state_idx = agent.get_state_index(obs)
-            current_action = agent.sample_random_action(obs, epsilon=epsilon)
             current_exp = [current_state_idx, current_action, None, None, None]
             
             for step in range(max_steps):
@@ -89,6 +90,7 @@ class ExperimentRunner:
                 agent_pos = agent.internal_pos
                 trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
+                # Store step info BEFORE taking action
                 # Make the normalized grid for step info
                 agent_view = obs['image'][0]
 
@@ -109,14 +111,29 @@ class ExperimentRunner:
                 }
                 trajectory_buffer.append(step_info)
 
+                old_agent_pos = env.agent_pos
+
                 # Take action in environment
                 obs, reward, done, _, _ = env.step(current_action)
-                
+
+                update_sr = True
+                if tuple(env.agent_pos) == tuple(old_agent_pos):
+                    update_sr = False
+
                 # Update internal state based on action taken
                 agent.update_internal_state(current_action)
                 
-                next_state_idx = agent.get_state_index(obs)
+                # next_state_idx = agent.get_state_index(obs)
                 obs['image'] = obs['image'].T
+
+                # Get the next forward action (after any necessary turns)
+                if not done:
+                    obs, next_action, manual = execute_turns_until_forward(agent, obs, epsilon, env, manual)
+                    next_state_idx = agent.get_state_index(obs)
+                else:
+                    # If done, we still need a next state for the update
+                    next_state_idx = agent.get_state_index(obs)
+                    next_action = current_action  # Doesn't matter since episode is done
 
                 # Complete current experience
                 current_exp[2] = next_state_idx
@@ -124,36 +141,37 @@ class ExperimentRunner:
                 current_exp[4] = done
 
                 # ============================= ACTION SELECTION =============================
-                if manual:
-                    print(f"Episode {episode}, Step {step}")
-                    key = getch().lower()
+                # if manual:
+                #     print(f"Episode {episode}, Step {step}")
+                #     key = getch().lower()
                     
-                    if key == 'w':
-                        next_action = 2  # forward
-                    elif key == 'a':
-                        next_action = 0  # turn left
-                    elif key == 'd':
-                        next_action = 1  # turn right
-                    elif key == 's':
-                        next_action = 5  # toggle
-                    elif key == 'q':
-                        manual = False
-                        next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                    elif key == '\r' or key == '\n':
-                        next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                    else:
-                        next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                else:
-                    next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                #     if key == 'w':
+                #         next_action = 2  # forward
+                #     elif key == 'a':
+                #         next_action = 0  # turn left
+                #     elif key == 'd':
+                #         next_action = 1  # turn right
+                #     elif key == 's':
+                #         next_action = 5  # toggle
+                #     elif key == 'q':
+                #         manual = False
+                #         next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                #     elif key == '\r' or key == '\n':
+                #         next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                #     else:
+                #         next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                # else:
+                #     next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
                 # ============================= SR UPDATE =============================
-                if done:
-                    # Terminal state - update without next experience
-                    agent.update(current_exp, next_exp=None)
-                else:
-                    # Non-terminal - create next_exp and update
-                    next_exp = [next_state_idx, next_action, None, None, None]
-                    agent.update(current_exp, next_exp)
+                if update_sr:
+                    if done:
+                        # Terminal state - update without next experience
+                        agent.update(current_exp, next_exp=None)
+                    else:
+                        # Non-terminal - create next_exp and update
+                        next_exp = [next_state_idx, next_action, None, None, None]
+                        agent.update(current_exp, next_exp)
 
                 # ============================= VISION MODEL ====================================
                 
@@ -182,6 +200,7 @@ class ExperimentRunner:
                     ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
                     predicted_reward_map_tensor = ae_model(ae_input_tensor)
                     predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
+                    predicted_reward_map_2d = np.clip(predicted_reward_map_2d, 0.0, 1.0) 
 
                 # Mark position as visited (using path integration)
                 agent.visited_positions[agent_position[1], agent_position[0]] = True
@@ -253,6 +272,7 @@ class ExperimentRunner:
                         if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
                             if not agent.visited_positions[global_y, global_x]:
                                 predicted_value = predicted_reward_map_2d[view_y, view_x]
+                                predicted_value = np.clip(predicted_value, 0.0, 1.0)
                                 agent.true_reward_map[global_y, global_x] = predicted_value
 
                 # Extract the 7x7 target from the true reward map
@@ -330,12 +350,9 @@ class ExperimentRunner:
 
                 # ============================= EPISODE END CHECK =============================
                 if done:
-                    # Prepare next episode's starting action
-                    current_exp = [next_state_idx, next_action, None, None, None]
-                    current_action = next_action
-                    break  # Exit the step loop
+                    break
                 else:
-                    # Continue episode - move to next transition
+                    # Move to next transition (forward action only)
                     current_exp = next_exp
                     current_action = next_action
 
@@ -751,7 +768,25 @@ class ExperimentRunner:
         
         return loss.item()
 
+def execute_turns_until_forward(agent, obs, epsilon, env, manual=False):
+    """
+    Keep executing turn actions until a forward action is selected.
+    Returns the final observation after all turns and the forward action.
+    """
+    while True:
 
+        action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+        
+        # If it's a forward, we're done turning
+        if action == 2:  # forward or toggle
+            return obs, action, manual
+        
+        # Execute the turn action
+        obs, _, _, _, _ = env.step(action)
+        obs['image'] = obs['image'].T
+        
+        # Update agent's internal state for the turn
+        agent.update_internal_state(action)
 
 def main():
     """Run the experiment comparison with path integration"""
