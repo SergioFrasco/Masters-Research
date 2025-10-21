@@ -1,7 +1,8 @@
 from miniworld.envs.oneroom import OneRoom
+from miniworld.miniworld import MiniWorldEnv
 import numpy as np
 import math
-from miniworld.entity import Box, Ball
+from miniworld.entity import Box
 
 class DiscreteMiniWorldWrapper(OneRoom):
     def __init__(
@@ -43,30 +44,42 @@ class DiscreteMiniWorldWrapper(OneRoom):
         return super().turn_agent(custom_angle)
     
     def step(self, action):
-        obs, reward, terminated, truncated, info = super().step(action)
-
+        # Call the grandparent step method (MiniWorldEnv), skipping OneRoom's step
+        obs, reward, termination, truncation, info = MiniWorldEnv.step(self, action)
+        
+        # Check collision with red box
+        if self.near(self.box_red):
+            reward += self._reward()
+            termination = True
+        
+        # Check collision with blue box
+        if self.near(self.box_blue):
+            reward += self._reward()
+            termination = True
+        
+        # Calculate distances for info
         agent_pos = self.agent.pos
         
-        # Calculate distance to box
-        box_pos = self.box.pos
-        distance_to_box = np.sqrt((agent_pos[0] - box_pos[0])**2 + (agent_pos[2] - box_pos[2])**2)
+        # Calculate distance to red box
+        box_red_pos = self.box_red.pos
+        distance_to_box = np.sqrt((agent_pos[0] - box_red_pos[0])**2 + (agent_pos[2] - box_red_pos[2])**2)
         
-        # Calculate distance to ball
-        ball_pos = self.ball.pos
-        distance_to_ball = np.sqrt((agent_pos[0] - ball_pos[0])**2 + (agent_pos[2] - ball_pos[2])**2)
+        # Calculate distance to blue box
+        box_blue_pos = self.box_blue.pos
+        distance_to_ball = np.sqrt((agent_pos[0] - box_blue_pos[0])**2 + (agent_pos[2] - box_blue_pos[2])**2)
         
         # Add both distances to info dictionary
         info['distance_to_box'] = distance_to_box
         info['distance_to_ball'] = distance_to_ball
         info['distance_to_goal'] = min(distance_to_box, distance_to_ball)  # Closest target
         
-        return obs, reward, terminated, truncated, info
+        return obs, reward, termination, truncation, info
 
     def _gen_world(self):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
 
-        self.box = self.place_entity(Box(color="red"))
-        self.ball = self.place_entity(Ball(color="blue"))
+        self.box_red = self.place_entity(Box(color="red"))
+        self.box_blue = self.place_entity(Box(color="blue"))  #
         self.place_agent()
 
 # ================= Override placement methods to enforce discrete agent placement =======================
