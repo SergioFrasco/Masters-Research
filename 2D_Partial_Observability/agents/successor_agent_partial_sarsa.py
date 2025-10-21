@@ -19,7 +19,8 @@ class SuccessorAgentPartialSARSA:
         self.action_size = 3
         
         # initialization of the SR
-        self.M = np.zeros((self.action_size, self.state_size, self.state_size))
+        # self.M = np.zeros((self.action_size, self.state_size, self.state_size))
+        self.M = np.array([np.eye(self.state_size) for _ in range(self.action_size)])
         # self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
 
         self.w = np.zeros([self.state_size])

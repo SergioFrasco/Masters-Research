@@ -1,7 +1,7 @@
 from miniworld.envs.oneroom import OneRoom
 import numpy as np
 import math
-from miniworld.entity import Box
+from miniworld.entity import Box, Ball
 
 class DiscreteMiniWorldWrapper(OneRoom):
     def __init__(
@@ -45,17 +45,20 @@ class DiscreteMiniWorldWrapper(OneRoom):
     def step(self, action):
         obs, reward, terminated, truncated, info = super().step(action)
 
-        # Calculate distance to goal (box object)
         agent_pos = self.agent.pos
-        goal_pos = self.box.pos  # The rewarding object in OneRoom is self.box
         
-        # Calculate Euclidean distance (2D, ignoring y-axis)
-        distance = np.sqrt((agent_pos[0] - goal_pos[0])**2 + (agent_pos[2] - goal_pos[2])**2)
-
-        # print("Distance to goal: ", distance)
+        # Calculate distance to box
+        box_pos = self.box.pos
+        distance_to_box = np.sqrt((agent_pos[0] - box_pos[0])**2 + (agent_pos[2] - box_pos[2])**2)
         
-        # Add distance to info dictionary
-        info['distance_to_goal'] = distance
+        # Calculate distance to ball
+        ball_pos = self.ball.pos
+        distance_to_ball = np.sqrt((agent_pos[0] - ball_pos[0])**2 + (agent_pos[2] - ball_pos[2])**2)
+        
+        # Add both distances to info dictionary
+        info['distance_to_box'] = distance_to_box
+        info['distance_to_ball'] = distance_to_ball
+        info['distance_to_goal'] = min(distance_to_box, distance_to_ball)  # Closest target
         
         return obs, reward, terminated, truncated, info
 
@@ -63,6 +66,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
 
         self.box = self.place_entity(Box(color="red"))
+        self.ball = self.place_entity(Ball(color="blue"))
         self.place_agent()
 
 # ================= Override placement methods to enforce discrete agent placement =======================
