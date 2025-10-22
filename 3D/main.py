@@ -25,64 +25,116 @@ import matplotlib.pyplot as plt  # This must come AFTER matplotlib.use('Agg')
 from collections import deque
 import gc
 import pandas as pd
+from train_advanced_cube_detector2 import CubeDetector
 
-class CubeDetector(nn.Module):
-    """Lightweight CNN for cube detection using MobileNetV2"""
-    def __init__(self, pretrained=False):
-        super(CubeDetector, self).__init__()
-        # Use MobileNetV2 as backbone
-        self.backbone = models.mobilenet_v2(pretrained=pretrained)
-        # Replace final classifier
-        self.backbone.classifier[1] = nn.Linear(self.backbone.last_channel, 2)
+# class CubeDetector(nn.Module):
+#     """Lightweight CNN for cube detection using MobileNetV2"""
+#     def __init__(self, pretrained=False):
+#         super(CubeDetector, self).__init__()
+#         # Use MobileNetV2 as backbone
+#         self.backbone = models.mobilenet_v2(pretrained=pretrained)
+#         # Replace final classifier
+#         self.backbone.classifier[1] = nn.Linear(self.backbone.last_channel, 2)
     
-    def forward(self, x):
-        return self.backbone(x)
+#     def forward(self, x):
+#         return self.backbone(x)
 
-def load_cube_detector(model_path='models/cube_detector.pth', force_cpu=False):
+def load_cube_detector(model_path='models/advanced_cube_detector.pth', force_cpu=False):
     """Load the trained cube detector model"""
-    # Force CPU to avoid CUDA compatibility issues
     if force_cpu:
         device = torch.device('cpu')
         print("Forcing CPU mode to avoid CUDA compatibility issues")
     else:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    model = CubeDetector(pretrained=False).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model = CubeDetector().to(device)
+    
+    # Load checkpoint
+    checkpoint = torch.load(model_path, map_location=device)
+    
+    # Handle both old and new checkpoint formats
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+        pos_mean = checkpoint.get('pos_mean', 0.0)
+        pos_std = checkpoint.get('pos_std', 1.0)
+    else:
+        # Old format - just state dict
+        model.load_state_dict(checkpoint)
+        pos_mean = 0.0
+        pos_std = 1.0
+    
     model.eval()
     print(f"✓ Cube detector loaded on {device}")
-    return model, device
+    return model, device, pos_mean, pos_std
 
-def detect_cube(model, obs, device, transform):
-    """Run cube detection on observation"""
-    # Extract image from observation
+def detect_cube(model, obs, device, transform, pos_mean=0.0, pos_std=1.0):
+    """Run cube detection with classification + regression output"""
+    # Extract image
     if isinstance(obs, dict) and 'image' in obs:
         img = obs['image']
     else:
         img = obs
     
-    # Convert to PIL Image (MiniWorld returns numpy array)
+    # Convert to PIL Image
     if isinstance(img, np.ndarray):
-        # If shape is (C, H, W), transpose to (H, W, C)
         if img.shape[0] == 3 or img.shape[0] == 4:
             img = np.transpose(img, (1, 2, 0))
-        # Convert to uint8 if needed
         if img.dtype != np.uint8:
             img = (img * 255).astype(np.uint8)
-        # Remove alpha channel if present
         if img.shape[2] == 4:
             img = img[:, :, :3]
         img = Image.fromarray(img)
     
-    # Apply transform and add batch dimension
+    # Apply transform and move to device
     img_tensor = transform(img).unsqueeze(0).to(device)
     
-    # Run inference
+    # Initialize output variables
+    predicted_class_idx = None
+    confidence = None
+    regression_values = None
+    
+    # Inference
     with torch.no_grad():
-        output = model(img_tensor)
-        _, predicted = torch.max(output, 1)
+        model_output = model(img_tensor)
         
-    return predicted.item() == 1  # Return True if cube detected (class 1)
+        # Handle model output structure
+        if isinstance(model_output, (tuple, list)) and len(model_output) == 2:
+            classification_output, regression_output = model_output
+            probs = torch.softmax(classification_output, dim=1)
+            predicted_class_idx = torch.argmax(probs, dim=1).item()
+            confidence = probs[0, predicted_class_idx].item()
+            regression_values = regression_output.squeeze().cpu().numpy()
+            
+        elif isinstance(model_output, dict):
+            classification_output = model_output.get('classification', None)
+            regression_output = model_output.get('regression', None)
+            
+            if classification_output is not None:
+                probs = torch.softmax(classification_output, dim=1)
+                predicted_class_idx = torch.argmax(probs, dim=1).item()
+                confidence = probs[0, predicted_class_idx].item()
+            
+            if regression_output is not None:
+                regression_values = regression_output.squeeze().cpu().numpy()
+        
+        else:
+            probs = torch.softmax(model_output, dim=1)
+            predicted_class_idx = torch.argmax(probs, dim=1).item()
+            confidence = probs[0, predicted_class_idx].item()
+    
+    # Denormalize regression values
+    if regression_values is not None:
+        regression_values = regression_values * pos_std + pos_mean
+    
+    # Decode class index to label
+    CLASS_NAMES = ['None', 'Red', 'Blue', 'Both']
+    label = CLASS_NAMES[predicted_class_idx] if predicted_class_idx is not None else "Unknown"
+    
+    return {
+        "label": label,
+        "confidence": confidence,
+        "regression": regression_values
+    }
 
 def get_goal_position(env):
     """Get the ground truth position of the goal/cube in the environment"""
@@ -217,16 +269,16 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     print(f"Max episodes: {max_episodes}")
     print(f"Max steps per episode: {max_steps_per_episode}\n")
     print("Loading cube detector model...")
-    cube_model, device = load_cube_detector('models/cube_detector.pth', force_cpu=False)
+    # 1. Load the model
+    cube_model, device, pos_mean, pos_std = load_cube_detector('models/advanced_cube_detector.pth', force_cpu=False)
     
-    # Define transform (same as training)
+    # 2. Define transform
     transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((128, 128)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                           std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    print("Transform initialized\n")
+
 
     # Vision Model from 2D
     print("Loading 2D vision model...")
@@ -282,8 +334,12 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             agent_pos = agent._get_agent_pos_from_env()
             trajectory.append((agent_pos[0], agent_pos[1], current_action))
 
-            cube_detected = detect_cube(cube_model, obs, device, transform)
+            # model_output = detect_cube(cube_model, obs, device, transform)
+            # print(model_output)
+            
 
+            #TODO REMOVE - this is just for testing
+            cube_detected = False
             if cube_detected:
                 episode_cubes += 1
                 total_cubes_detected += 1
@@ -323,22 +379,35 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             total_steps += 1
             episode_reward += reward
 
-            # CUBE DETECTION: Run model on observation
-            cube_detected = detect_cube(cube_model, obs, device, transform)
+            # 4. NOW you can detect cubes
+            detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
+            
+            label = detection_result['label']
+            confidence = detection_result['confidence']
+            regression_values = detection_result['regression']
+            
+            print(f"Detected: {label} with confidence {confidence:.3f}")
+            if regression_values is not None:
+                print(f"Positions: {regression_values}")
 
             # Save the frame - ensure render mode is "rgb_array"
-            # frame = env.render()
-            # if frame is not None:
-            #     if isinstance(frame, np.ndarray):
-            #         img = Image.fromarray(frame)
-            #     else:
-            #         img = frame
+            frame = env.render()
+            if frame is not None:
+                if isinstance(frame, np.ndarray):
+                    img = Image.fromarray(frame)
+                else:
+                    img = frame
                 
-            #     # Save RGB frame
-            #     save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
-            #     img.save(save_frame_path)
-            #     print(f"  Saved frame: {save_frame_path}")
+                # Save RGB frame
+                save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
+                img.save(save_frame_path)
+                print(f"  Saved frame: {save_frame_path}")
+
+            time.sleep(10) 
             
+            #TODO REMOVE - this is just for testing
+            cube_detected = False
+
             if cube_detected:
                 episode_cubes += 1
                 total_cubes_detected += 1
@@ -709,8 +778,8 @@ def _find_convergence_episode(all_rewards, window):
 if __name__ == "__main__":
     # create environment
     # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
-    # env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
-    env = DiscreteMiniWorldWrapper(size=10)
+    env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
+    # env = DiscreteMiniWorldWrapper(size=10)
     
     # create agent
     agent = RandomAgentWithSR(env)
