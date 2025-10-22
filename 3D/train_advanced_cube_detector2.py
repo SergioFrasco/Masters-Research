@@ -328,4 +328,4 @@ def load_model_and_predict(model_path, image_path):
 # ============================
 
 if __name__ == "__main__":
-    train_model("dataset/dataset_3d/labels.csv", "dataset/dataset_3d", num_epochs=15, batch_size=32, lr=1e-4)
+    train_model("dataset/dataset_3d/labels.csv", "dataset/dataset_3d", num_epochs=30, batch_size=32, lr=1e-4)
