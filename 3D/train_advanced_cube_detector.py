@@ -143,8 +143,8 @@ def train_model(csv_path, img_root, num_epochs=10, batch_size=32, lr=1e-4):
 
         print(f"Epoch {epoch+1}: Train Loss={avg_train_loss:.4f} | Test Acc={val_acc:.3f}")
 
-    torch.save(model.state_dict(), "cube_detector.pth")
-    print("\n✅ Training complete! Model saved to cube_detector.pth")
+    torch.save(model.state_dict(), "advanced_cube_detector.pth")
+    print("\n✅ Training complete! Model saved to advanced_cube_detector.pth")
 
 
 # ============================
