@@ -198,63 +198,45 @@ class RandomAgentWithSR:
         self.prev_state = None
         self.prev_action = None
     
-    def create_egocentric_observation(self, goal_global_pos=None, matrix_size=11):
+    def create_egocentric_observation(self, goal_pos_red=None, goal_pos_blue=None, matrix_size=13):
         """
-        Create a mock egocentric observation matrix where agent is always at 
-        bottom-middle facing upward.
+        Create an egocentric observation matrix where:
+        - Agent is always at the bottom-middle cell, facing upward.
+        - Goal positions (red, blue) are given in the agent's egocentric coordinates.
+            (x = right, z = forward)
         
         Args:
-            goal_global_pos: Tuple (goal_x, goal_z) in global coordinates, or None
-            matrix_size: Size of the square matrix (default 11x11)
-        
+            goal_pos_red  : Tuple (x_right, z_forward) or None
+            goal_pos_blue : Tuple (x_right, z_forward) or None
+            matrix_size   : Size of the square matrix (default 13x13)
+
         Returns:
             ego_matrix: numpy array of shape (matrix_size, matrix_size)
+                        Red goal marked as 1, Blue goal as 1
         """
+        import numpy as np
+
         # Initialize empty egocentric matrix
         ego_matrix = np.zeros((matrix_size, matrix_size), dtype=np.float32)
-        
-        # If no goal detected, return empty matrix
-        if goal_global_pos is None:
-            return ego_matrix
-        
-        # Get agent's current position and direction from environment
-        agent_x, agent_z = self._get_agent_pos_from_env()
-        agent_dir = self._get_agent_dir_from_env()
-        goal_x, goal_z = goal_global_pos
-        
-        # Calculate offset from agent to goal in GLOBAL coordinates
-        dx = goal_x - agent_x  # Positive = goal is east of agent
-        dz = goal_z - agent_z  # Positive = goal is south of agent
-        
-        # Agent is always at bottom-middle in egocentric view
-        agent_ego_row = matrix_size - 1  # Bottom row (index 10 for 11x11)
-        agent_ego_col = matrix_size // 2  # Middle column (index 5 for 11x11)
-        
-        # Transform global offset to egocentric coordinates based on agent direction
-        if agent_dir == 3:  # Agent facing North in global frame
-            ego_row = agent_ego_row + dz
-            ego_col = agent_ego_col + dx
-            
-        elif agent_dir == 0:  # Agent facing East in global frame
-            ego_row = agent_ego_row - dx
-            ego_col = agent_ego_col + dz
-            
-        elif agent_dir == 1:  # Agent facing South in global frame
-            ego_row = agent_ego_row - dz
-            ego_col = agent_ego_col - dx
-            
-        elif agent_dir == 2:  # Agent facing West in global frame
-            ego_row = agent_ego_row + dx
-            ego_col = agent_ego_col - dz
-        
-        # Check if goal position is within the egocentric matrix bounds
-        if 0 <= ego_row < matrix_size and 0 <= ego_col < matrix_size:
-            ego_matrix[int(ego_row), int(ego_col)] = 1.0
-        else:
-            print("Error: Goal out of egocentric view bounds")
-            print(f"  Agent pos: ({agent_x}, {agent_z}), dir: {agent_dir}")
-            print(f"  Goal pos: ({goal_x}, {goal_z})")
-            print(f"  Offsets: dx={dx}, dz={dz}")
-            print(f"  Ego coords: row={ego_row}, col={ego_col}")
-        
+
+        # Agent position (bottom-center)
+        agent_row = matrix_size - 1
+        agent_col = matrix_size // 2
+
+        def place_goal(pos, value):
+            if pos is None:
+                return
+            gx, gz = pos  # (right, forward)
+            # Convert to matrix coordinates
+            ego_row = agent_row - gz  # forward is upward (smaller row)
+            ego_col = agent_col - gx  # right is right (larger col)
+
+            # Check bounds and place marker
+            if 0 <= ego_row < matrix_size and 0 <= ego_col < matrix_size:
+                ego_matrix[int(ego_row), int(ego_col)] = value
+
+        # Place red and blue goals
+        place_goal(goal_pos_red, 1.0)
+        place_goal(goal_pos_blue, 1.0)
+
         return ego_matrix

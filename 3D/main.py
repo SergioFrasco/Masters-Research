@@ -334,33 +334,63 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             agent_pos = agent._get_agent_pos_from_env()
             trajectory.append((agent_pos[0], agent_pos[1], current_action))
 
-            # model_output = detect_cube(cube_model, obs, device, transform)
-            # print(model_output)
+            # First (before step) Detect type of cube in the observation, as well as position regression - marked rx, rz, bx, bz
+            # where +x is forward, +z is right from agent perspective
+            detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
             
+            label = detection_result['label']
+            confidence = detection_result['confidence']
+            regression_values = detection_result['regression'] # rx, rz, bx, bz
+            regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
+            rx, rz, bx, bz = regression_values  # forward, right for each color
+            
+            # print(f"Detected: {label} with confidence {confidence:.3f}")
+            # if regression_values is not None:
+                # print(f"Positions: {regression_values}")
 
-            #TODO REMOVE - this is just for testing
-            cube_detected = False
-            if cube_detected:
-                episode_cubes += 1
-                total_cubes_detected += 1
+
+            if label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
+                # Update counters
+                if label == 'Red' or label == 'Blue':
+                    episode_cubes += 1
+                    total_cubes_detected += 1
+                else:
+                    episode_cubes += 2
+                    total_cubes_detected += 2
+
+                # We have:
+                # pos x is forward
+                # pos z is right
+
+                # We need:
+                # pos x is right
+                # pos z is south
+
+                # so swap x and z and make x negative
                 
-                # Get ground truth goal position from environment
-                goal_pos = get_goal_position(env)
-                if goal_pos is not None:
-                    goal_x, goal_z = goal_pos
-                    if 0 <= goal_x < env.size and 0 <= goal_z < env.size:
-                        reward_map[goal_z, goal_x] = 1
+                # Check goal position from model
+                if label == 'Red':
+                    goal_pos_red  = (-rz, rx)
+                    goal_pos_blue = None
+                elif label == 'Blue':
+                    goal_pos_blue = (-bz, bx)
+                    goal_pos_red = None
+                elif label == 'Both': 
+                    goal_pos_red  = (-rz, rx)
+                    goal_pos_blue = (-bz, bx)
 
-                    # Create egocentric observation matrix
-                    ego_obs = agent.create_egocentric_observation(
-                        goal_global_pos=(goal_x, goal_z),
-                        matrix_size=13
-                    )
+                # Create egocentric observation matrix
+                ego_obs = agent.create_egocentric_observation(
+                    goal_pos_red=goal_pos_red,
+                    goal_pos_blue=goal_pos_blue,
+                    matrix_size=13
+                )
             
             else:
                 # No cube detected - create empty egocentric observation
                 ego_obs = agent.create_egocentric_observation(
-                    goal_global_pos=None,
+                    goal_pos_red=None,
+                    goal_pos_blue=None,
                     matrix_size=13
                 )
 
@@ -379,73 +409,78 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             total_steps += 1
             episode_reward += reward
 
-            # 4. NOW you can detect cubes
+            # Save the frame - ensure render mode is "rgb_array"
+            # frame = env.render()
+            # if frame is not None:
+            #     if isinstance(frame, np.ndarray):
+            #         img = Image.fromarray(frame)
+            #     else:
+            #         img = frame
+                
+            #     # Save RGB frame
+            #     save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
+            #     img.save(save_frame_path)
+            #     print(f"  Saved frame: {save_frame_path}")
+
+            # time.sleep(10) 
+
+            # Second (after step) Detect type of cube in the observation, as well as position regression - marked rx, rz, bx, bz
+            # where +x is forward, +z is right from agent perspective
             detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
             
             label = detection_result['label']
             confidence = detection_result['confidence']
-            regression_values = detection_result['regression']
+            regression_values = detection_result['regression'] # rx, rz, bx, bz
+            regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
+            rx, rz, bx, bz = regression_values  # forward, right for each color
             
-            print(f"Detected: {label} with confidence {confidence:.3f}")
-            if regression_values is not None:
-                print(f"Positions: {regression_values}")
+            # print(f"Detected: {label} with confidence {confidence:.3f}")
+            # if regression_values is not None:
+            #     print(f"Positions: {regression_values}")
 
-            # Save the frame - ensure render mode is "rgb_array"
-            frame = env.render()
-            if frame is not None:
-                if isinstance(frame, np.ndarray):
-                    img = Image.fromarray(frame)
+            if label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
+                # Update counters
+                if label == 'Red' or label == 'Blue':
+                    episode_cubes += 1
+                    total_cubes_detected += 1
                 else:
-                    img = frame
+                    episode_cubes += 2
+                    total_cubes_detected += 2
+
+                # We have:
+                # pos x is forward
+                # pos z is right
+
+                # We need:
+                # pos x is right
+                # pos z is south
+
+                # so swap x and z and make x negative
                 
-                # Save RGB frame
-                save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
-                img.save(save_frame_path)
-                print(f"  Saved frame: {save_frame_path}")
+                # Check goal position from model
+                if label == 'Red':
+                    goal_pos_red  = (-rz, rx)
+                    goal_pos_blue = None
+                elif label == 'Blue':
+                    goal_pos_blue = (-bz, bx)
+                    goal_pos_red = None
+                elif label == 'Both': 
+                    goal_pos_red  = (-rz, rx)
+                    goal_pos_blue = (-bz, bx)
 
-            time.sleep(10) 
-            
-            #TODO REMOVE - this is just for testing
-            cube_detected = False
-
-            if cube_detected:
-                episode_cubes += 1
-                total_cubes_detected += 1
-                
-                # Get ground truth goal position from environment
-                goal_pos = get_goal_position(env)
-                if goal_pos is not None:
-                    goal_x, goal_z = goal_pos
-                    if 0 <= goal_x < env.size and 0 <= goal_z < env.size:
-                        reward_map[goal_z, goal_x] = 1
-
-                    # Create egocentric observation matrix
-                    ego_obs = agent.create_egocentric_observation(goal_global_pos=(goal_x, goal_z),matrix_size=13)
-                    
-                    # # ANALYZE FIRST DETECTION
-                    # print("\n" + "="*80)
-                    # print("🎯 CUBE DETECTED - SAVING AND EXITING FOR ANALYSIS")
-                    # print("="*80)
-                    # print(f"Episode: {episode}, Step: {step}")
-                    # print(f"Agent position: {agent._get_agent_pos_from_env()}")
-                    # print(f"Agent direction: {agent._get_agent_dir_from_env()}")
-                    # print(f"Goal position: ({goal_x}, {goal_z})")
-                    # print("\nEgocentric Observation Matrix (15x15):")
-                    # print(ego_obs)
-                    # print("\nAgent is at [14, 7] (bottom-middle) facing upward")
-                    
-                    
-                    # print("\n" + "="*80)
-                    # print("Exiting program for analysis...")
-                    # print("="*80)
-                    
-                    # # Exit the program
-                    # import sys
-                    # sys.exit(0)
-
+                # Create egocentric observation matrix
+                ego_obs = agent.create_egocentric_observation(
+                    goal_pos_red=goal_pos_red,
+                    goal_pos_blue=goal_pos_blue,
+                    matrix_size=13
+                )      
             else:
                 # No cube detected - create empty egocentric observation
-                ego_obs = agent.create_egocentric_observation(goal_global_pos=None,matrix_size=13)
+                ego_obs = agent.create_egocentric_observation(
+                    goal_pos_red=None,
+                    goal_pos_blue=None,
+                    matrix_size=13
+                )
                     
             # print(reward_map)
             
@@ -778,8 +813,8 @@ def _find_convergence_episode(all_rewards, window):
 if __name__ == "__main__":
     # create environment
     # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
-    env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
-    # env = DiscreteMiniWorldWrapper(size=10)
+    # env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
+    env = DiscreteMiniWorldWrapper(size=10)
     
     # create agent
     agent = RandomAgentWithSR(env)
