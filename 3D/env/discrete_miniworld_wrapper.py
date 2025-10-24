@@ -53,7 +53,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
             termination = True
         
         # Check collision with blue box
-        if self.near(self.box_blue):
+        elif self.near(self.box_blue):
             reward += self._reward()
             termination = True
         
