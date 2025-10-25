@@ -3,6 +3,7 @@ from miniworld.miniworld import MiniWorldEnv
 import numpy as np
 import math
 from miniworld.entity import Box
+from miniworld.math import intersect_circle_segs
 
 class DiscreteMiniWorldWrapper(OneRoom):
     def __init__(
@@ -43,6 +44,23 @@ class DiscreteMiniWorldWrapper(OneRoom):
             
         return super().turn_agent(custom_angle)
     
+    def near(self, ent0, ent1=None):
+        """
+        Override near to check if entities are on the same grid cell
+        """
+        if ent1 is None:
+            ent1 = self.agent
+        
+        # Get grid positions
+        grid_x0 = int(round(ent0.pos[0] / self.grid_size))
+        grid_z0 = int(round(ent0.pos[2] / self.grid_size))
+        
+        grid_x1 = int(round(ent1.pos[0] / self.grid_size))
+        grid_z1 = int(round(ent1.pos[2] / self.grid_size))
+        
+        # Check if on same grid cell
+        return grid_x0 == grid_x1 and grid_z0 == grid_z1
+                              
     def step(self, action):
         # Call the grandparent step method (MiniWorldEnv), skipping OneRoom's step
         obs, reward, termination, truncation, info = MiniWorldEnv.step(self, action)
@@ -79,7 +97,9 @@ class DiscreteMiniWorldWrapper(OneRoom):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
 
         self.box_red = self.place_entity(Box(color="red"))
+        self.box_red.radius = 0  # No collision
         self.box_blue = self.place_entity(Box(color="blue"))  #
+        self.box_blue.radius = 0  # No collision
         self.place_agent()
 
 # ================= Override placement methods to enforce discrete agent placement =======================
@@ -218,3 +238,37 @@ class DiscreteMiniWorldWrapper(OneRoom):
 
         self.entities.append(ent)
         return ent
+    
+    def intersect(self, ent, pos, radius=None):
+        """
+        Override to check walls but allow agent to pass through boxes
+        """
+        if radius is None:
+            radius = ent.radius
+        
+        # Ignore the Y position
+        px, _, pz = pos
+        pos = np.array([px, 0, pz])
+
+        # Check for intersection with walls (keep this from base class)
+        if intersect_circle_segs(pos, radius, self.wall_segs):
+            return True
+
+        # Check for entity intersection
+        for ent2 in self.entities:
+            # Entities can't intersect with themselves
+            if ent2 is ent:
+                continue
+            
+            # Skip collision check with boxes - THIS IS THE KEY ADDITION
+            if isinstance(ent2, Box):
+                continue
+
+            px, _, pz = ent2.pos
+            pos2 = np.array([px, 0, pz])
+
+            d = np.linalg.norm(pos2 - pos)
+            if d < radius + ent2.radius:
+                return ent2
+
+        return None

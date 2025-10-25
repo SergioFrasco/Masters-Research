@@ -136,17 +136,6 @@ def detect_cube(model, obs, device, transform, pos_mean=0.0, pos_std=1.0):
         "regression": regression_values
     }
 
-def get_goal_position(env):
-    """Get the ground truth position of the goal/cube in the environment"""
-    # Access the goal entity from the environment
-    if hasattr(env, 'entities') and len(env.entities) > 0:
-        for entity in env.entities:
-            if entity.color == 'red':  # color is already a string
-                goal_x = int(round(entity.pos[0]))
-                goal_z = int(round(entity.pos[2]))
-                return goal_x, goal_z
-    return None
-
 # def compose_wvf(agent, reward_map):
 #     """Compose world value functions from SR and reward map"""
 #     grid_size = agent.grid_size
@@ -683,19 +672,53 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         #     plot_sr_matrix(agent, episode)
 
         ae_triggers_per_episode.append(ae_triggers_this_episode)
-            
+
         # Create ground truth reward space
         ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
 
-        # Get ground truth goal position from environment - for plotting
-        goal_pos = get_goal_position(env)
-        if goal_pos is not None:
-            goal_x, goal_z = goal_pos
-            if 0 <= goal_x < env.size and 0 <= goal_z < env.size:
-                ground_truth_reward_space[goal_z, goal_x] = 1
+        box_red_pos = env.box_red.pos
+        box_blue_pos = env.box_blue.pos
+
+        # Convert to grid coordinates
+        red_x = int(round(box_red_pos[0]))
+        red_z = int(round(box_red_pos[2]))
+        blue_x = int(round(box_blue_pos[0]))
+        blue_z = int(round(box_blue_pos[2]))
+
+        # Mark both boxes in ground truth reward space
+        if 0 <= red_x < env.size and 0 <= red_z < env.size:
+            ground_truth_reward_space[red_z, red_x] = 1
+        if 0 <= blue_x < env.size and 0 <= blue_z < env.size:
+            ground_truth_reward_space[blue_z, blue_x] = 1
 
         # Generate visualizations occasionally
-        if episode % 100 == 0 or episode == max_episodes or episode == 0:
+        if episode % 1 == 0 or episode == max_episodes or episode == 0:
+
+            # # Right before creating ground_truth_reward_space
+            # print(f"\n=== Debug Info for Episode {episode} ===")
+            # print(f"Agent position: ({agent_x}, {agent_z})")
+            # print(f"Agent raw pos: {env.agent.pos}")
+
+            # box_red_pos = env.box_red.pos
+            # box_blue_pos = env.box_blue.pos
+            # print(f"Red box raw pos: {box_red_pos}")
+            # print(f"Blue box raw pos: {box_blue_pos}")
+
+            # # Convert to grid coordinates
+            # red_x = int(round(box_red_pos[0]))
+            # red_z = int(round(box_red_pos[2]))
+            # blue_x = int(round(box_blue_pos[0]))
+            # blue_z = int(round(box_blue_pos[2]))
+
+            # print(f"Red box grid: ({red_x}, {red_z})")
+            # print(f"Blue box grid: ({blue_x}, {blue_z})")
+
+            # # Check what's in true_reward_map at those locations
+            # print(f"true_reward_map[{red_z}, {red_x}] = {agent.true_reward_map[red_z, red_x]}")
+            # print(f"true_reward_map[{blue_z}, {blue_x}] = {agent.true_reward_map[blue_z, blue_x]}")
+            # print(f"ground_truth[{red_z}, {red_x}] = {ground_truth_reward_space[red_z, red_x]}")
+            # print(f"ground_truth[{blue_z}, {blue_x}] = {ground_truth_reward_space[blue_z, blue_x]}")
+
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
             # Saving the Move Forward SR
@@ -708,6 +731,10 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             plt.tight_layout()
             plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
             plt.close()
+
+            box_red_pos = env.box_red.pos
+            box_blue_pos = env.box_blue.pos
+
 
             # Create vision plots
             fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
@@ -731,12 +758,12 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             ax2.plot(6, 12, 'ro', markersize=8, label='Agent')
             plt.colorbar(im2, ax=ax2, fraction=0.046)
 
-            im3 = ax3.imshow(agent.true_reward_map, cmap='viridis', vmin=vmin, vmax=vmax)
+            im3 = ax3.imshow(agent.true_reward_map, cmap='viridis', origin='lower', vmin=vmin, vmax=vmax)
             ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_z})')
             ax3.plot(agent_x, agent_z, 'ro', markersize=8, label='Agent')
             plt.colorbar(im3, ax=ax3, fraction=0.046)
 
-            im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis', vmin=vmin, vmax=vmax)
+            im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis', origin='lower', vmin=vmin, vmax=vmax)
             ax4.set_title('Ground Truth Reward Space')
             plt.colorbar(im4, ax=ax4, fraction=0.046)
 

@@ -134,8 +134,9 @@ class RandomAgentWithSR:
     
     def _get_agent_pos_from_env(self):
         """Get agent position directly from environment"""
-        x = int(round(self.env.agent.pos[0]))
-        z = int(round(self.env.agent.pos[2]))
+        # Use the SAME conversion as you use for boxes
+        x = int(round(self.env.agent.pos[0] /  self.env.grid_size))
+        z = int(round(self.env.agent.pos[2] / self.env.grid_size))
         return (x, z)
     
     def _get_agent_dir_from_env(self):
