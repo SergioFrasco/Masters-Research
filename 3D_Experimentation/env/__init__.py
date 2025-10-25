@@ -1,0 +1,1 @@
+from .discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
