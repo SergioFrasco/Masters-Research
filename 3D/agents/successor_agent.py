@@ -23,7 +23,7 @@ class RandomAgentWithSR:
         self.state_size = self.grid_size * self.grid_size
         
         # Initialize SR matrix: M[action, from_state, to_state]
-        self.M = np.zeros((self.action_size, self.state_size, self.state_size))
+        self.M = np.array([np.eye(self.state_size) for _ in range(self.action_size)])
         
         # Store previous experience for TD update
         self.prev_state = None
