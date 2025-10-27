@@ -695,7 +695,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                 ground_truth_reward_space[goal_z, goal_x] = 1
 
         # Generate visualizations occasionally
-        if episode % 100 == 0 or episode == max_episodes or episode == 0:
+        if episode % 250 == 0 or episode == max_episodes or episode == 0:
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
             # Saving the Move Forward SR
@@ -826,7 +826,7 @@ if __name__ == "__main__":
     successor_results = run_successor_agent(
         env, 
         agent, 
-        max_episodes=10000,        
+        max_episodes=2000,        
         max_steps_per_episode=200 
     )
 
