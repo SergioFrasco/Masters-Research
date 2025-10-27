@@ -1,0 +1,17 @@
+{
+  "DQN with Vision": [
+    {
+      "rewards": [
+        0.99732
+      ],
+      "lengths": [
+        134
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "DQN with Vision",
+      "dqn_losses": [
+        0.0001006105549271683
+      ]
+    }
+  ]
+}

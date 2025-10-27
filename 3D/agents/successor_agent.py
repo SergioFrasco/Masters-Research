@@ -1,5 +1,5 @@
 # ============================================================================
-# UPDATED successor_agent.py - Direct environment access (no path integration)
+# UPDATED successor_agent.py - Direct environment access 
 # ============================================================================
 
 import numpy as np
@@ -7,7 +7,7 @@ import numpy as np
 class RandomAgentWithSR:
     """Random agent that learns Successor Representation"""
     
-    def __init__(self, env, learning_rate=0.01, gamma=0.95):
+    def __init__(self, env, learning_rate=0.05, gamma=0.99):
         self.env = env
         self.learning_rate = learning_rate
         self.gamma = gamma

@@ -692,7 +692,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             ground_truth_reward_space[blue_z, blue_x] = 1
 
         # Generate visualizations occasionally
-        if episode % 1 == 0 or episode == max_episodes or episode == 0:
+        if episode % 250 == 0 or episode == max_episodes or episode == 0:
 
             # # Right before creating ground_truth_reward_space
             # print(f"\n=== Debug Info for Episode {episode} ===")
