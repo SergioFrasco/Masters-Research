@@ -17,31 +17,33 @@ from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 def world_to_agent_relative(agent_pos, agent_dir, obj_pos):
     """
     Convert world (x, z) difference to agent-relative (dx, dz)
+    following MiniWorld's convention:
     
     agent_pos: (x, y, z)
     agent_dir: angle in radians
     obj_pos:   (x, y, z)
 
     Returns (dx_local, dz_local) where:
-      - dx_local positive means object is to the agent's right
-      - dz_local negative means object is in front (forward = negative dz)
+      - dx_local positive means object is to the agent's right (+X in world when dir=0)
+      - dz_local negative means object is in front (-Z in world when dir=0)
     """
     dx_global = float(obj_pos[0] - agent_pos[0])
     dz_global = float(obj_pos[2] - agent_pos[2])
 
     # Rotate global difference into agent frame
-    cos_t = math.cos(agent_dir)
-    sin_t = math.sin(agent_dir)
+    cos_t = math.cos(-agent_dir)
+    sin_t = math.sin(-agent_dir)
 
-    dx_local = dx_global * cos_t + dz_global * sin_t
-    dz_local = -dx_global * sin_t + dz_global * cos_t
+    # Agent frame: +X is right, -Z is forward
+    dx_local = dx_global * cos_t + dz_global * sin_t  # Right
+    dz_local = -dx_global * sin_t + dz_global * cos_t  # Forward (negative is ahead)
 
     return dx_local, dz_local
 
 def is_object_in_fov(agent_pos, agent_dir, obj_pos, fov_angle=90, max_distance=20):
     """
     Check if an object is within the agent's field of view using pure geometry.
-    Rotated 90 degrees clockwise to match MiniWorld coordinate system.
+    Uses MiniWorld convention: -Z is forward, +X is right.
     
     agent_pos: (x, y, z)
     agent_dir: angle in radians (direction agent is facing)
@@ -51,10 +53,7 @@ def is_object_in_fov(agent_pos, agent_dir, obj_pos, fov_angle=90, max_distance=2
     
     Returns True if object is in FOV
     """
-    # Rotate the agent direction by 90 degrees clockwise (subtract π/2)
-    rotated_dir = agent_dir - math.pi / 2
-    
-    dx_local, dz_local = world_to_agent_relative(agent_pos, rotated_dir, obj_pos)
+    dx_local, dz_local = world_to_agent_relative(agent_pos, agent_dir, obj_pos)
     
     # Calculate distance
     distance = math.sqrt(dx_local**2 + dz_local**2)
@@ -62,12 +61,13 @@ def is_object_in_fov(agent_pos, agent_dir, obj_pos, fov_angle=90, max_distance=2
     if distance > max_distance or distance < 0.1:
         return False
     
-    # Object must be in front of agent (positive dz in agent frame means forward)
-    if dz_local < 0:  # Object is behind the agent
+    # Object must be in front of agent (negative dz_local)
+    if dz_local >= 0:  # Object is behind or too close
         return False
     
     # Calculate angle from forward direction
-    angle_to_object = math.atan2(dx_local, dz_local)
+    # atan2(right, -forward) gives angle from forward axis
+    angle_to_object = math.atan2(dx_local, -dz_local)
     
     # Check if within FOV
     half_fov = math.radians(fov_angle / 2)
@@ -113,7 +113,7 @@ def collect_dataset(
         if frame is not None:
             try:
                 agent_pos = env.agent.pos
-                agent_dir = getattr(env.agent, "dir", 0.0)
+                agent_dir = env.agent.dir - math.pi / 2  # Adjust to MiniWorld's convention
 
                 # Check each object purely geometrically
                 red_box_visible = False
@@ -144,6 +144,21 @@ def collect_dataset(
                         agent_pos, agent_dir, env.sphere_blue.pos,
                         fov_angle=fov_angle, max_distance=max_distance
                     )
+
+                
+                # Add debug:
+                # print(f"\nImage {images_collected}:")
+                # print(f"Agent pos: {agent_pos}, dir: {agent_dir} ({math.degrees(agent_dir):.1f}°)")
+                # if hasattr(env, "box_red"):
+                #     dx, dz = world_to_agent_relative(agent_pos, agent_dir, env.box_red.pos)
+                #     dist = math.sqrt(dx**2 + dz**2)
+                #     angle = math.atan2(dx, -dz)
+                #     print(f"Red box: pos={env.box_red.pos}, dx={dx:.2f}, dz={dz:.2f}, dist={dist:.2f}, angle={math.degrees(angle):.1f}°, visible={red_box_visible}")
+                # if hasattr(env, "sphere_blue"):
+                #     dx, dz = world_to_agent_relative(agent_pos, agent_dir, env.sphere_blue.pos)
+                #     dist = math.sqrt(dx**2 + dz**2)
+                #     angle = math.atan2(dx, -dz)
+                #     print(f"Blue sphere: pos={env.sphere_blue.pos}, dx={dx:.2f}, dz={dz:.2f}, dist={dist:.2f}, angle={math.degrees(angle):.1f}°, visible={blue_sphere_visible}")
 
                 # Create binary flags
                 box_flag = 1 if (red_box_visible or blue_box_visible) else 0
@@ -278,9 +293,9 @@ if __name__ == "__main__":
 
     collect_dataset(
         env, 
-        num_images=10, 
+        num_images=50000, 
         out_dir="dataset/dataset_3d", 
         test_fraction=0.2,
-        fov_angle=60,
+        fov_angle=90,
         max_distance=20,
     )

@@ -2,7 +2,7 @@ from miniworld.envs.oneroom import OneRoom
 from miniworld.miniworld import MiniWorldEnv
 import numpy as np
 import math
-from miniworld.entity import Box
+from miniworld.entity import Box, Ball
 from miniworld.math import intersect_circle_segs
 
 class DiscreteMiniWorldWrapper(OneRoom):
@@ -65,6 +65,17 @@ class DiscreteMiniWorldWrapper(OneRoom):
         # Call the grandparent step method (MiniWorldEnv), skipping OneRoom's step
         obs, reward, termination, truncation, info = MiniWorldEnv.step(self, action)
         
+
+        # Check collision with red sphere
+        if self.near(self.sphere_red):
+            reward += self._reward()
+            termination = True
+
+        # Check collision with blue sphere 
+        if self.near(self.sphere_blue):
+            reward += self._reward()
+            termination = True
+
         # Check collision with red box
         if self.near(self.box_red):
             reward += self._reward()
@@ -78,6 +89,14 @@ class DiscreteMiniWorldWrapper(OneRoom):
         # Calculate distances for info
         agent_pos = self.agent.pos
         
+         # Calculate distance to sphere
+        sphere_red_pos = self.sphere_red.pos
+        distance_to_sphere = np.sqrt((agent_pos[0] - sphere_red_pos[0])**2 + (agent_pos[2] - sphere_red_pos[2])**2)
+
+         # Calculate distance to sphere
+        sphere_blue_pos = self.sphere_blue.pos
+        distance_to_sphere = np.sqrt((agent_pos[0] - sphere_blue_pos[0])**2 + (agent_pos[2] - sphere_blue_pos[2])**2)
+
         # Calculate distance to red box
         box_red_pos = self.box_red.pos
         distance_to_box = np.sqrt((agent_pos[0] - box_red_pos[0])**2 + (agent_pos[2] - box_red_pos[2])**2)
@@ -95,11 +114,24 @@ class DiscreteMiniWorldWrapper(OneRoom):
 
     def _gen_world(self):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
+    
+        # Create entities with radius=0 first to allow overlapping placement
+        self.sphere_red = Ball(color="red", size=0.75)
+        self.sphere_red.radius = 0  # Set before placement
+        self.sphere_red = self.place_entity(self.sphere_red)
 
-        self.box_red = self.place_entity(Box(color="red"))
-        self.box_red.radius = 0  # No collision
-        self.box_blue = self.place_entity(Box(color="blue"))  #
-        self.box_blue.radius = 0  # No collision
+        self.sphere_blue = Ball(color="blue", size=0.75)
+        self.sphere_blue.radius = 0  # Set before placement
+        self.sphere_blue = self.place_entity(self.sphere_blue)
+
+        self.box_red = Box(color="red")
+        self.box_red.radius = 0  # Set before placement
+        self.box_red = self.place_entity(self.box_red)
+
+        self.box_blue = Box(color="blue")
+        self.box_blue.radius = 0  # Set before placement
+        self.box_blue = self.place_entity(self.box_blue)
+        
         self.place_agent()
 
 # ================= Override placement methods to enforce discrete agent placement =======================
@@ -241,7 +273,8 @@ class DiscreteMiniWorldWrapper(OneRoom):
     
     def intersect(self, ent, pos, radius=None):
         """
-        Override to check walls but allow agent to pass through boxes
+        Override to check walls and prevent object overlap during placement
+        but allow agent to pass through boxes/balls
         """
         if radius is None:
             radius = ent.radius
@@ -260,8 +293,9 @@ class DiscreteMiniWorldWrapper(OneRoom):
             if ent2 is ent:
                 continue
             
-            # Skip collision check with boxes - THIS IS THE KEY ADDITION
-            if isinstance(ent2, Box):
+            # Skip collision check with boxes/balls ONLY if entity being placed is the agent
+            # This allows agent to pass through objects but prevents objects from overlapping each other
+            if isinstance(ent2, (Box, Ball)) and hasattr(self, 'agent') and ent is self.agent:
                 continue
 
             px, _, pz = ent2.pos
