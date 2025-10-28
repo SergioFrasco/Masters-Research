@@ -147,58 +147,59 @@ def collect_dataset(
                         fov_angle=fov_angle, max_distance=max_distance
                     )
 
+                # CHANGED: Label ALL visible objects (multiple can be 1)
+                # If no objects visible, only None=1
                 
-                # Add debug:
-                # print(f"\nImage {images_collected}:")
-                # print(f"Agent pos: {agent_pos}, dir: {agent_dir} ({math.degrees(agent_dir):.1f}°)")
-                # if hasattr(env, "box_red"):
-                #     dx, dz = world_to_agent_relative(agent_pos, agent_dir, env.box_red.pos)
-                #     dist = math.sqrt(dx**2 + dz**2)
-                #     angle = math.atan2(dx, -dz)
-                #     print(f"Red box: pos={env.box_red.pos}, dx={dx:.2f}, dz={dz:.2f}, dist={dist:.2f}, angle={math.degrees(angle):.1f}°, visible={red_box_visible}")
-                # if hasattr(env, "sphere_blue"):
-                #     dx, dz = world_to_agent_relative(agent_pos, agent_dir, env.sphere_blue.pos)
-                #     dist = math.sqrt(dx**2 + dz**2)
-                #     angle = math.atan2(dx, -dz)
-                #     print(f"Blue sphere: pos={env.sphere_blue.pos}, dx={dx:.2f}, dz={dz:.2f}, dist={dist:.2f}, angle={math.degrees(angle):.1f}°, visible={blue_sphere_visible}")
-
-                # Create binary flags
-                box_flag = 1 if (red_box_visible or blue_box_visible) else 0
-                sphere_flag = 1 if (red_sphere_visible or blue_sphere_visible) else 0
-                red_flag = 1 if (red_box_visible or red_sphere_visible) else 0
-                blue_flag = 1 if (blue_box_visible or blue_sphere_visible) else 0
-
-                # Compute relative positions for visible objects
-                red_box_dx = red_box_dz = ""
-                blue_box_dx = blue_box_dz = ""
-                red_sphere_dx = red_sphere_dz = ""
-                blue_sphere_dx = blue_sphere_dz = ""
-
+                # Initialize all flags to 0
+                red_box_flag = 0
+                blue_box_flag = 0
+                red_sphere_flag = 0
+                blue_sphere_flag = 0
+                none_flag = 0
+                
+                # Initialize all positions to 0
+                red_box_dx = red_box_dz = 0
+                blue_box_dx = blue_box_dz = 0
+                red_sphere_dx = red_sphere_dz = 0
+                blue_sphere_dx = blue_sphere_dz = 0
+                
+                # Set flag and position for each visible object
                 if red_box_visible:
+                    red_box_flag = 1
                     rdx, rdz = world_to_agent_relative(agent_pos, agent_dir, env.box_red.pos)
-                    red_box_dx, red_box_dz = f"{rdx:.5f}", f"{rdz:.5f}"
-
+                    red_box_dx, red_box_dz = rdx, rdz
+                
                 if blue_box_visible:
+                    blue_box_flag = 1
                     bdx, bdz = world_to_agent_relative(agent_pos, agent_dir, env.box_blue.pos)
-                    blue_box_dx, blue_box_dz = f"{bdx:.5f}", f"{bdz:.5f}"
-
+                    blue_box_dx, blue_box_dz = bdx, bdz
+                
                 if red_sphere_visible:
+                    red_sphere_flag = 1
                     rsdx, rsdz = world_to_agent_relative(agent_pos, agent_dir, env.sphere_red.pos)
-                    red_sphere_dx, red_sphere_dz = f"{rsdx:.5f}", f"{rsdz:.5f}"
-
+                    red_sphere_dx, red_sphere_dz = rsdx, rsdz
+                
                 if blue_sphere_visible:
+                    blue_sphere_flag = 1
                     bsdx, bsdz = world_to_agent_relative(agent_pos, agent_dir, env.sphere_blue.pos)
-                    blue_sphere_dx, blue_sphere_dz = f"{bsdx:.5f}", f"{bsdz:.5f}"
+                    blue_sphere_dx, blue_sphere_dz = bsdx, bsdz
+                
+                # If NO objects are visible, set None flag
+                if not (red_box_visible or blue_box_visible or red_sphere_visible or blue_sphere_visible):
+                    none_flag = 1
+                    # All positions remain 0
 
             except Exception as e:
                 print(f"\nWarning computing visibility/positions: {e}")
                 import traceback
                 traceback.print_exc()
-                box_flag = sphere_flag = red_flag = blue_flag = 0
-                red_box_dx = red_box_dz = ""
-                blue_box_dx = blue_box_dz = ""
-                red_sphere_dx = red_sphere_dz = ""
-                blue_sphere_dx = blue_sphere_dz = ""
+                # Set all to 0 and none_flag to 1 on error
+                red_box_flag = blue_box_flag = red_sphere_flag = blue_sphere_flag = 0
+                none_flag = 1
+                red_box_dx = red_box_dz = 0
+                blue_box_dx = blue_box_dz = 0
+                red_sphere_dx = red_sphere_dz = 0
+                blue_sphere_dx = blue_sphere_dz = 0
 
             # Save image
             filename = f"{img_prefix}_{images_collected:05d}.png"
@@ -212,34 +213,37 @@ def collect_dataset(
                 img = frame
             img.save(img_path)
 
+            # CHANGED: Store new label format
             tmp_rows.append(
                 {
                     "filename": filename,
-                    "box": box_flag,
-                    "sphere": sphere_flag,
-                    "red": red_flag,
-                    "blue": blue_flag,
-                    "red_box_dx": red_box_dx,
-                    "red_box_dz": red_box_dz,
-                    "blue_box_dx": blue_box_dx,
-                    "blue_box_dz": blue_box_dz,
-                    "red_sphere_dx": red_sphere_dx,
-                    "red_sphere_dz": red_sphere_dz,
-                    "blue_sphere_dx": blue_sphere_dx,
-                    "blue_sphere_dz": blue_sphere_dz,
+                    "red_box": red_box_flag,
+                    "blue_box": blue_box_flag,
+                    "red_sphere": red_sphere_flag,
+                    "blue_sphere": blue_sphere_flag,
+                    "None": none_flag,
+                    "red_box_dx": f"{red_box_dx:.5f}" if isinstance(red_box_dx, float) else red_box_dx,
+                    "red_box_dz": f"{red_box_dz:.5f}" if isinstance(red_box_dz, float) else red_box_dz,
+                    "blue_box_dx": f"{blue_box_dx:.5f}" if isinstance(blue_box_dx, float) else blue_box_dx,
+                    "blue_box_dz": f"{blue_box_dz:.5f}" if isinstance(blue_box_dz, float) else blue_box_dz,
+                    "red_sphere_dx": f"{red_sphere_dx:.5f}" if isinstance(red_sphere_dx, float) else red_sphere_dx,
+                    "red_sphere_dz": f"{red_sphere_dz:.5f}" if isinstance(red_sphere_dz, float) else red_sphere_dz,
+                    "blue_sphere_dx": f"{blue_sphere_dx:.5f}" if isinstance(blue_sphere_dx, float) else blue_sphere_dx,
+                    "blue_sphere_dz": f"{blue_sphere_dz:.5f}" if isinstance(blue_sphere_dz, float) else blue_sphere_dz,
                 }
             )
 
             images_collected += 1
             pbar.update(1)
 
+            # CHANGED: Updated progress reporting
             if images_collected % 100 == 0:
-                box_count = sum(1 for r in tmp_rows[-100:] if r["box"] == 1)
-                sphere_count = sum(1 for r in tmp_rows[-100:] if r["sphere"] == 1)
-                red_count = sum(1 for r in tmp_rows[-100:] if r["red"] == 1)
-                blue_count = sum(1 for r in tmp_rows[-100:] if r["blue"] == 1)
-                none_count = sum(1 for r in tmp_rows[-100:] if r["box"] == 0 and r["sphere"] == 0)
-                print(f"\nLast 100 -> Box:{box_count} Sphere:{sphere_count} Red:{red_count} Blue:{blue_count} None:{none_count}")
+                red_box_count = sum(1 for r in tmp_rows[-100:] if r["red_box"] == 1)
+                blue_box_count = sum(1 for r in tmp_rows[-100:] if r["blue_box"] == 1)
+                red_sphere_count = sum(1 for r in tmp_rows[-100:] if r["red_sphere"] == 1)
+                blue_sphere_count = sum(1 for r in tmp_rows[-100:] if r["blue_sphere"] == 1)
+                none_count = sum(1 for r in tmp_rows[-100:] if r["None"] == 1)
+                print(f"\nLast 100 -> RedBox:{red_box_count} BlueBox:{blue_box_count} RedSphere:{red_sphere_count} BlueSphere:{blue_sphere_count} None:{none_count}")
 
         action = env.action_space.sample()
         obs, reward, terminated, truncated, info = env.step(action)
@@ -259,9 +263,10 @@ def collect_dataset(
     train_rows = tmp_rows[:split_index]
     test_rows = tmp_rows[split_index:]
 
+    # CHANGED: Updated CSV fieldnames
     with open(labels_path, "w", newline="") as csvfile:
         fieldnames = [
-            "filename", "box", "sphere", "red", "blue",
+            "filename", "red_box", "blue_box", "red_sphere", "blue_sphere", "None",
             "red_box_dx", "red_box_dz", "blue_box_dx", "blue_box_dz",
             "red_sphere_dx", "red_sphere_dz", "blue_sphere_dx", "blue_sphere_dz",
             "split"
@@ -295,7 +300,7 @@ if __name__ == "__main__":
 
     collect_dataset(
         env, 
-        num_images=50000, 
+        num_images=20000, 
         out_dir="dataset/dataset_3d", 
         test_fraction=0.2,
         fov_angle=90,
