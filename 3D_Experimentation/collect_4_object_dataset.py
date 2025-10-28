@@ -1,5 +1,7 @@
-# collect_3d_dataset.py
 import os
+os.environ['PYGLET_HEADLESS'] = '1'
+os.environ['MPLBACKEND'] = 'Agg'  # Optional: for matplotlib
+
 import csv
 import math
 from pathlib import Path
