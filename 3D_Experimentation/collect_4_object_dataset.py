@@ -300,7 +300,7 @@ if __name__ == "__main__":
 
     collect_dataset(
         env, 
-        num_images=20000, 
+        num_images=10, 
         out_dir="dataset/dataset_3d", 
         test_fraction=0.2,
         fov_angle=90,

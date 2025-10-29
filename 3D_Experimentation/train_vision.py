@@ -375,7 +375,7 @@ if __name__ == "__main__":
     # train_model("dataset/dataset_3d/labels.csv", "dataset/dataset_3d", num_epochs=30, batch_size=32, lr=1e-4)
     
     # Example inference (uncomment after training)
-    result = load_model_and_predict("advanced_cube_detector.pth", "dataset/dataset_3d/test/img_00091.png")
+    result = load_model_and_predict("advanced_cube_detector.pth", "dataset/dataset_3d/train/img_00008.png")
     print(f"\nInference Results:")
     print(f"  Detected objects: {result['detected_objects']}")
     print(f"  None present: {result['none']}")
