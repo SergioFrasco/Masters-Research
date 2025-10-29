@@ -4,8 +4,8 @@
 
 import numpy as np
 
-class RandomAgentWithSR:
-    """Random agent that learns Successor Representation"""
+class SuccessorAgent:
+    """A Successor agent which samples actions using World Value Function (WVF)"""
     
     def __init__(self, env, learning_rate=0.01, gamma=0.95):
         self.env = env

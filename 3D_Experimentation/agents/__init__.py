@@ -1,2 +1,2 @@
 from .random_agent import RandomAgent
-from .successor_agent import RandomAgentWithSR
+from .successor_agent import SuccessorAgent

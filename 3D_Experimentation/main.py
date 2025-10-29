@@ -9,7 +9,7 @@ import gymnasium as gym
 import miniworld
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
-from agents import RandomAgent, RandomAgentWithSR
+from agents import SuccessorAgent
 from tqdm import tqdm
 import math
 from utils import plot_sr_matrix, generate_save_path, save_all_wvf
@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt  # This must come AFTER matplotlib.use('Agg')
 from collections import deque
 import gc
 import pandas as pd
-from train_advanced_cube_detector2 import CubeDetector
+from train_vision import CubeDetector
 
 # class CubeDetector(nn.Module):
 #     """Lightweight CNN for cube detection using MobileNetV2"""
@@ -50,7 +50,7 @@ def load_cube_detector(model_path='models/advanced_cube_detector.pth', force_cpu
     model = CubeDetector().to(device)
     
     # Load checkpoint
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     
     # Handle both old and new checkpoint formats
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
@@ -88,84 +88,38 @@ def detect_cube(model, obs, device, transform, pos_mean=0.0, pos_std=1.0):
     # Apply transform and move to device
     img_tensor = transform(img).unsqueeze(0).to(device)
     
-    # Initialize output variables
-    predicted_class_idx = None
-    confidence = None
-    regression_values = None
-    
     # Inference
     with torch.no_grad():
-        model_output = model(img_tensor)
+        cls_logits, pos_preds = model(img_tensor)
         
-        # Handle model output structure
-        if isinstance(model_output, (tuple, list)) and len(model_output) == 2:
-            classification_output, regression_output = model_output
-            probs = torch.softmax(classification_output, dim=1)
-            predicted_class_idx = torch.argmax(probs, dim=1).item()
-            confidence = probs[0, predicted_class_idx].item()
-            regression_values = regression_output.squeeze().cpu().numpy()
-            
-        elif isinstance(model_output, dict):
-            classification_output = model_output.get('classification', None)
-            regression_output = model_output.get('regression', None)
-            
-            if classification_output is not None:
-                probs = torch.softmax(classification_output, dim=1)
-                predicted_class_idx = torch.argmax(probs, dim=1).item()
-                confidence = probs[0, predicted_class_idx].item()
-            
-            if regression_output is not None:
-                regression_values = regression_output.squeeze().cpu().numpy()
+        # Multi-label classification
+        probs = torch.sigmoid(cls_logits)
+        predictions = (probs > 0.5).cpu().numpy()[0]
         
-        else:
-            probs = torch.softmax(model_output, dim=1)
-            predicted_class_idx = torch.argmax(probs, dim=1).item()
-            confidence = probs[0, predicted_class_idx].item()
+        # Denormalize regression output (8 values)
+        regression_values = pos_preds.cpu().numpy()[0] * pos_std + pos_mean
+        
+        # Label names match the model's output order
+        label_names = ["red_box", "blue_box", "red_sphere", "blue_sphere"]
+        detected_objects = [label_names[i] for i in range(4) if predictions[i]]
     
-    # Denormalize regression values
-    if regression_values is not None:
-        regression_values = regression_values * pos_std + pos_mean
-    
-    # Decode class index to label
-    CLASS_NAMES = ['None', 'Red', 'Blue', 'Both']
-    label = CLASS_NAMES[predicted_class_idx] if predicted_class_idx is not None else "Unknown"
+    # Extract positions for detected objects
+    # Positions are: [red_box_dx, red_box_dz, blue_box_dx, blue_box_dz, 
+    #                 red_sphere_dx, red_sphere_dz, blue_sphere_dx, blue_sphere_dz]
+    positions = {
+        'red_box': (regression_values[0], regression_values[1]) if predictions[0] else None,
+        'blue_box': (regression_values[2], regression_values[3]) if predictions[1] else None,
+        'red_sphere': (regression_values[4], regression_values[5]) if predictions[2] else None,
+        'blue_sphere': (regression_values[6], regression_values[7]) if predictions[3] else None,
+    }
     
     return {
-        "label": label,
-        "confidence": confidence,
-        "regression": regression_values
+        "detected_objects": detected_objects,
+        "predictions": predictions,
+        "probabilities": {label_names[i]: float(probs[0, i]) for i in range(4)},
+        "positions": positions,
+        "regression_raw": regression_values
     }
-
-# def compose_wvf(agent, reward_map):
-#     """Compose world value functions from SR and reward map"""
-#     grid_size = agent.grid_size
-#     state_size = agent.state_size
-    
-#     # Initialize reward maps for each state
-#     reward_maps = np.zeros((state_size, grid_size, grid_size))
-    
-#     # Fill reward maps based on threshold
-#     for z in range(grid_size):
-#         for x in range(grid_size):
-#             curr_reward = reward_map[z, x]
-#             idx = z * grid_size + x
-#             # Threshold
-#             if reward_map[z, x] >= 0.5:
-#                 reward_maps[idx, z, x] = curr_reward
-    
-#     MOVE_FORWARD = 2
-#     M_forward = agent.M[MOVE_FORWARD, :, :]
-    
-#     # Flatten reward maps
-#     R_flat_all = reward_maps.reshape(state_size, -1)
-    
-#     # Compute WVF: V = M @ R^T
-#     V_all = M_forward @ R_flat_all.T
-    
-#     # Reshape back to grid
-#     wvf = V_all.T.reshape(state_size, grid_size, grid_size)
-    
-#     return wvf
 
 def plot_wvf(wvf, episode, grid_size, maps_per_row=10):
     """Plot all world value functions in a grid"""
@@ -252,9 +206,7 @@ def _train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
 
     
 def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200):
-    """Run with random agent that learns SR and detects cubes"""
-    print("\n=== SUCCESSOR REPRESENTATION AGENT MODE WITH CUBE DETECTION ===")
-    print("Agent will take random actions and learn SR matrix")
+    print("\n=== SUCCESSOR REPRESENTATION AGENT SHOWING WVF COMPOSITION ===")
     print(f"Max episodes: {max_episodes}")
     print(f"Max steps per episode: {max_steps_per_episode}\n")
     print("Loading cube detector model...")
@@ -267,7 +219,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-
 
     # Vision Model from 2D
     print("Loading 2D vision model...")
@@ -323,51 +274,65 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             agent_pos = agent._get_agent_pos_from_env()
             trajectory.append((agent_pos[0], agent_pos[1], current_action))
 
-            # First (before step) Detect type of cube in the observation, as well as position regression - marked rx, rz, bx, bz
-            # where +x is forward, +z is right from agent perspective
+           # First (before step) Detect objects
             detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
+
+            detected_objects = detection_result['detected_objects']
+            positions = detection_result['positions']
+
+            has_red_box = 'red_box' in detected_objects
+            has_blue_box = 'blue_box' in detected_objects
+            has_red_sphere = 'red_sphere' in detected_objects
+            has_blue_sphere = 'blue_sphere' in detected_objects
             
-            label = detection_result['label']
-            confidence = detection_result['confidence']
-            regression_values = detection_result['regression'] # rx, rz, bx, bz
-            regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
-            rx, rz, bx, bz = regression_values  # forward, right for each color
+            # label = detection_result['label']
+            # confidence = detection_result['confidence']
+            # regression_values = detection_result['regression'] # rx, rz, bx, bz
+            # regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
+            # rx, rz, bx, bz = regression_values  # forward, right for each color
             
             # print(f"Detected: {label} with confidence {confidence:.3f}")
             # if regression_values is not None:
                 # print(f"Positions: {regression_values}")
 
 
-            if label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
+            if has_red_box or has_blue_box or has_red_sphere or has_blue_sphere:
                 # Update counters
-                if label == 'Red' or label == 'Blue':
-                    episode_cubes += 1
-                    total_cubes_detected += 1
+                episode_cubes += sum([has_red_box, has_blue_box ,has_red_sphere, has_blue_sphere])
+                total_cubes_detected += sum([has_red_box, has_blue_box ,has_red_sphere, has_blue_sphere])
+
+                # Extract positions
+                goal_pos_red_box = None
+                goal_pos_blue_box = None
+                goal_pos_red_sphere = None
+                goal_pos_blue_sphere = None
+
+                if has_red_box and positions['red_box'] is not None:
+                    rbx, rbz = positions['red_box']
+                    rbx, rbz = int(round(rbx)), int(round(rbz))
+                    goal_pos_red_box = (rbx, rbz)
                 else:
-                    episode_cubes += 2
-                    total_cubes_detected += 2
-
-                # We have:
-                # pos x is forward
-                # pos z is right
-
-                # We need:
-                # pos x is right
-                # pos z is south
-
-                # so swap x and z and make x negative
+                    goal_pos_red_box = None
                 
-                # Check goal position from model
-                if label == 'Red':
-                    goal_pos_red  = (-rz, rx)
+                if has_blue_box and positions['blue_box'] is not None:
+                    bbx, bbz = positions['blue_box']
+                    bbx, bbz = int(round(bbx)), int(round(bbz))
+                    goal_pos_red = (bbx, bbz)
+                else:
                     goal_pos_blue = None
-                elif label == 'Blue':
-                    goal_pos_blue = (-bz, bx)
-                    goal_pos_red = None
-                elif label == 'Both': 
-                    goal_pos_red  = (-rz, rx)
-                    goal_pos_blue = (-bz, bx)
+                
+                if has_red_sphere and positions['red_sphere'] is not None:
+                    rsx, rsz = positions['red_sphere']
+                    rsx, rsz = int(round(rsx)), int(round(rsz))
+                    goal_pos_red = (rsx, rsz)
 
+                if has_blue_sphere and positions['blue_sphere'] is not None:
+                    bsx, bsz = positions['blue_sphere']
+                    bsx, bsz = int(round(bsx)), int(round(bsz))
+                    goal_pos_red = (bsx, bsz)
+
+                # ================ Got up to here ================
+                
                 # Create egocentric observation matrix
                 ego_obs = agent.create_egocentric_observation(
                     goal_pos_red=goal_pos_red,
@@ -844,7 +809,7 @@ if __name__ == "__main__":
     env = DiscreteMiniWorldWrapper(size=10)
     
     # create agent
-    agent = RandomAgentWithSR(env)
+    agent = SuccessorAgent(env)
     
     all_results = {}
     window=100
