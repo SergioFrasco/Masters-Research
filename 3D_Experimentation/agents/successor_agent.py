@@ -33,7 +33,15 @@ class SuccessorAgent:
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
 
         # World Value Function - Mappings of values to each state goal pair
-        self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
+        # self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
+
+        # This is the composition of WVF slices
+        self.wvf = {
+            "red":  np.zeros((10, 10)), 
+            "blue": np.zeros((10, 10)), 
+            "box": np.zeros((10, 10)), 
+            "sphere": np.zeros((10, 10))
+        }
 
         # Initialize individual reward maps: one per state
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
@@ -199,21 +207,25 @@ class SuccessorAgent:
         self.prev_state = None
         self.prev_action = None
     
-    def create_egocentric_observation(self, goal_pos_red=None, goal_pos_blue=None, matrix_size=13):
+    def create_egocentric_observation(self, goal_pos_red_box=None, goal_pos_blue_box=None, 
+                                    goal_pos_red_sphere=None, goal_pos_blue_sphere=None, 
+                                    matrix_size=13):
         """
         Create an egocentric observation matrix where:
         - Agent is always at the bottom-middle cell, facing upward.
-        - Goal positions (red, blue) are given in the agent's egocentric coordinates.
+        - Goal positions (red box, blue box, red sphere, blue sphere) are given in the agent's egocentric coordinates.
             (x = right, z = forward)
         
         Args:
-            goal_pos_red  : Tuple (x_right, z_forward) or None
-            goal_pos_blue : Tuple (x_right, z_forward) or None
-            matrix_size   : Size of the square matrix (default 13x13)
+            goal_pos_red_box    : Tuple (x_right, z_forward) or None
+            goal_pos_blue_box   : Tuple (x_right, z_forward) or None
+            goal_pos_red_sphere : Tuple (x_right, z_forward) or None
+            goal_pos_blue_sphere: Tuple (x_right, z_forward) or None
+            matrix_size         : Size of the square matrix (default 13x13)
 
         Returns:
             ego_matrix: numpy array of shape (matrix_size, matrix_size)
-                        Red goal marked as 1, Blue goal as 1
+                        All goals marked as 1
         """
         import numpy as np
 
@@ -229,15 +241,35 @@ class SuccessorAgent:
                 return
             gx, gz = pos  # (right, forward)
             # Convert to matrix coordinates
-            ego_row = agent_row - gz  # forward is upward (smaller row)
-            ego_col = agent_col - gx  # right is right (larger col)
+            ego_row = agent_row + gz  # forward is upward (smaller row)
+            ego_col = agent_col + gx  # right is right (larger col)
 
             # Check bounds and place marker
             if 0 <= ego_row < matrix_size and 0 <= ego_col < matrix_size:
                 ego_matrix[int(ego_row), int(ego_col)] = value
 
-        # Place red and blue goals
-        place_goal(goal_pos_red, 1.0)
-        place_goal(goal_pos_blue, 1.0)
+        # Place all four goals
+        place_goal(goal_pos_red_box, 1.0)
+        place_goal(goal_pos_blue_box, 1.0)
+        place_goal(goal_pos_red_sphere, 1.0)
+        place_goal(goal_pos_blue_sphere, 1.0)
 
         return ego_matrix
+
+        # def place_goal(pos, value):
+        #     if pos is None:
+        #         return
+        #     gx, gz = pos  # (right, forward)
+        #     # Convert to matrix coordinates
+        #     ego_row = agent_row - gz  # forward is upward (smaller row)
+        #     ego_col = agent_col - gx  # right is right (larger col)
+
+        #     # Check bounds and place marker
+        #     if 0 <= ego_row < matrix_size and 0 <= ego_col < matrix_size:
+        #         ego_matrix[int(ego_row), int(ego_col)] = value
+
+        # # Place red and blue goals
+        # place_goal(goal_pos_red, 1.0)
+        # place_goal(goal_pos_blue, 1.0)
+
+        # return ego_matrix

@@ -284,6 +284,11 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             has_blue_box = 'blue_box' in detected_objects
             has_red_sphere = 'red_sphere' in detected_objects
             has_blue_sphere = 'blue_sphere' in detected_objects
+
+            # print("Has red box:", has_red_box)
+            # print("Has blue box:", has_blue_box)
+            # print("Has red sphere:", has_red_sphere)
+            # print("Has blue sphere:", has_blue_sphere)
             
             # label = detection_result['label']
             # confidence = detection_result['confidence']
@@ -298,8 +303,8 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
 
             if has_red_box or has_blue_box or has_red_sphere or has_blue_sphere:
                 # Update counters
-                episode_cubes += sum([has_red_box, has_blue_box ,has_red_sphere, has_blue_sphere])
-                total_cubes_detected += sum([has_red_box, has_blue_box ,has_red_sphere, has_blue_sphere])
+                episode_cubes += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
+                total_cubes_detected += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
 
                 # Extract positions
                 goal_pos_red_box = None
@@ -311,42 +316,46 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     rbx, rbz = positions['red_box']
                     rbx, rbz = int(round(rbx)), int(round(rbz))
                     goal_pos_red_box = (rbx, rbz)
-                else:
-                    goal_pos_red_box = None
+                    # print("Red box position:", goal_pos_red_box)
                 
                 if has_blue_box and positions['blue_box'] is not None:
                     bbx, bbz = positions['blue_box']
                     bbx, bbz = int(round(bbx)), int(round(bbz))
-                    goal_pos_red = (bbx, bbz)
-                else:
-                    goal_pos_blue = None
+                    goal_pos_blue_box = (bbx, bbz)
+                    # print("Blue box position:", goal_pos_blue_box)
                 
                 if has_red_sphere and positions['red_sphere'] is not None:
                     rsx, rsz = positions['red_sphere']
                     rsx, rsz = int(round(rsx)), int(round(rsz))
-                    goal_pos_red = (rsx, rsz)
+                    goal_pos_red_sphere = (rsx, rsz)
+                    # print("Red sphere position:", goal_pos_red_sphere)
 
                 if has_blue_sphere and positions['blue_sphere'] is not None:
                     bsx, bsz = positions['blue_sphere']
                     bsx, bsz = int(round(bsx)), int(round(bsz))
-                    goal_pos_red = (bsx, bsz)
-
-                # ================ Got up to here ================
+                    goal_pos_blue_sphere = (bsx, bsz)
+                    # print("Blue sphere position:", goal_pos_blue_sphere)
                 
                 # Create egocentric observation matrix
                 ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red=goal_pos_red,
-                    goal_pos_blue=goal_pos_blue,
+                    goal_pos_red_box=goal_pos_red_box,
+                    goal_pos_blue_box=goal_pos_blue_box,
+                    goal_pos_red_sphere=goal_pos_red_sphere,
+                    goal_pos_blue_sphere=goal_pos_blue_sphere,
                     matrix_size=13
                 )
             
             else:
                 # No cube detected - create empty egocentric observation
                 ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red=None,
-                    goal_pos_blue=None,
+                    goal_pos_red_box=None,
+                    goal_pos_blue_box=None,
+                    goal_pos_red_sphere=None,
+                    goal_pos_blue_sphere=None,
                     matrix_size=13
                 )
+
+            # print(ego_obs)
 
             # Store step info BEFORE taking action
             step_info = {
@@ -356,13 +365,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                 'normalized_grid': ego_obs.copy()
             }
             trajectory_buffer.append(step_info)
-            
-            # Step environment
-            obs, reward, terminated, truncated, info = env.step(current_action)
-            step += 1
-            total_steps += 1
-            episode_reward += reward
-
+    
             # Save the frame - ensure render mode is "rgb_array"
             # frame = env.render()
             # if frame is not None:
@@ -376,63 +379,94 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             #     img.save(save_frame_path)
             #     print(f"  Saved frame: {save_frame_path}")
 
-            # time.sleep(10) 
+            # time.sleep(15) 
+    
+            # Step environment
+            obs, reward, terminated, truncated, info = env.step(current_action)
+            step += 1
+            total_steps += 1
+            episode_reward += reward
+
 
             # Second (after step) Detect type of cube in the observation, as well as position regression - marked rx, rz, bx, bz
             # where +x is forward, +z is right from agent perspective
             detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
+
+            detected_objects = detection_result['detected_objects']
+            positions = detection_result['positions']
+
+            has_red_box = 'red_box' in detected_objects
+            has_blue_box = 'blue_box' in detected_objects
+            has_red_sphere = 'red_sphere' in detected_objects
+            has_blue_sphere = 'blue_sphere' in detected_objects
+
+            # print("Has red box:", has_red_box)
+            # print("Has blue box:", has_blue_box)
+            # print("Has red sphere:", has_red_sphere)
+            # print("Has blue sphere:", has_blue_sphere)
             
-            label = detection_result['label']
-            confidence = detection_result['confidence']
-            regression_values = detection_result['regression'] # rx, rz, bx, bz
-            regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
-            rx, rz, bx, bz = regression_values  # forward, right for each color
+            # label = detection_result['label']
+            # confidence = detection_result['confidence']
+            # regression_values = detection_result['regression'] # rx, rz, bx, bz
+            # regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
+            # rx, rz, bx, bz = regression_values  # forward, right for each color
             
             # print(f"Detected: {label} with confidence {confidence:.3f}")
             # if regression_values is not None:
-            #     print(f"Positions: {regression_values}")
+                # print(f"Positions: {regression_values}")
 
-            if label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
+
+            if has_red_box or has_blue_box or has_red_sphere or has_blue_sphere:
                 # Update counters
-                if label == 'Red' or label == 'Blue':
-                    episode_cubes += 1
-                    total_cubes_detected += 1
-                else:
-                    episode_cubes += 2
-                    total_cubes_detected += 2
+                episode_cubes += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
+                total_cubes_detected += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
 
-                # We have:
-                # pos x is forward
-                # pos z is right
+                # Extract positions
+                goal_pos_red_box = None
+                goal_pos_blue_box = None
+                goal_pos_red_sphere = None
+                goal_pos_blue_sphere = None
 
-                # We need:
-                # pos x is right
-                # pos z is south
-
-                # so swap x and z and make x negative
+                if has_red_box and positions['red_box'] is not None:
+                    rbx, rbz = positions['red_box']
+                    rbx, rbz = int(round(rbx)), int(round(rbz))
+                    goal_pos_red_box = (rbx, rbz)
+                    # print("Red box position:", goal_pos_red_box)
                 
-                # Check goal position from model
-                if label == 'Red':
-                    goal_pos_red  = (-rz, rx)
-                    goal_pos_blue = None
-                elif label == 'Blue':
-                    goal_pos_blue = (-bz, bx)
-                    goal_pos_red = None
-                elif label == 'Both': 
-                    goal_pos_red  = (-rz, rx)
-                    goal_pos_blue = (-bz, bx)
+                if has_blue_box and positions['blue_box'] is not None:
+                    bbx, bbz = positions['blue_box']
+                    bbx, bbz = int(round(bbx)), int(round(bbz))
+                    goal_pos_blue_box = (bbx, bbz)
+                    # print("Blue box position:", goal_pos_blue_box)
+                
+                if has_red_sphere and positions['red_sphere'] is not None:
+                    rsx, rsz = positions['red_sphere']
+                    rsx, rsz = int(round(rsx)), int(round(rsz))
+                    goal_pos_red_sphere = (rsx, rsz)
+                    # print("Red sphere position:", goal_pos_red_sphere)
 
+                if has_blue_sphere and positions['blue_sphere'] is not None:
+                    bsx, bsz = positions['blue_sphere']
+                    bsx, bsz = int(round(bsx)), int(round(bsz))
+                    goal_pos_blue_sphere = (bsx, bsz)
+                    # print("Blue sphere position:", goal_pos_blue_sphere)
+                
                 # Create egocentric observation matrix
                 ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red=goal_pos_red,
-                    goal_pos_blue=goal_pos_blue,
+                    goal_pos_red_box=goal_pos_red_box,
+                    goal_pos_blue_box=goal_pos_blue_box,
+                    goal_pos_red_sphere=goal_pos_red_sphere,
+                    goal_pos_blue_sphere=goal_pos_blue_sphere,
                     matrix_size=13
-                )      
+                )
+            
             else:
                 # No cube detected - create empty egocentric observation
                 ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red=None,
-                    goal_pos_blue=None,
+                    goal_pos_red_box=None,
+                    goal_pos_blue_box=None,
+                    goal_pos_red_sphere=None,
+                    goal_pos_blue_sphere=None,
                     matrix_size=13
                 )
                     
@@ -591,6 +625,10 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                 optimizer.step()
                 
                 step_loss = loss.item()
+
+
+            # ============= Got up to here also have to do action with WVF================
+            # Place the value from true reward mao into the reward map if the position is the same as where goals were detected
 
             # Update reward maps
             agent.reward_maps.fill(0)
@@ -805,8 +843,8 @@ def _find_convergence_episode(all_rewards, window):
 if __name__ == "__main__":
     # create environment
     # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
-    # env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
-    env = DiscreteMiniWorldWrapper(size=10)
+    env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
+    # env = DiscreteMiniWorldWrapper(size=10)
     
     # create agent
     agent = SuccessorAgent(env)
