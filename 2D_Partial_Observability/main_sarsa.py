@@ -83,7 +83,10 @@ class ExperimentRunner:
 
             obs, current_action, manual = execute_turns_until_forward(agent, obs, epsilon, env, manual)
             current_state_idx = agent.get_state_index(obs)
-            current_exp = [current_state_idx, current_action, None, None, None]
+            # current_exp = [current_state_idx, current_action, None, None, None]
+            current_dir = agent.internal_dir
+            current_exp = [current_state_idx, current_dir, None, None, None]
+
             
             for step in range(max_steps):
                 # Record position and action for trajectory (using path integration)
@@ -130,12 +133,13 @@ class ExperimentRunner:
                 if not done:
                     obs, next_action, manual = execute_turns_until_forward(agent, obs, epsilon, env, manual)
                     next_state_idx = agent.get_state_index(obs)
+                    next_dir = agent.internal_dir
                 else:
                     # If done, we still need a next state for the update
                     next_state_idx = agent.get_state_index(obs)
                     next_action = current_action  # Doesn't matter since episode is done
+                    next_dir = agent.internal_dir
 
-                # Complete current experience
                 current_exp[2] = next_state_idx
                 current_exp[3] = reward
                 current_exp[4] = done
@@ -164,13 +168,16 @@ class ExperimentRunner:
                 #     next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
 
                 # ============================= SR UPDATE =============================
+                # Complete current experience
+
                 if update_sr:
                     if done:
                         # Terminal state - update without next experience
                         agent.update(current_exp, next_exp=None)
                     else:
                         # Non-terminal - create next_exp and update
-                        next_exp = [next_state_idx, next_action, None, None, None]
+                        next_exp = [next_state_idx, next_dir, None, None, None]
+                        # next_exp = [next_state_idx, next_action, None, None, None]
                         agent.update(current_exp, next_exp)
 
                 # ============================= VISION MODEL ====================================
@@ -337,24 +344,31 @@ class ExperimentRunner:
                         if agent.true_reward_map[y, x] >= 0.25:
                             agent.reward_maps[idx, y, x] = curr_reward
 
+
                 # Update agent WVF
-                MOVE_FORWARD = 2
-                M_forward = agent.M[MOVE_FORWARD, :, :]
+                M_flat = np.mean(agent.M, axis=0)
                 R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                V_all = M_forward @ R_flat_all.T
+                V_all = M_flat @ R_flat_all.T
                 agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+
+                # # Update agent WVF
+                # MOVE_FORWARD = 2
+                # M_forward = agent.M[MOVE_FORWARD, :, :]
+                # R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                # V_all = M_forward @ R_flat_all.T
+                # agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
                 # Update counters
                 total_reward += reward
                 steps += 1
 
                 # ============================= EPISODE END CHECK =============================
-                if done:
-                    break
-                else:
-                    # Move to next transition (forward action only)
-                    current_exp = next_exp
-                    current_action = next_action
+                # Prepare for next iteration
+                current_action = next_action
+                current_dir = next_dir
+                current_state_idx = next_state_idx
+                current_exp = [current_state_idx, current_dir, None, None, None]
+
 
             # ============================= POST-EPISODE PROCESSING =============================
             ae_triggers_per_episode.append(ae_triggers_this_episode)
@@ -382,16 +396,28 @@ class ExperimentRunner:
             if episode % 500 == 0:
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
-                # Saving the Move Forward SR
-                forward_M = agent.M[MOVE_FORWARD, :, :]
+                # # Saving the Move Forward SR
+                # forward_M = agent.M[MOVE_FORWARD, :, :]
+
+                # plt.figure(figsize=(6, 5))
+                # im = plt.imshow(forward_M, cmap='hot')
+                # plt.title(f"Forward SR Matrix (Episode {episode})")
+                # plt.colorbar(im, label="SR Value")
+                # plt.tight_layout()
+                # plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
+                # plt.close()
+
+                # Compute averaged SR
+                M_flat = np.mean(agent.M, axis=0)
 
                 plt.figure(figsize=(6, 5))
-                im = plt.imshow(forward_M, cmap='hot')
-                plt.title(f"Forward SR Matrix (Episode {episode})")
+                im = plt.imshow(M_flat, cmap='hot')
+                plt.title(f"Averaged SR Matrix (Episode {episode})")
                 plt.colorbar(im, label="SR Value")
                 plt.tight_layout()
                 plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
                 plt.close()
+
 
                 # Create vision plots
                 fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))

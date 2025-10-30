@@ -20,7 +20,8 @@ class SuccessorAgentPartialSARSA:
         
         # initialization of the SR
         # self.M = np.zeros((self.action_size, self.state_size, self.state_size))
-        self.M = np.array([np.eye(self.state_size) for _ in range(self.action_size)])
+        # Range 4 cardinal directions, we'll stor an SR slice for each direction
+        self.M = np.array([np.eye(self.state_size) for _ in range(4)])
         # self.M += np.random.normal(0, 0.01, self.M.shape) # Add small random noise
 
         self.w = np.zeros([self.state_size])
@@ -190,64 +191,86 @@ class SuccessorAgentPartialSARSA:
         
         return 2  # fallback: move forward
 
-    def update_sr(self, current_exp, next_exp):
-        """Update successor features for forward movements only."""
-        
-        s = current_exp[0]    # current state index
-        s_a = current_exp[1]  # current action (always forward/toggle)
-        s_1 = current_exp[2]  # next state index  
-        done = current_exp[4] # terminal flag
-        
-        # Don't update if we didn't actually move
-        if s == s_1 and not done:
-            return 0.0
-    
-        MOVE_FORWARD = 2
-        
-        # Create one-hot vector for current state
-        I = self._onehot(s, self.state_size)
-        
-        if done:
-            # Terminal state: SR should predict only current state
-            td_target = I
-        else:
-            # Non-terminal: SR should predict current + discounted future states
-            # Since next_exp always contains a forward action when not done,
-            # we can directly use it
-            td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
-        
-        # Update SR for the forward action
-        td_error = td_target - self.M[MOVE_FORWARD, s, :]
-        self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
-
-        # Theoretical max is 1/(1-gamma) for any single entry
-        max_sr_value = 1.0 / (1.0 - self.gamma)  # = 100 for gamma=0.99
-        self.M[MOVE_FORWARD, s, :] = np.clip(self.M[MOVE_FORWARD, s, :], 0, max_sr_value)
-    
-        return np.mean(np.abs(td_error))
-
+    # Old, no cardinal direction
     # def update_sr(self, current_exp, next_exp):
-    #     """Update successor features for all actions using SARSA."""
+    #     """Update successor features for forward movements only."""
+        
     #     s = current_exp[0]    # current state index
-    #     s_a = current_exp[1]  # current action
-    #     s_1 = current_exp[2]  # next state index
+    #     s_a = current_exp[1]  # current action (always forward/toggle)
+    #     s_1 = current_exp[2]  # next state index  
     #     done = current_exp[4] # terminal flag
         
+    #     # Don't update if we didn't actually move
+    #     if s == s_1 and not done:
+    #         return 0.0
+    
+    #     MOVE_FORWARD = 2
+        
+    #     # Create one-hot vector for current state
     #     I = self._onehot(s, self.state_size)
         
     #     if done:
+    #         # Terminal state: SR should predict only current state
     #         td_target = I
-    #     elif next_exp is not None:
-    #         s_a_1 = next_exp[1]  # next action (SARSA)
-    #         td_target = I + self.gamma * self.M[s_a_1, s_1, :]
     #     else:
-    #         # Fallback - shouldn't happen with proper SARSA
-    #         td_target = I
+    #         # Non-terminal: SR should predict current + discounted future states
+    #         # Since next_exp always contains a forward action when not done,
+    #         # we can directly use it
+    #         td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
         
-    #     td_error = td_target - self.M[s_a, s, :]
-    #     self.M[s_a, s, :] += self.learning_rate * td_error
-        
+    #     # Update SR for the forward action
+    #     td_error = td_target - self.M[MOVE_FORWARD, s, :]
+    #     self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
+
+    #     # Theoretical max is 1/(1-gamma) for any single entry
+    #     max_sr_value = 1.0 / (1.0 - self.gamma)  # = 100 for gamma=0.99
+    #     self.M[MOVE_FORWARD, s, :] = np.clip(self.M[MOVE_FORWARD, s, :], 0, max_sr_value)
+    
     #     return np.mean(np.abs(td_error))
+    
+    # New, takes into account cardinal direction
+    def update_sr(self, current_exp, next_exp):
+        """
+        Update successor representation for the agent's current cardinal direction.
+
+        Args:
+            current_exp: (s, a_dir, s1, r, done)
+                - s: current state index
+                - a_dir: current cardinal direction (0,1,2,3)
+                - s1: next state index
+                - r: reward (not used directly in SR)
+                - done: whether episode terminated
+            next_exp: (s1, a_dir_next, s2, r_next, done_next) [for SARSA-style bootstrapping]
+        """
+        
+        s      = current_exp[0]
+        a_dir  = current_exp[1]   # cardinal direction (e.g., N,E,S,W)
+        s1     = current_exp[2]
+        done   = current_exp[4]
+
+        # Skip update if the state didn't 
+        if s == s1:
+            return 0.0
+
+        I = self._onehot(s, self.state_size)
+
+        if done:
+            td_target = I
+        else:
+            # Use the same direction or next direction for bootstrapping
+            a_dir_next = next_exp[1]
+            td_target = I + self.gamma * self.M[a_dir_next, s1, :]
+
+        td_error = td_target - self.M[a_dir, s, :]
+        self.M[a_dir, s, :] += self.learning_rate * td_error
+
+        # Stability clipping (optional but smart)
+        max_sr_value = 1.0 / (1.0 - self.gamma)
+        self.M[a_dir, s, :] = np.clip(self.M[a_dir, s, :], 0, max_sr_value)
+
+        return np.mean(np.abs(td_error))
+
+
 
     def update(self , current_exp, next_exp=None):
         """Update both reward weights and successor features."""
