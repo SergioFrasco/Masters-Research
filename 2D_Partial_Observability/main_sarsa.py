@@ -119,10 +119,6 @@ class ExperimentRunner:
                 # Take action in environment
                 obs, reward, done, _, _ = env.step(current_action)
 
-                update_sr = True
-                if tuple(env.agent_pos) == tuple(old_agent_pos):
-                    update_sr = False
-
                 # Update internal state based on action taken
                 agent.update_internal_state(current_action)
                 
@@ -169,8 +165,7 @@ class ExperimentRunner:
 
                 # ============================= SR UPDATE =============================
                 # Complete current experience
-
-                if update_sr:
+                if next_action == 2:
                     if done:
                         # Terminal state - update without next experience
                         agent.update(current_exp, next_exp=None)

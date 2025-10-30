@@ -248,10 +248,6 @@ class SuccessorAgentPartialSARSA:
         s1     = current_exp[2]
         done   = current_exp[4]
 
-        # Skip update if the state didn't 
-        if s == s1:
-            return 0.0
-
         I = self._onehot(s, self.state_size)
 
         if done:
@@ -269,8 +265,6 @@ class SuccessorAgentPartialSARSA:
         self.M[a_dir, s, :] = np.clip(self.M[a_dir, s, :], 0, max_sr_value)
 
         return np.mean(np.abs(td_error))
-
-
 
     def update(self , current_exp, next_exp=None):
         """Update both reward weights and successor features."""
