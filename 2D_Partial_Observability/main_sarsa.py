@@ -165,15 +165,15 @@ class ExperimentRunner:
 
                 # ============================= SR UPDATE =============================
                 # Complete current experience
-                if next_action == 2:
-                    if done:
-                        # Terminal state - update without next experience
-                        agent.update(current_exp, next_exp=None)
-                    else:
-                        # Non-terminal - create next_exp and update
-                        next_exp = [next_state_idx, next_dir, None, None, None]
-                        # next_exp = [next_state_idx, next_action, None, None, None]
-                        agent.update(current_exp, next_exp)
+
+                if done:
+                    # Terminal state - update without next experience
+                    agent.update(current_exp, next_exp=None)
+                else:
+                    # Non-terminal - create next_exp and update
+                    next_exp = [next_state_idx, next_dir, None, None, None]
+                    # next_exp = [next_state_idx, next_action, None, None, None]
+                    agent.update(current_exp, next_exp)
 
                 # ============================= VISION MODEL ====================================
                 
