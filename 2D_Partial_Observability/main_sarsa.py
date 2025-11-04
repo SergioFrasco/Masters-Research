@@ -410,18 +410,31 @@ class ExperimentRunner:
 
                 # ============================= SR COMPARISON =============================
                 if self.sr_comparator is not None:
-                    # Get the forward action SR from agent
-                    # Compare with optimal SR
-                    metrics = self.sr_comparator.compare(forward_M, episode)
-                    
-                    if metrics:
-                        # print(f"\nSR Comparison Metrics (Episode {episode}):")
-                        for key, value in metrics.items():
-                            print(f"  {key}: {value:.6f}")
-                    
-                    # Visualize comparison
-                    self.sr_comparator.visualize_comparison(forward_M, episode)
-
+                    print("Attempting SR comparison...")
+                    try:
+                        # Compare with optimal SR
+                        metrics = self.sr_comparator.compare(forward_M, episode)
+                        
+                        if metrics:
+                            print(f"\nSR Comparison Metrics (Episode {episode}):")
+                            for key, value in metrics.items():
+                                print(f"  {key}: {value:.6f}")
+                        else:
+                            print("Warning: metrics returned None!")
+                        
+                        # Visualize comparison
+                        print("Creating SR comparison visualization...")
+                        self.sr_comparator.visualize_comparison(forward_M, episode)
+                        print("SR comparison visualization completed!")
+                        
+                    except Exception as e:
+                        print(f"ERROR in SR comparison: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print("WARNING: sr_comparator is None - SR comparison skipped!")
+                
+                print(f"{'='*60}\n")
                 plt.figure(figsize=(6, 5))
                 im = plt.imshow(forward_M, cmap='hot')
                 plt.title(f"Forward SR Matrix (Episode {episode})")
