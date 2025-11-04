@@ -404,8 +404,23 @@ class ExperimentRunner:
             if episode % 500 == 0:
                 save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
+                MOVE_FORWARD = 2
                 # Saving the Move Forward SR
                 forward_M = agent.M[MOVE_FORWARD, :, :]
+
+                # ============================= SR COMPARISON =============================
+                if self.sr_comparator is not None:
+                    # Get the forward action SR from agent
+                    # Compare with optimal SR
+                    metrics = self.sr_comparator.compare(forward_M, episode)
+                    
+                    if metrics:
+                        # print(f"\nSR Comparison Metrics (Episode {episode}):")
+                        for key, value in metrics.items():
+                            print(f"  {key}: {value:.6f}")
+                    
+                    # Visualize comparison
+                    self.sr_comparator.visualize_comparison(forward_M, episode)
 
                 plt.figure(figsize=(6, 5))
                 im = plt.imshow(forward_M, cmap='hot')
@@ -490,19 +505,7 @@ class ExperimentRunner:
                 plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
                 plt.close()
 
-                # ============================= SR COMPARISON =============================
-                if self.sr_comparator is not None:
-                    # Get the forward action SR from agent
-                    # Compare with optimal SR
-                    metrics = self.sr_comparator.compare(forward_M, episode)
-                    
-                    if metrics:
-                        # print(f"\nSR Comparison Metrics (Episode {episode}):")
-                        for key, value in metrics.items():
-                            print(f"  {key}: {value:.6f}")
-                    
-                    # Visualize comparison
-                    self.sr_comparator.visualize_comparison(forward_M, episode)
+
                             
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
