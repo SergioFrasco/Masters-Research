@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from minigrid.wrappers import ViewSizeWrapper
+from utils.sr_comparison import SRComparator 
 
 # Set environment variables to prevent memory issues
 os.environ['OMP_NUM_THREADS'] = '1'
@@ -30,6 +31,27 @@ class ExperimentRunner:
         self.results = {}
         self.trajectory_buffer_size = 10 
 
+        # Load optimal SR for comparison
+        self.optimal_sr = self.load_optimal_sr()
+        self.sr_comparator = SRComparator(self.optimal_sr) if self.optimal_sr is not None else None
+
+    def load_optimal_sr(self):
+        """Load the pre-computed optimal SR from datasets/"""
+        try:
+            optimal_sr_path = 'datasets/optimal_sr_10x10_gamma099.npy'
+            if os.path.exists(optimal_sr_path):
+                optimal_sr = np.load(optimal_sr_path)
+                print(f"Loaded optimal SR from {optimal_sr_path}")
+                print(f"Optimal SR shape: {optimal_sr.shape}")
+                return optimal_sr
+            else:
+                print(f"Warning: Optimal SR not found at {optimal_sr_path}")
+                print("Run the SR generation script first to create it.")
+                return None
+        except Exception as e:
+            print(f"Error loading optimal SR: {e}")
+            return None
+    
     def run_successor_experiment(self, episodes=5000, max_steps=200, seed=20, manual = False):
         """Run Master agent experiment with path integration"""
         
@@ -467,7 +489,24 @@ class ExperimentRunner:
                 plt.tight_layout()
                 plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
                 plt.close()
-                
+
+                # ============================= SR COMPARISON =============================
+                if self.sr_comparator is not None:
+                    # Get the forward action SR from agent
+                    MOVE_FORWARD = 2
+                    learned_sr = agent.M[MOVE_FORWARD, :, :]
+                    
+                    # Compare with optimal SR
+                    metrics = self.sr_comparator.compare(learned_sr, episode)
+                    
+                    if metrics:
+                        # print(f"\nSR Comparison Metrics (Episode {episode}):")
+                        for key, value in metrics.items():
+                            print(f"  {key}: {value:.6f}")
+                    
+                    # Visualize comparison
+                    self.sr_comparator.visualize_comparison(learned_sr, episode)
+                            
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
