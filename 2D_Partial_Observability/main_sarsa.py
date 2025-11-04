@@ -494,7 +494,7 @@ class ExperimentRunner:
                 if self.sr_comparator is not None:
                     # Get the forward action SR from agent
                     # Compare with optimal SR
-                    metrics = self.sr_comparator.compare(forward_M, episode)
+                    metrics = self.sr_comparator.compare(M_forward, episode)
                     
                     if metrics:
                         # print(f"\nSR Comparison Metrics (Episode {episode}):")
@@ -502,7 +502,7 @@ class ExperimentRunner:
                             print(f"  {key}: {value:.6f}")
                     
                     # Visualize comparison
-                    self.sr_comparator.visualize_comparison(forward_M, episode)
+                    self.sr_comparator.visualize_comparison(M_forward, episode)
                             
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
