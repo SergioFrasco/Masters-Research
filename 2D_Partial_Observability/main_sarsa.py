@@ -493,11 +493,8 @@ class ExperimentRunner:
                 # ============================= SR COMPARISON =============================
                 if self.sr_comparator is not None:
                     # Get the forward action SR from agent
-                    MOVE_FORWARD = 2
-                    learned_sr = agent.M[MOVE_FORWARD, :, :]
-                    
                     # Compare with optimal SR
-                    metrics = self.sr_comparator.compare(learned_sr, episode)
+                    metrics = self.sr_comparator.compare(forward_M, episode)
                     
                     if metrics:
                         # print(f"\nSR Comparison Metrics (Episode {episode}):")
@@ -505,7 +502,7 @@ class ExperimentRunner:
                             print(f"  {key}: {value:.6f}")
                     
                     # Visualize comparison
-                    self.sr_comparator.visualize_comparison(learned_sr, episode)
+                    self.sr_comparator.visualize_comparison(forward_M, episode)
                             
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
