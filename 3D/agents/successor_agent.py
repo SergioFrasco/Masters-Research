@@ -1,7 +1,3 @@
-# ============================================================================
-# UPDATED successor_agent.py - Direct environment access 
-# ============================================================================
-
 import numpy as np
 
 class RandomAgentWithSR:
@@ -162,33 +158,42 @@ class RandomAgentWithSR:
         z = np.clip(z, 0, self.grid_size - 1)
         return z * self.grid_size + x
     
-    def update_sr(self, s, action, s_next, next_action, done):
-        """Update SR matrix using TD learning with next action (SARSA-style)"""
-        # Skip turns - they don't change state
-        if action != self.MOVE_FORWARD:
-            return 0.0
+    def update_sr(self, current_exp, next_exp):
+        """Update successor features for forward movements only."""
         
-        # Skip if we didn't actually move
-        if s == s_next and not done:
-            return 0.0
+        s = current_exp[0]    # current state index
+        s_a = current_exp[1]  # current action (always forward/toggle)
+        s_1 = current_exp[2]  # next state index  
+        done = current_exp[4] # terminal flag
         
-        # One-hot encoding of current state
-        I = np.zeros(self.state_size)
-        I[s] = 1.0
+        # Don't update if we didn't actually move
+        if s == s_1 and not done:
+            return 0.0
+    
+        MOVE_FORWARD = 2
+        
+        # Create one-hot vector for current state
+        I = self._onehot(s, self.state_size)
         
         if done:
+            # Terminal state: SR should predict only current state
             td_target = I
         else:
-            if next_action == self.MOVE_FORWARD:
-                td_target = I + self.gamma * self.M[next_action, s_next, :]
-            else:
-                td_target = I + self.M[self.MOVE_FORWARD, s_next, :]
+            # Non-terminal: SR should predict current + discounted future states
+            # Since next_exp always contains a forward action when not done,
+            # we can directly use it
+            td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
         
-        # TD error and update
-        td_error = td_target - self.M[action, s, :]
-        self.M[action, s, :] += self.learning_rate * td_error
-        
+        # Update SR for the forward action
+        td_error = td_target - self.M[MOVE_FORWARD, s, :]
+        self.M[MOVE_FORWARD, s, :] += self.learning_rate * td_error
+
+        # Theoretical max is 1/(1-gamma) for any single entry
+        max_sr_value = 1.0 / (1.0 - self.gamma)  # = 100 for gamma=0.99
+        self.M[MOVE_FORWARD, s, :] = np.clip(self.M[MOVE_FORWARD, s, :], 0, max_sr_value)
+    
         return np.mean(np.abs(td_error))
+        
     
     def select_action(self):
         """Select a random action"""
