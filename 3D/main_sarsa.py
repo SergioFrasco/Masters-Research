@@ -2,6 +2,16 @@ import os
 os.environ['PYGLET_HEADLESS'] = '1'
 os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use non-GUI backend
 
+# Set up virtual display
+import subprocess
+import time
+
+# Start Xvfb
+xvfb_proc = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'])
+time.sleep(1)  # Give it time to start
+os.environ['DISPLAY'] = ':99'
+
+
 import matplotlib
 matplotlib.use('Agg')  # Must be called before importing pyplot
 
