@@ -1,10 +1,9 @@
 import os
 os.environ['PYGLET_HEADLESS'] = '1'
 os.environ['MPLBACKEND'] = 'Agg'
-
-from pyvirtualdisplay import Display
-display = Display(visible=0, size=(1024, 768))
-display.start()
+os.environ['PYOPENGL_PLATFORM'] = 'egl'
+os.environ['MESA_GL_VERSION_OVERRIDE'] = '3.3'
+os.environ['MESA_GLSL_VERSION_OVERRIDE'] = '330'
 
 import matplotlib
 matplotlib.use('Agg')  # Must be called before importing pyplot
