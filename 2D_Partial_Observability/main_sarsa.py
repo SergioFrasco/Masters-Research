@@ -138,9 +138,6 @@ class ExperimentRunner:
                 # Take action in environment
                 obs, reward, done, _, _ = env.step(current_action)
 
-                update_sr = True
-                if tuple(env.agent_pos) == tuple(old_agent_pos):
-                    update_sr = False
 
                 # Update internal state based on action taken
                 agent.update_internal_state(current_action)
@@ -162,38 +159,14 @@ class ExperimentRunner:
                 current_exp[3] = reward
                 current_exp[4] = done
 
-                # ============================= ACTION SELECTION =============================
-                # if manual:
-                #     print(f"Episode {episode}, Step {step}")
-                #     key = getch().lower()
-                    
-                #     if key == 'w':
-                #         next_action = 2  # forward
-                #     elif key == 'a':
-                #         next_action = 0  # turn left
-                #     elif key == 'd':
-                #         next_action = 1  # turn right
-                #     elif key == 's':
-                #         next_action = 5  # toggle
-                #     elif key == 'q':
-                #         manual = False
-                #         next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                #     elif key == '\r' or key == '\n':
-                #         next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                #     else:
-                #         next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-                # else:
-                #     next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-
                 # ============================= SR UPDATE =============================
-                if update_sr:
-                    if done:
-                        # Terminal state - update without next experience
-                        agent.update(current_exp, next_exp=None)
-                    else:
-                        # Non-terminal - create next_exp and update
-                        next_exp = [next_state_idx, next_action, None, None, None]
-                        agent.update(current_exp, next_exp)
+                if done:
+                    # Terminal state - update without next experience
+                    agent.update(current_exp, next_exp=None)
+                else:
+                    # Non-terminal - create next_exp and update
+                    next_exp = [next_state_idx, next_action, None, None, None]
+                    agent.update(current_exp, next_exp)
 
                 # ============================= VISION MODEL ====================================
                 

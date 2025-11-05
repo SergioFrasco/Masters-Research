@@ -317,6 +317,10 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         # Memory to train vision on
         trajectory_buffer = deque(maxlen=10)
         trajectory = []
+
+        obs, reward, terminated, truncated, info = env.step(current_action)
+        current_state_idx = agent.get_state_index(obs)
+        current_exp = [current_state_idx, current_action, None, None, None]
         
         while step < max_steps_per_episode:
             
@@ -482,6 +486,19 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             
             # Update SR matrix with current and next action
             td_error = agent.update_sr(current_state, current_action, next_state, next_action, done)
+
+            current_exp[2] = next_state
+            current_exp[3] = reward
+            current_exp[4] = done
+        
+            if done:
+                # Terminal state - update without next experience
+                agent.update(current_exp, next_exp=None)
+            else:
+                # Non-terminal - create next_exp and update
+                next_exp = [next_state, next_action, None, None, None]
+                agent.update(current_exp, next_exp)
+
 
             # ============================= VISION MODEL ====================================
                 
@@ -651,8 +668,13 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             total_reward += reward
             steps += 1
             
-            if terminated or truncated:
+            # ============================= EPISODE END CHECK =============================
+            if done:
                 break
+            else:
+                current_exp = next_exp
+                current_action = next_action
+
         
         # Episode ended 
         episode += 1
