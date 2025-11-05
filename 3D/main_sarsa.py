@@ -21,6 +21,20 @@ pyglet.options['debug_gl'] = False
 import pyglet.gl
 pyglet.gl._create_shadow_window = mock_create_shadow_window
 
+# ALSO patch pyglet.window.Window to prevent MiniWorld from creating its own shadow window
+original_window_init = pyglet.window.Window.__init__
+
+def patched_window_init(self, *args, **kwargs):
+    # If this is a 1x1 invisible window (shadow window), skip it
+    if kwargs.get('width') == 1 and kwargs.get('height') == 1 and kwargs.get('visible') == False:
+        # Just set minimal attributes instead of calling parent __init__
+        self._context = None
+        return
+    # Otherwise, call the original init
+    original_window_init(self, *args, **kwargs)
+
+pyglet.window.Window.__init__ = patched_window_init
+
 # NOW import everything else
 import gymnasium as gym
 import miniworld
@@ -882,7 +896,7 @@ if __name__ == "__main__":
     # create environment
     # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
     # env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
-    env = DiscreteMiniWorldWrapper(size=10, render_mode="None")
+    env = DiscreteMiniWorldWrapper(size=10, render_mode=None)
     
     # create agent
     agent = RandomAgentWithSR(env)
