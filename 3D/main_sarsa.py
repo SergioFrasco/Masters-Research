@@ -38,6 +38,31 @@ pyglet.window.Window.__init__ = patched_window_init
 # NOW import everything else
 import gymnasium as gym
 import miniworld
+
+# Patch FrameBuffer to avoid OpenGL context issues
+from miniworld import opengl
+
+class MockFrameBuffer:
+    """Mock FrameBuffer that doesn't require OpenGL context"""
+    def __init__(self, width, height, num_samples=0):
+        self.width = width
+        self.height = height
+        self.num_samples = num_samples
+        
+    def bind(self):
+        pass
+    
+    def unbind(self):
+        pass
+    
+    def read_pixels(self):
+        # Return a black image
+        import numpy as np
+        return np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+# Replace FrameBuffer with mock
+opengl.FrameBuffer = MockFrameBuffer
+
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 from agents import RandomAgent, RandomAgentWithSR
