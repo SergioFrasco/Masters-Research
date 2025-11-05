@@ -5,63 +5,9 @@ os.environ['MPLBACKEND'] = 'Agg'
 import matplotlib
 matplotlib.use('Agg')
 
-# Monkey-patch pyglet BEFORE it gets imported by miniworld
-import sys
-
-# Create a mock to prevent shadow window creation
-def mock_create_shadow_window():
-    pass
-
-# Import pyglet and disable shadow window
-import pyglet
-pyglet.options['shadow_window'] = False
-pyglet.options['debug_gl'] = False
-
-# Patch the _create_shadow_window function before pyglet.gl initializes
-import pyglet.gl
-pyglet.gl._create_shadow_window = mock_create_shadow_window
-
-# ALSO patch pyglet.window.Window to prevent MiniWorld from creating its own shadow window
-original_window_init = pyglet.window.Window.__init__
-
-def patched_window_init(self, *args, **kwargs):
-    # If this is a 1x1 invisible window (shadow window), skip it
-    if kwargs.get('width') == 1 and kwargs.get('height') == 1 and kwargs.get('visible') == False:
-        # Just set minimal attributes instead of calling parent __init__
-        self._context = None
-        return
-    # Otherwise, call the original init
-    original_window_init(self, *args, **kwargs)
-
-pyglet.window.Window.__init__ = patched_window_init
-
 # NOW import everything else
 import gymnasium as gym
 import miniworld
-
-# Patch FrameBuffer to avoid OpenGL context issues
-from miniworld import opengl
-
-class MockFrameBuffer:
-    """Mock FrameBuffer that doesn't require OpenGL context"""
-    def __init__(self, width, height, num_samples=0):
-        self.width = width
-        self.height = height
-        self.num_samples = num_samples
-        
-    def bind(self):
-        pass
-    
-    def unbind(self):
-        pass
-    
-    def read_pixels(self):
-        # Return a black image
-        import numpy as np
-        return np.zeros((self.height, self.width, 3), dtype=np.uint8)
-
-# Replace FrameBuffer with mock
-opengl.FrameBuffer = MockFrameBuffer
 
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
@@ -377,7 +323,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         trajectory = []
 
         obs, reward, terminated, truncated, info = env.step(current_action)
-        current_state_idx = agent.get_state_index(obs)
+        current_state_idx = agent.get_state_index()
         current_exp = [current_state_idx, current_action, None, None, None]
         
         while step < max_steps_per_episode:
@@ -543,7 +489,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             done = terminated or truncated
             
             # Update SR matrix with current and next action
-            td_error = agent.update_sr(current_state, current_action, next_state, next_action, done)
+            # td_error = agent.update_sr(current_state, current_action, next_state, next_action, done)
 
             current_exp[2] = next_state
             current_exp[3] = reward

@@ -20,6 +20,7 @@ class RandomAgentWithSR:
         
         # Initialize SR matrix: M[action, from_state, to_state]
         self.M = np.array([np.eye(self.state_size) for _ in range(self.action_size)])
+        self.w = np.zeros([self.state_size])
         
         # Store previous experience for TD update
         self.prev_state = None
@@ -158,6 +159,12 @@ class RandomAgentWithSR:
         z = np.clip(z, 0, self.grid_size - 1)
         return z * self.grid_size + x
     
+    def _onehot(self, index, size):
+        """Create one-hot encoded vector"""
+        vec = np.zeros(size)
+        vec[index] = 1
+        return vec
+    
     def update_sr(self, current_exp, next_exp):
         """Update successor features for forward movements only."""
         
@@ -194,7 +201,31 @@ class RandomAgentWithSR:
     
         return np.mean(np.abs(td_error))
         
-    
+    def update(self , current_exp, next_exp=None):
+        """Update both reward weights and successor features."""
+        # Always update reward weights when we observe a reward
+        error_w = self.update_w(current_exp)
+        
+        # Only update SR for actual state transitions (move forward)
+        error_sr = 0
+        if next_exp is not None:
+            error_sr = self.update_sr(current_exp, next_exp)
+        
+        return error_w, error_sr
+
+    def update_w(self, current_exp):
+        """Update reward weights - only when we actually observe a reward."""
+        s_1 = current_exp[2]  # next state index
+        r = current_exp[3]    # reward
+        
+        # Only update if we actually received a reward
+        if r != 0:
+            error = r - self.w[s_1]
+            self.w[s_1] += self.learning_rate * error
+            return error
+        
+        return 0.0  # No reward observed, no update
+
     def select_action(self):
         """Select a random action"""
         return np.random.randint(self.action_size)
