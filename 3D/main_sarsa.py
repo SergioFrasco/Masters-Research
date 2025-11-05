@@ -1,11 +1,27 @@
 import os
 os.environ['PYGLET_HEADLESS'] = '1'
 os.environ['MPLBACKEND'] = 'Agg'
-os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
 
 import matplotlib
-matplotlib.use('Agg')  # Must be called before importing pyplot
+matplotlib.use('Agg')
 
+# Monkey-patch pyglet BEFORE it gets imported by miniworld
+import sys
+
+# Create a mock to prevent shadow window creation
+def mock_create_shadow_window():
+    pass
+
+# Import pyglet and disable shadow window
+import pyglet
+pyglet.options['shadow_window'] = False
+pyglet.options['debug_gl'] = False
+
+# Patch the _create_shadow_window function before pyglet.gl initializes
+import pyglet.gl
+pyglet.gl._create_shadow_window = mock_create_shadow_window
+
+# NOW import everything else
 import gymnasium as gym
 import miniworld
 from miniworld.manual_control import ManualControl
@@ -22,11 +38,13 @@ from torchvision import transforms, models
 from PIL import Image
 from models import Autoencoder
 import numpy as np
-import matplotlib.pyplot as plt  # This must come AFTER matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from collections import deque
 import gc
 import pandas as pd
 from train_advanced_cube_detector2 import CubeDetector
+
+# Rest of your code stays the same...
 
 # class CubeDetector(nn.Module):
 #     """Lightweight CNN for cube detection using MobileNetV2"""
