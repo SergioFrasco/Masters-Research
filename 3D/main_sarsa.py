@@ -1,15 +1,6 @@
 import os
 os.environ['PYGLET_HEADLESS'] = '1'
-os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use non-GUI backend
-
-# Set up virtual display
-import subprocess
-import time
-
-# Start Xvfb
-xvfb_proc = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'])
-time.sleep(1)  # Give it time to start
-os.environ['DISPLAY'] = ':99'
+os.environ['MPLBACKEND'] = 'Agg'
 
 
 import matplotlib
@@ -873,7 +864,7 @@ if __name__ == "__main__":
     # create environment
     # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
     # env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
-    env = DiscreteMiniWorldWrapper(size=10)
+    env = DiscreteMiniWorldWrapper(size=10, render_mode="None")
     
     # create agent
     agent = RandomAgentWithSR(env)
