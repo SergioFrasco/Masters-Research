@@ -2,6 +2,9 @@ import os
 os.environ['PYGLET_HEADLESS'] = '1'
 os.environ['MPLBACKEND'] = 'Agg'
 
+from pyvirtualdisplay import Display
+display = Display(visible=0, size=(1024, 768))
+display.start()
 
 import matplotlib
 matplotlib.use('Agg')  # Must be called before importing pyplot
