@@ -5,13 +5,12 @@ os.environ['MPLBACKEND'] = 'Agg'
 import matplotlib
 matplotlib.use('Agg')
 
-# NOW import everything else
 import gymnasium as gym
 import miniworld
 
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
-from agents import RandomAgent, SuccessorAgentSARSA
+from agents import RandomAgent, SuccessorAgentQLearning
 from tqdm import tqdm
 import math
 from utils import plot_sr_matrix, generate_save_path, save_all_wvf
@@ -28,20 +27,6 @@ from collections import deque
 import gc
 import pandas as pd
 from train_advanced_cube_detector2 import CubeDetector
-
-# Rest of your code stays the same...
-
-# class CubeDetector(nn.Module):
-#     """Lightweight CNN for cube detection using MobileNetV2"""
-#     def __init__(self, pretrained=False):
-#         super(CubeDetector, self).__init__()
-#         # Use MobileNetV2 as backbone
-#         self.backbone = models.mobilenet_v2(pretrained=pretrained)
-#         # Replace final classifier
-#         self.backbone.classifier[1] = nn.Linear(self.backbone.last_channel, 2)
-    
-#     def forward(self, x):
-#         return self.backbone(x)
 
 def load_cube_detector(model_path='models/advanced_cube_detector.pth', force_cpu=False):
     """Load the trained cube detector model"""
@@ -140,37 +125,6 @@ def detect_cube(model, obs, device, transform, pos_mean=0.0, pos_std=1.0):
         "regression": regression_values
     }
 
-# def compose_wvf(agent, reward_map):
-#     """Compose world value functions from SR and reward map"""
-#     grid_size = agent.grid_size
-#     state_size = agent.state_size
-    
-#     # Initialize reward maps for each state
-#     reward_maps = np.zeros((state_size, grid_size, grid_size))
-    
-#     # Fill reward maps based on threshold
-#     for z in range(grid_size):
-#         for x in range(grid_size):
-#             curr_reward = reward_map[z, x]
-#             idx = z * grid_size + x
-#             # Threshold
-#             if reward_map[z, x] >= 0.5:
-#                 reward_maps[idx, z, x] = curr_reward
-    
-#     MOVE_FORWARD = 2
-#     M_forward = agent.M[MOVE_FORWARD, :, :]
-    
-#     # Flatten reward maps
-#     R_flat_all = reward_maps.reshape(state_size, -1)
-    
-#     # Compute WVF: V = M @ R^T
-#     V_all = M_forward @ R_flat_all.T
-    
-#     # Reshape back to grid
-#     wvf = V_all.T.reshape(state_size, grid_size, grid_size)
-    
-#     return wvf
-
 def plot_wvf(wvf, episode, grid_size, maps_per_row=10):
     """Plot all world value functions in a grid"""
     num_maps = wvf.shape[0]  # state_size
@@ -237,7 +191,6 @@ def _create_target_view_with_reward(past_agent_pos, past_agent_dir, reward_pos, 
 
 def _train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
     """Train autoencoder on batch of trajectory data"""
-    # print("Done: Batch training triggered")
     # Convert to tensors and stack
     input_batch = np.stack([inp[np.newaxis, ..., np.newaxis] for inp in inputs])
     target_batch = np.stack([tgt[np.newaxis, ..., np.newaxis] for tgt in targets])
@@ -256,12 +209,13 @@ def _train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
 
     
 def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200):
-    """Run with random agent that learns SR and detects cubes"""
-    print("\n=== SUCCESSOR REPRESENTATION AGENT MODE WITH CUBE DETECTION ===")
-    print("Agent will take random actions and learn SR matrix")
+    """Run with Q-Learning agent that learns SR and detects cubes"""
+    print("\n=== Q-LEARNING SUCCESSOR REPRESENTATION AGENT MODE WITH CUBE DETECTION ===")
+    print("Agent will take actions and learn SR matrix using Q-Learning (off-policy)")
     print(f"Max episodes: {max_episodes}")
     print(f"Max steps per episode: {max_steps_per_episode}\n")
     print("Loading cube detector model...")
+    
     # 1. Load the model
     cube_model, device, pos_mean, pos_std = load_cube_detector('models/advanced_cube_detector.pth', force_cpu=False)
     
@@ -271,7 +225,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-
 
     # Vision Model from 2D
     print("Loading 2D vision model...")
@@ -302,13 +255,13 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     total_steps = 0
     total_cubes_detected = 0
     
-    for episode in tqdm(range(max_episodes), desc="Training 3D Successor Agent"):
+    for episode in tqdm(range(max_episodes), desc="Training Q-Learning Successor Agent"):
         step = 0
         episode_reward = 0
         episode_cubes = 0
         ae_triggers_this_episode = 0
         
-        # Initialize first action
+        # Q-LEARNING: Only need to initialize first action (no need for next_action initially)
         current_state = agent.get_state_index()
         current_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
         reward_map = np.zeros((env.size, env.size))
@@ -322,8 +275,11 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         trajectory_buffer = deque(maxlen=10)
         trajectory = []
 
+        # Take initial step
         obs, reward, terminated, truncated, info = env.step(current_action)
         current_state_idx = agent.get_state_index()
+        
+        # Q-LEARNING: Experience format doesn't need next_action for learning
         current_exp = [current_state_idx, current_action, None, None, None]
         
         while step < max_steps_per_episode:
@@ -331,20 +287,14 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             agent_pos = agent._get_agent_pos_from_env()
             trajectory.append((agent_pos[0], agent_pos[1], current_action))
 
-            # First (before step) Detect type of cube in the observation, as well as position regression - marked rx, rz, bx, bz
-            # where +x is forward, +z is right from agent perspective
+            # First (before step) Detect type of cube in the observation
             detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
             
             label = detection_result['label']
             confidence = detection_result['confidence']
-            regression_values = detection_result['regression'] # rx, rz, bx, bz
-            regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
-            rx, rz, bx, bz = regression_values  # forward, right for each color
-            
-            # print(f"Detected: {label} with confidence {confidence:.3f}")
-            # if regression_values is not None:
-                # print(f"Positions: {regression_values}")
-
+            regression_values = detection_result['regression']
+            regression_values = np.round(regression_values).astype(int)
+            rx, rz, bx, bz = regression_values
 
             if label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
                 # Update counters
@@ -355,17 +305,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     episode_cubes += 2
                     total_cubes_detected += 2
 
-                # We have:
-                # pos x is forward
-                # pos z is right
-
-                # We need:
-                # pos x is right
-                # pos z is south
-
-                # so swap x and z and make x negative
-                
-                # Check goal position from model
+                # Convert coordinates
                 if label == 'Red':
                     goal_pos_red  = (-rz, rx)
                     goal_pos_blue = None
@@ -400,40 +340,23 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             }
             trajectory_buffer.append(step_info)
             
+            # Q-LEARNING: Select next action for execution (but not needed for update)
+            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+            
             # Step environment
-            obs, reward, terminated, truncated, info = env.step(current_action)
+            obs, reward, terminated, truncated, info = env.step(next_action)
             step += 1
             total_steps += 1
             episode_reward += reward
 
-            # Save the frame - ensure render mode is "rgb_array"
-            # frame = env.render()
-            # if frame is not None:
-            #     if isinstance(frame, np.ndarray):
-            #         img = Image.fromarray(frame)
-            #     else:
-            #         img = frame
-                
-            #     # Save RGB frame
-            #     save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
-            #     img.save(save_frame_path)
-            #     print(f"  Saved frame: {save_frame_path}")
-
-            # time.sleep(10) 
-
-            # Second (after step) Detect type of cube in the observation, as well as position regression - marked rx, rz, bx, bz
-            # where +x is forward, +z is right from agent perspective
+            # Second (after step) Detect type of cube in the observation
             detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
             
             label = detection_result['label']
             confidence = detection_result['confidence']
-            regression_values = detection_result['regression'] # rx, rz, bx, bz
-            regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
-            rx, rz, bx, bz = regression_values  # forward, right for each color
-            
-            # print(f"Detected: {label} with confidence {confidence:.3f}")
-            # if regression_values is not None:
-            #     print(f"Positions: {regression_values}")
+            regression_values = detection_result['regression']
+            regression_values = np.round(regression_values).astype(int)
+            rx, rz, bx, bz = regression_values
 
             if label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
                 # Update counters
@@ -444,17 +367,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     episode_cubes += 2
                     total_cubes_detected += 2
 
-                # We have:
-                # pos x is forward
-                # pos z is right
-
-                # We need:
-                # pos x is right
-                # pos z is south
-
-                # so swap x and z and make x negative
-                
-                # Check goal position from model
+                # Convert coordinates
                 if label == 'Red':
                     goal_pos_red  = (-rz, rx)
                     goal_pos_blue = None
@@ -478,43 +391,30 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     goal_pos_blue=None,
                     matrix_size=13
                 )
-                    
-            # print(reward_map)
             
             # Get next state after action
             next_state = agent.get_state_index()
-            
-            # Select NEXT action (SARSA)
-            next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
             done = terminated or truncated
             
-            # Update SR matrix with current and next action
-            # td_error = agent.update_sr(current_state, current_action, next_state, next_action, done)
-
+            # Complete current experience
             current_exp[2] = next_state
             current_exp[3] = reward
             current_exp[4] = done
-        
-            if done:
-                # Terminal state - update without next experience
-                agent.update(current_exp, next_exp=None)
-            else:
-                # Non-terminal - create next_exp and update
-                next_exp = [next_state, next_action, None, None, None]
-                agent.update(current_exp, next_exp)
-
+            
+            # Q-LEARNING: Update doesn't need next_action
+            agent.update(current_exp)
 
             # ============================= VISION MODEL ====================================
-                
-            # # Get current agent position
+            
+            # Get current agent position
             agent_position = agent._get_agent_pos_from_env()
 
-            # # Get the agent's 13x13 view from observation
+            # Get the agent's 13x13 view from observation
             agent_view = ego_obs
 
-            # # If agent is on goal, force the agent's position in view to show reward
+            # If agent is on goal, force the agent's position in view to show reward
             if done:
-                x,z = agent_position
+                x, z = agent_position
                 agent_view[12, 6] = 1.0  # Agent position in egocentric view
 
             # Reshape for the autoencoder (add batch and channel dims)
@@ -551,7 +451,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                         batch_targets.append(past_target_13x13)
                     
                     # ALSO include the current step (when agent is on goal)
-                    current_target_13x13 =_create_target_view_with_reward(
+                    current_target_13x13 = _create_target_view_with_reward(
                         tuple(agent._get_agent_pos_from_env()),
                         agent._get_agent_dir_from_env(),
                         agent_position,
@@ -625,7 +525,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     else:
                         target_13x13[view_z, view_x] = 0.0
 
-            # # Check for prediction errors and trigger training if needed
+            # Check for prediction errors and trigger training if needed
             trigger_ae_training = False
             view_error = np.abs(predicted_reward_map_2d - target_13x13)
             max_error = np.max(view_error)
@@ -665,7 +565,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
             
-            # Move to next step
+            # Q-LEARNING: Move to next step (simpler than SARSA)
             current_state = next_state
             current_action = next_action
             
@@ -676,27 +576,13 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             if done:
                 break
             else:
-                current_exp = next_exp
-                current_action = next_action
+                # Q-LEARNING: Create new experience for next step
+                current_exp = [current_state, current_action, None, None, None]
 
         
         # Episode ended 
         episode += 1
-        # print(f"\n=== Episode {episode}/{max_episodes} ended after {step} steps! ===")
-        # print(f"Episode reward: {episode_reward:.2f}")
-        # print(f"Cubes detected this episode: {episode_cubes}")
-        # print(f"Total cubes detected: {total_cubes_detected}")
-        # print(f"Reward map sum: {reward_map.sum()}")
-        # print(f"SR Matrix stats: mean={agent.M.mean():.4f}, std={agent.M.std():.4f}")
-        # print(f"Total steps so far: {total_steps}")
         
-        # Compose and plot WVF every 50 episodes or on last episode
-        # if episode % 1000 == 0 or episode == max_episodes:
-        #     if reward_map.sum() > 0:  # Only if we've detected rewards
-        #         wvf = compose_wvf(agent, reward_map)
-        #         plot_wvf(wvf, episode, agent.grid_size)
-        #     plot_sr_matrix(agent, episode)
-
         ae_triggers_per_episode.append(ae_triggers_this_episode)
 
         # Create ground truth reward space
@@ -720,31 +606,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         # Generate visualizations occasionally
         if episode % 250 == 0 or episode == max_episodes or episode == 0:
 
-            # # Right before creating ground_truth_reward_space
-            # print(f"\n=== Debug Info for Episode {episode} ===")
-            # print(f"Agent position: ({agent_x}, {agent_z})")
-            # print(f"Agent raw pos: {env.agent.pos}")
-
-            # box_red_pos = env.box_red.pos
-            # box_blue_pos = env.box_blue.pos
-            # print(f"Red box raw pos: {box_red_pos}")
-            # print(f"Blue box raw pos: {box_blue_pos}")
-
-            # # Convert to grid coordinates
-            # red_x = int(round(box_red_pos[0]))
-            # red_z = int(round(box_red_pos[2]))
-            # blue_x = int(round(box_blue_pos[0]))
-            # blue_z = int(round(box_blue_pos[2]))
-
-            # print(f"Red box grid: ({red_x}, {red_z})")
-            # print(f"Blue box grid: ({blue_x}, {blue_z})")
-
-            # # Check what's in true_reward_map at those locations
-            # print(f"true_reward_map[{red_z}, {red_x}] = {agent.true_reward_map[red_z, red_x]}")
-            # print(f"true_reward_map[{blue_z}, {blue_x}] = {agent.true_reward_map[blue_z, blue_x]}")
-            # print(f"ground_truth[{red_z}, {red_x}] = {ground_truth_reward_space[red_z, red_x]}")
-            # print(f"ground_truth[{blue_z}, {blue_x}] = {ground_truth_reward_space[blue_z, blue_x]}")
-
             save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
 
             # Saving the Move Forward SR
@@ -760,7 +621,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
 
             box_red_pos = env.box_red.pos
             box_blue_pos = env.box_blue.pos
-
 
             # Create vision plots
             fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
@@ -802,7 +662,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             
             window_size = 50
             if len(ae_triggers_per_episode) >= window_size:
-                smoothed_triggers = np.convolve(ae_triggers_per_episode, np.ones(window_size)/window_size,  mode='valid')
+                smoothed_triggers = np.convolve(ae_triggers_per_episode, np.ones(window_size)/window_size, mode='valid')
                 smooth_episodes = range(window_size//2, len(ae_triggers_per_episode) - window_size//2 + 1)
             else:
                 smoothed_triggers = ae_triggers_per_episode
@@ -838,42 +698,40 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     print(f"✓ Final SR Matrix stats: mean={agent.M.mean():.4f}, std={agent.M.std():.4f}")
 
     return {
-    "rewards": episode_rewards,
-    "lengths": episode_lengths,
-    "final_epsilon": epsilon,
-    "algorithm": "Masters Successor w/ Path Integration",
-}
+        "rewards": episode_rewards,
+        "lengths": episode_lengths,
+        "final_epsilon": epsilon,
+        "algorithm": "Q-Learning Successor w/ Path Integration",
+    }
 
 
 def _find_convergence_episode(all_rewards, window):
-        """Find approximate convergence episode"""
-        mean_rewards = np.mean(all_rewards, axis=0)
-        smoothed = pd.Series(mean_rewards).rolling(window).mean()
+    """Find approximate convergence episode"""
+    mean_rewards = np.mean(all_rewards, axis=0)
+    smoothed = pd.Series(mean_rewards).rolling(window).mean()
 
-        # Simple heuristic: convergence when slope becomes small
-        if len(smoothed) < window * 2:
-            return len(smoothed)
-
-        slopes = np.diff(smoothed[window:])
-        convergence_threshold = 0.001
-
-        for i, slope in enumerate(slopes):
-            if abs(slope) < convergence_threshold:
-                return i + window
-
+    # Simple heuristic: convergence when slope becomes small
+    if len(smoothed) < window * 2:
         return len(smoothed)
+
+    slopes = np.diff(smoothed[window:])
+    convergence_threshold = 0.001
+
+    for i, slope in enumerate(slopes):
+        if abs(slope) < convergence_threshold:
+            return i + window
+
+    return len(smoothed)
     
 if __name__ == "__main__":
     # create environment
-    # env = DiscreteMiniWorldWrapper(size=10, render_mode = "human")
-    # env = DiscreteMiniWorldWrapper(size=10, render_mode="rgb_array") # For Image Capture
     env = DiscreteMiniWorldWrapper(size=10, render_mode=None)
     
     # create agent
-    agent = SuccessorAgentSARSA(env)
+    agent = SuccessorAgentQLearning(env)
     
     all_results = {}
-    window=100
+    window = 100
 
     # Run training with limits
     successor_results = run_successor_agent(
@@ -884,7 +742,7 @@ if __name__ == "__main__":
     )
 
     # Store results
-    algorithms = ['3D Masters Successor']
+    algorithms = ['Q-Learning Successor']
     results_list = [successor_results]
     
     for alg, result in zip(algorithms, results_list):
@@ -999,6 +857,3 @@ if __name__ == "__main__":
 
     # Save numerical results
     # self.save_results()
-
-    # return summary_df
- 

@@ -1,7 +1,7 @@
 import numpy as np
 
-class RandomAgentWithSR:
-    """Random agent that learns Successor Representation"""
+class SuccessorAgentQLearning:
+    """Random agent that learns Successor Representation using Q-Learning"""
     
     def __init__(self, env, learning_rate=0.05, gamma=0.99):
         self.env = env
@@ -34,20 +34,19 @@ class RandomAgentWithSR:
 
         # Initialize individual reward maps: one per state
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
+        
+        # Track visited positions for path integration
+        self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
     
     def sample_action_with_wvf(self, obs, epsilon=0.0):
-
-        """Sample action using WVF"""
-        # if not self.initialized:
-        #     self.initialize_path_integration(obs)
-            
+        """Sample action using WVF with epsilon-greedy exploration"""
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
         
         x, z = self._get_agent_pos_from_env()
         current_dir = self._get_agent_dir_from_env()
         
-        # Fixed: neighbors in (x, y) format
+        # Fixed: neighbors in (x, z) format
         neighbors = [
             ((x + 1, z), 0),  # Right
             ((x, z + 1), 1),  # Down
@@ -59,9 +58,9 @@ class RandomAgentWithSR:
         valid_values = []
         
         for neighbor_pos, target_dir in neighbors:
-            if self._is_valid_position(neighbor_pos):  # Now passing (x, y)
-                next_x, next_y = neighbor_pos  # Unpack as (x, y)
-                max_value_across_maps = np.max(self.wvf[:, next_y, next_x])  # Index as [y, x]
+            if self._is_valid_position(neighbor_pos):  # Now passing (x, z)
+                next_x, next_z = neighbor_pos  # Unpack as (x, z)
+                max_value_across_maps = np.max(self.wvf[:, next_z, next_x])  # Index as [z, x]
                 action_to_take = self._get_action_toward_direction(current_dir, target_dir)
                 
                 valid_actions.append(action_to_take)
@@ -86,7 +85,6 @@ class RandomAgentWithSR:
         
         # Store original agent position
         original_pos = self._get_agent_pos_from_env()
-        original_dir = self._get_agent_dir_from_env()
         
         # Calculate direction vector to new position
         dx = x - original_pos[0]
@@ -132,7 +130,7 @@ class RandomAgentWithSR:
     def _get_agent_pos_from_env(self):
         """Get agent position directly from environment"""
         # Use the SAME conversion as you use for boxes
-        x = int(round(self.env.agent.pos[0] /  self.env.grid_size))
+        x = int(round(self.env.agent.pos[0] / self.env.grid_size))
         z = int(round(self.env.agent.pos[2] / self.env.grid_size))
         return (x, z)
     
@@ -165,8 +163,13 @@ class RandomAgentWithSR:
         vec[index] = 1
         return vec
     
-    def update_sr(self, current_exp, next_exp):
-        """Update successor features for forward movements only."""
+    def update_sr(self, current_exp):
+        """
+        Update successor features using Q-Learning (off-policy).
+        
+        Q-Learning difference: Instead of using the next action that will be taken (SARSA),
+        we use the MAXIMUM SR value over all possible actions from the next state.
+        """
         
         s = current_exp[0]    # current state index
         s_a = current_exp[1]  # current action (always forward/toggle)
@@ -186,10 +189,10 @@ class RandomAgentWithSR:
             # Terminal state: SR should predict only current state
             td_target = I
         else:
-            # Non-terminal: SR should predict current + discounted future states
-            # Since next_exp always contains a forward action when not done,
-            # we can directly use it
-            td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
+            # Q-LEARNING: Use the BEST possible SR from next state (max over all actions)
+            # This is the key difference from SARSA which would use M[next_action, s_1, :]
+            max_next_sr = np.max([self.M[a, s_1, :] for a in range(self.action_size)], axis=0)
+            td_target = I + self.gamma * max_next_sr
         
         # Update SR for the forward action
         td_error = td_target - self.M[MOVE_FORWARD, s, :]
@@ -201,15 +204,17 @@ class RandomAgentWithSR:
     
         return np.mean(np.abs(td_error))
         
-    def update(self , current_exp, next_exp=None):
-        """Update both reward weights and successor features."""
+    def update(self, current_exp):
+        """
+        Update both reward weights and successor features.
+        
+        Q-Learning version: Only needs current experience, not next action.
+        """
         # Always update reward weights when we observe a reward
         error_w = self.update_w(current_exp)
         
-        # Only update SR for actual state transitions (move forward)
-        error_sr = 0
-        if next_exp is not None:
-            error_sr = self.update_sr(current_exp, next_exp)
+        # Update SR using Q-Learning (doesn't need next_exp)
+        error_sr = self.update_sr(current_exp)
         
         return error_w, error_sr
 
