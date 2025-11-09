@@ -152,28 +152,28 @@ class DQNExperimentRunner:
                 agent_pos = agent._get_agent_pos_from_env()
                 
                 # Select action using DQN
-                if manual:
-                    print(f"Episode {episode}, Step {step}")
-                    key = getch().lower()
+                # if manual:
+                #     print(f"Episode {episode}, Step {step}")
+                #     key = getch().lower()
                     
-                    if key == 'w':
-                        current_action = 2  # forward
-                    elif key == 'a':
-                        current_action = 0  # turn left
-                    elif key == 'd':
-                        current_action = 1  # turn right
-                    elif key == 's':
-                        current_action = 5  # toggle
-                    elif key == 'q':
-                        manual = False
-                        current_action = agent.select_action_dqn(current_obs, agent.epsilon)
-                    elif key == '\r' or key == '\n':  # Enter key
-                        current_action = agent.select_action_dqn(current_obs, agent.epsilon)
-                    else:
-                        current_action = agent.select_action_dqn(current_obs, agent.epsilon)
+                #     if key == 'w':
+                #         current_action = 2  # forward
+                #     elif key == 'a':
+                #         current_action = 0  # turn left
+                #     elif key == 'd':
+                #         current_action = 1  # turn right
+                #     elif key == 's':
+                #         current_action = 5  # toggle
+                #     elif key == 'q':
+                #         manual = False
+                #         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
+                #     elif key == '\r' or key == '\n':  # Enter key
+                #         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
+                #     else:
+                #         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
 
-                else:
-                    current_action = agent.select_action_dqn(current_obs, agent.epsilon)
+                # else:
+                current_action = agent.select_action_dqn(current_obs, agent.epsilon)
 
                 trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
@@ -806,7 +806,7 @@ def main():
     runner = DQNExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=2000, max_steps=200, manual=False)
+    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual=False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
