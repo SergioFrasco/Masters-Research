@@ -1,6 +1,6 @@
 import os
-os.environ['PYGLET_HEADLESS'] = '1'
-os.environ['MPLBACKEND'] = 'Agg'
+os.environ["MINIWORLD_HEADLESS"] = "1"
+os.environ["PYGLET_HEADLESS"] = "True"  # extra safety for pyglet itself
 
 import matplotlib
 matplotlib.use('Agg')
@@ -879,7 +879,7 @@ if __name__ == "__main__":
     successor_results = run_successor_agent(
         env, 
         agent, 
-        max_episodes=10000,        
+        max_episodes=3000,        
         max_steps_per_episode=200 
     )
 
