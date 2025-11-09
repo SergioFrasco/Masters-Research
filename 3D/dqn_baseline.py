@@ -1,10 +1,7 @@
-
-from pyvirtualdisplay import Display
-display = Display(visible=False, size=(1024, 768))
-display.start()
-
 import os
 os.environ["MINIWORLD_HEADLESS"] = "1"
+os.environ["PYGLET_HEADLESS"] = "True"  # extra safety for pyglet itself
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
