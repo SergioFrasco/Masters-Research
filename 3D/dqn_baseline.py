@@ -1,7 +1,9 @@
+import os
+os.environ["MINIWORLD_HEADLESS"] = "1"
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import os
 from collections import deque
 from tqdm import tqdm
 from env import DiscreteMiniWorldWrapper
