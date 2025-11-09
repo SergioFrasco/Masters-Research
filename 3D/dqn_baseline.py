@@ -1,6 +1,5 @@
+from pyvirtualdisplay import Display
 import os
-os.environ["MINIWORLD_HEADLESS"] = "1"
-
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -21,6 +20,9 @@ from minigrid.wrappers import ViewSizeWrapper
 from torchvision import transforms
 from train_advanced_cube_detector2 import CubeDetector
 from PIL import Image
+
+display = Display(visible=False, size=(1024, 768))
+display.start()
 
 # Set environment variables to prevent memory issues
 os.environ['OMP_NUM_THREADS'] = '1'
