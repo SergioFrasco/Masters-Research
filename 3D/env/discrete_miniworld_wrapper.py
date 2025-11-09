@@ -2,7 +2,7 @@ from miniworld.envs.oneroom import OneRoom
 from miniworld.miniworld import MiniWorldEnv
 import numpy as np
 import math
-from miniworld.entity import Box, Ball
+from miniworld.entity import Box
 from miniworld.math import intersect_circle_segs
 
 class DiscreteMiniWorldWrapper(OneRoom):
@@ -17,22 +17,22 @@ class DiscreteMiniWorldWrapper(OneRoom):
     ):
         if max_steps is None:
             max_steps = 10000
-            
+
         # Store custom step sizes
         self.custom_forward_step = forward_step
         self.custom_turn_step = turn_step
         self.grid_size = grid_size
 
         super().__init__(size=size, max_episode_steps=max_steps, **kwargs)
-        
-        
+
+
         # Override the max_forward_step (this affects forward/backward movement)
         self.max_forward_step = forward_step
-        
+
     def move_agent(self, forward_step, fwd_drift=0.0):
         """Override move_agent to use custom step size"""
         return super().move_agent(self.custom_forward_step, fwd_drift)
-        
+
     def turn_agent(self, angle_delta):
         """Override turn_agent to use custom turn step"""
         if angle_delta > 0:  # Turning right
@@ -41,97 +41,64 @@ class DiscreteMiniWorldWrapper(OneRoom):
             custom_angle = -self.custom_turn_step
         else:  # No turn
             custom_angle = 0
-            
+
         return super().turn_agent(custom_angle)
-    
+
     def near(self, ent0, ent1=None):
         """
         Override near to check if entities are on the same grid cell
         """
         if ent1 is None:
             ent1 = self.agent
-        
+
         # Get grid positions
         grid_x0 = int(round(ent0.pos[0] / self.grid_size))
         grid_z0 = int(round(ent0.pos[2] / self.grid_size))
-        
+
         grid_x1 = int(round(ent1.pos[0] / self.grid_size))
         grid_z1 = int(round(ent1.pos[2] / self.grid_size))
-        
+
         # Check if on same grid cell
         return grid_x0 == grid_x1 and grid_z0 == grid_z1
-                              
+
     def step(self, action):
         # Call the grandparent step method (MiniWorldEnv), skipping OneRoom's step
         obs, reward, termination, truncation, info = MiniWorldEnv.step(self, action)
-        
-
-        # Check collision with red sphere
-        if self.near(self.sphere_red):
-            reward += self._reward()
-            termination = True
-
-        # Check collision with blue sphere 
-        if self.near(self.sphere_blue):
-            reward += self._reward()
-            termination = True
 
         # Check collision with red box
         if self.near(self.box_red):
             reward += self._reward()
             termination = True
-        
+
         # Check collision with blue box
         elif self.near(self.box_blue):
             reward += self._reward()
             termination = True
-        
+
         # Calculate distances for info
         agent_pos = self.agent.pos
-        
-         # Calculate distance to sphere
-        sphere_red_pos = self.sphere_red.pos
-        distance_to_sphere = np.sqrt((agent_pos[0] - sphere_red_pos[0])**2 + (agent_pos[2] - sphere_red_pos[2])**2)
-
-         # Calculate distance to sphere
-        sphere_blue_pos = self.sphere_blue.pos
-        distance_to_sphere = np.sqrt((agent_pos[0] - sphere_blue_pos[0])**2 + (agent_pos[2] - sphere_blue_pos[2])**2)
 
         # Calculate distance to red box
         box_red_pos = self.box_red.pos
         distance_to_box = np.sqrt((agent_pos[0] - box_red_pos[0])**2 + (agent_pos[2] - box_red_pos[2])**2)
-        
+
         # Calculate distance to blue box
         box_blue_pos = self.box_blue.pos
         distance_to_ball = np.sqrt((agent_pos[0] - box_blue_pos[0])**2 + (agent_pos[2] - box_blue_pos[2])**2)
-        
+
         # Add both distances to info dictionary
         info['distance_to_box'] = distance_to_box
         info['distance_to_ball'] = distance_to_ball
         info['distance_to_goal'] = min(distance_to_box, distance_to_ball)  # Closest target
-        
+
         return obs, reward, termination, truncation, info
 
     def _gen_world(self):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
-    
-        # Create entities with radius=0 first to allow overlapping placement
-        self.sphere_red = Ball(color="red", size=0.75)
-        self.sphere_red.radius = 0  # Set before placement
-        self.sphere_red = self.place_entity(self.sphere_red)
-
-        self.sphere_blue = Ball(color="blue", size=0.75)
-        self.sphere_blue.radius = 0  # Set before placement
-        self.sphere_blue = self.place_entity(self.sphere_blue)
-
-        self.box_red = Box(color="red")
-        self.box_red.radius = 0  # Set before placement
-        self.box_red = self.place_entity(self.box_red)
-
-        self.box_blue = Box(color="blue")
-        self.box_blue.radius = 0  # Set before placement
-        self.box_blue = self.place_entity(self.box_blue)
-        
+        self.box_red = self.place_entity(Box(color="red"))
+        self.box_red.radius = 0  # No collision
+        self.box_blue = self.place_entity(Box(color="blue"))  #
+        self.box_blue.radius = 0  # No collision
         self.place_agent()
 
 # ================= Override placement methods to enforce discrete agent placement =======================
@@ -169,11 +136,11 @@ class DiscreteMiniWorldWrapper(OneRoom):
         snapped_x = round(pos[0] / self.grid_size) * self.grid_size
         snapped_z = round(pos[2] / self.grid_size) * self.grid_size
         return np.array([snapped_x, pos[1], snapped_z])
-    
+
     def snap_direction_to_cardinal(self, direction):
         """Snap direction to cardinal directions (0°, 90°, 180°, 270°)"""
         degrees = math.degrees(direction) % 360
-        
+
         if degrees < 45 or degrees >= 315:
             return 0.0  # 0°
         elif 45 <= degrees < 135:
@@ -182,7 +149,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
             return math.pi  # 180°
         else:
             return 3 * math.pi / 2  # 270°
-        
+
     def place_entity(
         self,
         ent,
@@ -208,7 +175,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
                 discretized_dir = self.snap_direction_to_cardinal(dir)
             else:
                 discretized_dir = self.np_random.choice([0, math.pi/2, math.pi, 3*math.pi/2])
-            
+
             ent.dir = discretized_dir
             ent.pos = self.snap_to_grid(pos)
             self.entities.append(ent)
@@ -216,10 +183,10 @@ class DiscreteMiniWorldWrapper(OneRoom):
 
         max_attempts = 1000
         attempts = 0
-        
+
         while attempts < max_attempts:
             attempts += 1
-            
+
             r = (
                 room
                 if room
@@ -232,19 +199,19 @@ class DiscreteMiniWorldWrapper(OneRoom):
             hx = r.max_x if max_x is None else max_x
             lz = r.min_z if min_z is None else min_z
             hz = r.max_z if max_z is None else max_z
-            
+
             # Use self.grid_size instead of self.size
             min_grid_x = max(0, int((lx + ent.radius) // self.grid_size))
             max_grid_x = math.floor((hx - ent.radius) / self.grid_size)
             min_grid_z = max(0, int((lz + ent.radius) // self.grid_size))
             max_grid_z = math.floor((hz - ent.radius) / self.grid_size)
-            
+
             if min_grid_x > max_grid_x or min_grid_z > max_grid_z:
                 continue
-                
+
             grid_x = self.np_random.integers(min_grid_x, max_grid_x + 1)
             grid_z = self.np_random.integers(min_grid_z, max_grid_z + 1)
-            
+
             pos = np.array([
                 grid_x * self.grid_size,
                 0,
@@ -270,15 +237,15 @@ class DiscreteMiniWorldWrapper(OneRoom):
 
         self.entities.append(ent)
         return ent
-    
+
     def intersect(self, ent, pos, radius=None):
         """
-        Override to check walls and prevent object overlap during placement
-        but allow agent to pass through boxes/balls
+        Override to check walls but allow agent to pass through boxes
+
         """
         if radius is None:
             radius = ent.radius
-        
+
         # Ignore the Y position
         px, _, pz = pos
         pos = np.array([px, 0, pz])
@@ -292,10 +259,10 @@ class DiscreteMiniWorldWrapper(OneRoom):
             # Entities can't intersect with themselves
             if ent2 is ent:
                 continue
-            
-            # Skip collision check with boxes/balls ONLY if entity being placed is the agent
-            # This allows agent to pass through objects but prevents objects from overlapping each other
-            if isinstance(ent2, (Box, Ball)) and hasattr(self, 'agent') and ent is self.agent:
+
+            # Skip collision check with boxes - THIS IS THE KEY ADDITION
+            if isinstance(ent2, Box):
+
                 continue
 
             px, _, pz = ent2.pos
@@ -304,5 +271,3 @@ class DiscreteMiniWorldWrapper(OneRoom):
             d = np.linalg.norm(pos2 - pos)
             if d < radius + ent2.radius:
                 return ent2
-
-        return None

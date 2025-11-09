@@ -2,7 +2,7 @@ import gymnasium as gym
 import miniworld
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
-from agents import RandomAgent, RandomAgentWithSR
+from agents import RandomAgent
 from utils import plot_sr_matrix, generate_save_path
 import time
 
@@ -131,9 +131,9 @@ if __name__ == "__main__":
     elif choice == "2":
         agent = RandomAgent(env)
         run_random_agent(env, agent)
-    elif choice == "3":
-        agent = RandomAgentWithSR(env)
-        run_successor_agent(env, agent)
+    # elif choice == "3":
+    #     agent = RandomAgentWithSR(env)
+    #     run_successor_agent(env, agent)
 
     else:
         print("Invalid choice. Exiting.")
