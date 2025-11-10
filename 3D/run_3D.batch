@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python main_sarsa.py
+python main_qlearning.py
