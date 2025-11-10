@@ -1,6 +1,6 @@
 import os
-os.environ['PYGLET_HEADLESS'] = '1'
-os.environ['MPLBACKEND'] = 'Agg'
+os.environ["MINIWORLD_HEADLESS"] = "1"
+os.environ["PYGLET_HEADLESS"] = "True"  # extra safety for pyglet itself
 
 import matplotlib
 matplotlib.use('Agg')
