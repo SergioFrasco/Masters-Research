@@ -664,7 +664,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             ground_truth_reward_space[blue_z, blue_x] = 1
 
         # Generate visualizations occasionally
-        if episode % 50 == 0 or episode == max_episodes - 1 or episode == 0:
+        if episode % 250 == 0 or episode == max_episodes - 1 or episode == 0:
             # Save feature maps
             fig, axes = plt.subplots(2, 3, figsize=(18, 12))
             
