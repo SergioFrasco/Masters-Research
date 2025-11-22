@@ -51,13 +51,16 @@ class SuccessorAgent:
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
     
     def update_feature_map(self, detected_objects, positions):
-        """Update feature map with detected object locations (accumulates over episode)"""
+        """Update feature map with detected object locations, validated by vision model"""
         
         # Get agent info
         agent_x, agent_z = self._get_agent_pos_from_env()
         agent_dir = self._get_agent_dir_from_env()
         
-        # Mark detected objects in feature maps
+        # Vision model confidence threshold
+        vision_threshold = 0.25  # lower = more permissive
+        
+        # Mark detected objects in feature maps (only if vision model agrees)
         for obj_name in detected_objects:
             if obj_name in positions and positions[obj_name] is not None:
                 dx, dz = positions[obj_name]
@@ -70,7 +73,14 @@ class SuccessorAgent:
                 if not (0 <= global_x < self.grid_size and 0 <= global_z < self.grid_size):
                     continue
                 
-                # Update relevant feature slices
+                # VISION VALIDATION: Check if vision model predicts reward at this location
+                vision_confidence = self.true_reward_map[global_z, global_x]
+                
+                if vision_confidence < vision_threshold:
+                    # Vision model doesn't see anything here - skip this detection
+                    continue
+                
+                # Vision model agrees - add to feature maps
                 if "red" in obj_name:
                     self.feature_map["red"][global_z, global_x] = 1.0
                 if "blue" in obj_name:
