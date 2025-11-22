@@ -39,6 +39,145 @@ from train_vision import CubeDetector
 #     def forward(self, x):
 #         return self.backbone(x)
 
+def plot_task_rewards(task_rewards, tasks, episodes_per_task, max_episodes):
+    """Plot rewards with task boundaries and labels"""
+    
+    # Extract data
+    episodes = [r[0] for r in task_rewards]
+    task_rewards_values = [r[1] for r in task_rewards]
+    env_rewards_values = [r[2] for r in task_rewards]
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10))
+    
+    # Plot 1: Task-specific rewards
+    ax1.plot(episodes, task_rewards_values, alpha=0.3, color='blue', label='Raw Task Reward')
+    
+    # Smooth
+    window = 50
+    if len(task_rewards_values) >= window:
+        smoothed = pd.Series(task_rewards_values).rolling(window).mean()
+        ax1.plot(episodes, smoothed, color='darkblue', linewidth=2, label=f'Smoothed (window={window})')
+    
+    # Add vertical lines for task boundaries
+    for i in range(1, len(tasks)):
+        boundary = i * episodes_per_task
+        ax1.axvline(x=boundary, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
+    
+    ax1.set_ylabel('Task-Specific Reward', fontsize=12)
+    ax1.set_title('Reward Over Episodes with Task Composition', fontsize=14, fontweight='bold')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Environment rewards (for comparison)
+    ax2.plot(episodes, env_rewards_values, alpha=0.3, color='green', label='Raw Env Reward')
+    
+    if len(env_rewards_values) >= window:
+        smoothed_env = pd.Series(env_rewards_values).rolling(window).mean()
+        ax2.plot(episodes, smoothed_env, color='darkgreen', linewidth=2, label=f'Smoothed (window={window})')
+    
+    # Add vertical lines for task boundaries
+    for i in range(1, len(tasks)):
+        boundary = i * episodes_per_task
+        ax2.axvline(x=boundary, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
+    
+    ax2.set_xlabel('Episodes', fontsize=12)
+    ax2.set_ylabel('Environment Reward', fontsize=12)
+    ax2.set_title('Environment Reward (All Objects)', fontsize=14)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # Add task labels on x-axis
+    ax2_twin = ax2.twiny()
+    ax2_twin.set_xlim(ax2.get_xlim())
+    
+    # Create tick positions at middle of each task period
+    tick_positions = [(i * episodes_per_task + (i + 1) * episodes_per_task) / 2 
+                     for i in range(len(tasks))]
+    tick_labels = [task['name'] for task in tasks]
+    
+    ax2_twin.set_xticks(tick_positions)
+    ax2_twin.set_xticklabels(tick_labels, rotation=45, ha='right', fontsize=9)
+    ax2_twin.set_xlabel('Task Type', fontsize=12, fontweight='bold')
+    
+    plt.tight_layout()
+    save_path = generate_save_path('task_compositional_rewards.png')
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"✓ Task reward plot saved: {save_path}")
+
+def create_task_schedule(total_episodes):
+    """Create interleaved simple and compositional tasks"""
+    
+    # Define task pools
+    simple_tasks = [
+        {"name": "blue", "features": ["blue"], "type": "simple"},
+        {"name": "red", "features": ["red"], "type": "simple"},
+        {"name": "box", "features": ["box"], "type": "simple"},
+        {"name": "sphere", "features": ["sphere"], "type": "simple"},
+    ]
+    
+    compositional_tasks = [
+        {"name": "blue_sphere", "features": ["blue", "sphere"], "type": "compositional"},
+        {"name": "red_sphere", "features": ["red", "sphere"], "type": "compositional"},
+        {"name": "blue_box", "features": ["blue", "box"], "type": "compositional"},
+        {"name": "red_box", "features": ["red", "box"], "type": "compositional"},
+    ]
+    
+    # Interleave: simple, compositional, simple, compositional, ...
+    interleaved = []
+    for i in range(max(len(simple_tasks), len(compositional_tasks))):
+        if i < len(simple_tasks):
+            interleaved.append(simple_tasks[i])
+        if i < len(compositional_tasks):
+            interleaved.append(compositional_tasks[i])
+    
+    # Calculate episodes per task
+    num_tasks = len(interleaved)
+    episodes_per_task = total_episodes // num_tasks
+    
+    # Assign durations
+    for task in interleaved:
+        task["duration"] = episodes_per_task
+    
+    return interleaved, episodes_per_task
+
+
+def check_task_satisfaction(info, task):
+    """Check if contacted object satisfies current task requirements"""
+    contacted_object = info.get('contacted_object', None)
+    
+    # No contact = no satisfaction
+    if contacted_object is None:
+        return False
+    
+    features = task["features"]
+    
+    # Single feature tasks
+    if len(features) == 1:
+        feature = features[0]
+        
+        if feature == "blue":
+            return contacted_object in ["blue_box", "blue_sphere"]
+        elif feature == "red":
+            return contacted_object in ["red_box", "red_sphere"]
+        elif feature == "box":
+            return contacted_object in ["blue_box", "red_box"]
+        elif feature == "sphere":
+            return contacted_object in ["blue_sphere", "red_sphere"]
+    
+    # Compositional tasks (2 features - AND logic)
+    elif len(features) == 2:
+        if set(features) == {"blue", "sphere"}:
+            return contacted_object == "blue_sphere"
+        elif set(features) == {"red", "sphere"}:
+            return contacted_object == "red_sphere"
+        elif set(features) == {"blue", "box"}:
+            return contacted_object == "blue_box"
+        elif set(features) == {"red", "box"}:
+            return contacted_object == "red_box"
+    
+    return False
+
 def load_cube_detector(model_path='models/advanced_cube_detector.pth', force_cpu=False):
     """Load the trained cube detector model"""
     if force_cpu:
@@ -206,158 +345,121 @@ def _train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
 
     
 def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200):
-    print("\n=== SUCCESSOR REPRESENTATION AGENT SHOWING WVF COMPOSITION ===")
+    print("\n=== SUCCESSOR REPRESENTATION AGENT WITH COMPOSITIONAL TASKS ===")
     print(f"Max episodes: {max_episodes}")
     print(f"Max steps per episode: {max_steps_per_episode}\n")
+    
+    # Create task schedule
+    tasks, episodes_per_task = create_task_schedule(max_episodes)
+    print(f"Task schedule created: {len(tasks)} tasks, {episodes_per_task} episodes each")
+    for i, task in enumerate(tasks):
+        print(f"  Task {i}: {task['name']} ({task['type']}) - features: {task['features']}")
+    print()
+    
     print("Loading cube detector model...")
-    # 1. Load the model
     cube_model, device, pos_mean, pos_std = load_cube_detector('models/advanced_cube_detector.pth', force_cpu=False)
     
-    # 2. Define transform
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    # Vision Model from 2D
+    # Vision Model from 2D (keep intact)
     print("Loading 2D vision model...")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    vision_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     input_shape = (env.size, env.size, 1)
-    ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+    ae_model = Autoencoder(input_channels=input_shape[-1]).to(vision_device)
     optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
     loss_fn = nn.MSELoss()
     
-    # Initialize reward map
-    reward_map = np.zeros((env.size, env.size))
-
-    # Tracking ae triggers
-    ae_triggers_per_episode = [] 
+    # Tracking
+    ae_triggers_per_episode = []
+    task_rewards = []  # Store (episode, task_reward, env_reward) tuples
     
     obs, info = env.reset()
     agent.reset()
 
-    total_reward = 0
-    steps = 0
-    episode_rewards = []
-    episode_lengths = []
-    epsilon = 1
+    epsilon = 1.0
     epsilon_end = 0.05
     epsilon_decay = 0.9995
     
-    episode = 0
     total_steps = 0
     total_cubes_detected = 0
+    
+    episode_rewards = []
+    episode_lengths = []
+    task_specific_rewards = []  #Track rewards that satisfy task
     
     for episode in tqdm(range(max_episodes), desc="Training 3D Successor Agent"):
         step = 0
         episode_reward = 0
+        episode_task_reward = 0  #Reward for correct task completion
         episode_cubes = 0
         ae_triggers_this_episode = 0
+        
+        # Determine current task
+        task_idx = episode // episodes_per_task
+        current_task = tasks[min(task_idx, len(tasks) - 1)]
         
         # Initialize first action
         current_state = agent.get_state_index()
         current_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-        reward_map = np.zeros((env.size, env.size))
 
         # Reset maps for new episode 
-        agent.true_reward_map = np.zeros((env.size, env.size))
-        agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
+        agent.true_reward_map = np.zeros((agent.grid_size, agent.grid_size))
         agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
         
         # Memory to train vision on
         trajectory_buffer = deque(maxlen=10)
-        trajectory = []
         
         while step < max_steps_per_episode:
-            
             agent_pos = agent._get_agent_pos_from_env()
-            trajectory.append((agent_pos[0], agent_pos[1], current_action))
 
-           # First (before step) Detect objects
+            # ========== DETECTION BEFORE STEP ==========
             detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
-
             detected_objects = detection_result['detected_objects']
             positions = detection_result['positions']
 
-            has_red_box = 'red_box' in detected_objects
-            has_blue_box = 'blue_box' in detected_objects
-            has_red_sphere = 'red_sphere' in detected_objects
-            has_blue_sphere = 'blue_sphere' in detected_objects
-
-            # print("Has red box:", has_red_box)
-            # print("Has blue box:", has_blue_box)
-            # print("Has red sphere:", has_red_sphere)
-            # print("Has blue sphere:", has_blue_sphere)
+            # Update feature map with detections
+            agent.update_feature_map(detected_objects, positions)
             
-            # label = detection_result['label']
-            # confidence = detection_result['confidence']
-            # regression_values = detection_result['regression'] # rx, rz, bx, bz
-            # regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
-            # rx, rz, bx, bz = regression_values  # forward, right for each color
+            # Compose reward map based on current task
+            agent.compose_reward_map(current_task)
             
-            # print(f"Detected: {label} with confidence {confidence:.3f}")
-            # if regression_values is not None:
-                # print(f"Positions: {regression_values}")
+            # Compute WVF for action selection
+            agent.compute_wvf()
 
+            # Count detections
+            if detected_objects:
+                episode_cubes += len(detected_objects)
+                total_cubes_detected += len(detected_objects)
 
-            if has_red_box or has_blue_box or has_red_sphere or has_blue_sphere:
-                # Update counters
-                episode_cubes += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
-                total_cubes_detected += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
-
-                # Extract positions
-                goal_pos_red_box = None
-                goal_pos_blue_box = None
-                goal_pos_red_sphere = None
-                goal_pos_blue_sphere = None
-
-                if has_red_box and positions['red_box'] is not None:
-                    rbx, rbz = positions['red_box']
-                    rbx, rbz = int(round(rbx)), int(round(rbz))
-                    goal_pos_red_box = (rbx, rbz)
-                    # print("Red box position:", goal_pos_red_box)
-                
-                if has_blue_box and positions['blue_box'] is not None:
-                    bbx, bbz = positions['blue_box']
-                    bbx, bbz = int(round(bbx)), int(round(bbz))
-                    goal_pos_blue_box = (bbx, bbz)
-                    # print("Blue box position:", goal_pos_blue_box)
-                
-                if has_red_sphere and positions['red_sphere'] is not None:
-                    rsx, rsz = positions['red_sphere']
-                    rsx, rsz = int(round(rsx)), int(round(rsz))
-                    goal_pos_red_sphere = (rsx, rsz)
-                    # print("Red sphere position:", goal_pos_red_sphere)
-
-                if has_blue_sphere and positions['blue_sphere'] is not None:
-                    bsx, bsz = positions['blue_sphere']
-                    bsx, bsz = int(round(bsx)), int(round(bsz))
-                    goal_pos_blue_sphere = (bsx, bsz)
-                    # print("Blue sphere position:", goal_pos_blue_sphere)
-                
-                # Create egocentric observation matrix
-                ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red_box=goal_pos_red_box,
-                    goal_pos_blue_box=goal_pos_blue_box,
-                    goal_pos_red_sphere=goal_pos_red_sphere,
-                    goal_pos_blue_sphere=goal_pos_blue_sphere,
-                    matrix_size=13
-                )
+            # Extract positions for egocentric observation (vision model - keep intact)
+            goal_pos_red_box = positions.get('red_box')
+            goal_pos_blue_box = positions.get('blue_box')
+            goal_pos_red_sphere = positions.get('red_sphere')
+            goal_pos_blue_sphere = positions.get('blue_sphere')
             
-            else:
-                # No cube detected - create empty egocentric observation
-                ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red_box=None,
-                    goal_pos_blue_box=None,
-                    goal_pos_red_sphere=None,
-                    goal_pos_blue_sphere=None,
-                    matrix_size=13
-                )
+            if goal_pos_red_box:
+                goal_pos_red_box = (int(round(goal_pos_red_box[0])), int(round(goal_pos_red_box[1])))
+            if goal_pos_blue_box:
+                goal_pos_blue_box = (int(round(goal_pos_blue_box[0])), int(round(goal_pos_blue_box[1])))
+            if goal_pos_red_sphere:
+                goal_pos_red_sphere = (int(round(goal_pos_red_sphere[0])), int(round(goal_pos_red_sphere[1])))
+            if goal_pos_blue_sphere:
+                goal_pos_blue_sphere = (int(round(goal_pos_blue_sphere[0])), int(round(goal_pos_blue_sphere[1])))
+            
+            # Create egocentric observation (for vision model)
+            ego_obs = agent.create_egocentric_observation(
+                goal_pos_red_box=goal_pos_red_box,
+                goal_pos_blue_box=goal_pos_blue_box,
+                goal_pos_red_sphere=goal_pos_red_sphere,
+                goal_pos_blue_sphere=goal_pos_blue_sphere,
+                matrix_size=13
+            )
 
-            # print(ego_obs)
-
-            # Store step info BEFORE taking action
+            # Store step info for vision training
             step_info = {
                 'agent_view': ego_obs.copy(),
                 'agent_pos': tuple(agent._get_agent_pos_from_env()),
@@ -366,111 +468,22 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             }
             trajectory_buffer.append(step_info)
     
-            # Save the frame - ensure render mode is "rgb_array"
-            # frame = env.render()
-            # if frame is not None:
-            #     if isinstance(frame, np.ndarray):
-            #         img = Image.fromarray(frame)
-            #     else:
-            #         img = frame
-                
-            #     # Save RGB frame
-            #     save_frame_path = generate_save_path(f'frame_ep{episode:03d}_step{step:03d}.png')
-            #     img.save(save_frame_path)
-            #     print(f"  Saved frame: {save_frame_path}")
-
-            # time.sleep(15) 
-    
-            # Step environment
-            obs, reward, terminated, truncated, info = env.step(current_action)
+            # ========== STEP ENVIRONMENT ==========
+            obs, env_reward, terminated, truncated, info = env.step(current_action)
             step += 1
             total_steps += 1
-            episode_reward += reward
 
-
-            # Second (after step) Detect type of cube in the observation, as well as position regression - marked rx, rz, bx, bz
-            # where +x is forward, +z is right from agent perspective
-            detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
-
-            detected_objects = detection_result['detected_objects']
-            positions = detection_result['positions']
-
-            has_red_box = 'red_box' in detected_objects
-            has_blue_box = 'blue_box' in detected_objects
-            has_red_sphere = 'red_sphere' in detected_objects
-            has_blue_sphere = 'blue_sphere' in detected_objects
-
-            # print("Has red box:", has_red_box)
-            # print("Has blue box:", has_blue_box)
-            # print("Has red sphere:", has_red_sphere)
-            # print("Has blue sphere:", has_blue_sphere)
+            # Check task satisfaction using info from environment
+            task_satisfied = check_task_satisfaction(info, current_task)
             
-            # label = detection_result['label']
-            # confidence = detection_result['confidence']
-            # regression_values = detection_result['regression'] # rx, rz, bx, bz
-            # regression_values = np.round(regression_values).astype(int) # Round to nearest int for positions
-            # rx, rz, bx, bz = regression_values  # forward, right for each color
-            
-            # print(f"Detected: {label} with confidence {confidence:.3f}")
-            # if regression_values is not None:
-                # print(f"Positions: {regression_values}")
-
-
-            if has_red_box or has_blue_box or has_red_sphere or has_blue_sphere:
-                # Update counters
-                episode_cubes += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
-                total_cubes_detected += sum([has_red_box, has_blue_box, has_red_sphere, has_blue_sphere])
-
-                # Extract positions
-                goal_pos_red_box = None
-                goal_pos_blue_box = None
-                goal_pos_red_sphere = None
-                goal_pos_blue_sphere = None
-
-                if has_red_box and positions['red_box'] is not None:
-                    rbx, rbz = positions['red_box']
-                    rbx, rbz = int(round(rbx)), int(round(rbz))
-                    goal_pos_red_box = (rbx, rbz)
-                    # print("Red box position:", goal_pos_red_box)
-                
-                if has_blue_box and positions['blue_box'] is not None:
-                    bbx, bbz = positions['blue_box']
-                    bbx, bbz = int(round(bbx)), int(round(bbz))
-                    goal_pos_blue_box = (bbx, bbz)
-                    # print("Blue box position:", goal_pos_blue_box)
-                
-                if has_red_sphere and positions['red_sphere'] is not None:
-                    rsx, rsz = positions['red_sphere']
-                    rsx, rsz = int(round(rsx)), int(round(rsz))
-                    goal_pos_red_sphere = (rsx, rsz)
-                    # print("Red sphere position:", goal_pos_red_sphere)
-
-                if has_blue_sphere and positions['blue_sphere'] is not None:
-                    bsx, bsz = positions['blue_sphere']
-                    bsx, bsz = int(round(bsx)), int(round(bsz))
-                    goal_pos_blue_sphere = (bsx, bsz)
-                    # print("Blue sphere position:", goal_pos_blue_sphere)
-                
-                # Create egocentric observation matrix
-                ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red_box=goal_pos_red_box,
-                    goal_pos_blue_box=goal_pos_blue_box,
-                    goal_pos_red_sphere=goal_pos_red_sphere,
-                    goal_pos_blue_sphere=goal_pos_blue_sphere,
-                    matrix_size=13
-                )
-            
+            # Filter reward based on task
+            if task_satisfied:
+                task_reward = env_reward
+                episode_task_reward += task_reward
             else:
-                # No cube detected - create empty egocentric observation
-                ego_obs = agent.create_egocentric_observation(
-                    goal_pos_red_box=None,
-                    goal_pos_blue_box=None,
-                    goal_pos_red_sphere=None,
-                    goal_pos_blue_sphere=None,
-                    matrix_size=13
-                )
-                    
-            # print(reward_map)
+                task_reward = 0
+            
+            episode_reward += env_reward  # Still track total env reward
             
             # Get next state after action
             next_state = agent.get_state_index()
@@ -479,31 +492,24 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
             done = terminated or truncated
             
-            # Update SR matrix with current and next action
+            # Update SR matrix
             td_error = agent.update_sr(current_state, current_action, next_state, next_action, done)
 
-            # ============================= VISION MODEL ====================================
-                
-            # # Get current agent position
+            # ============================= VISION MODEL (KEEP INTACT) ====================================
             agent_position = agent._get_agent_pos_from_env()
-
-            # # Get the agent's 13x13 view from observation
             agent_view = ego_obs
 
-            # # If agent is on goal, force the agent's position in view to show reward
             if done:
-                x,z = agent_position
-                agent_view[12, 6] = 1.0  # Agent position in egocentric view
+                x, z = agent_position
+                agent_view[12, 6] = 1.0
 
-            # Reshape for the autoencoder (add batch and channel dims)
             input_grid = agent_view[np.newaxis, ..., np.newaxis] 
 
             with torch.no_grad():
-                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(vision_device)
                 predicted_reward_map_tensor = ae_model(ae_input_tensor)
                 predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
 
-            # Mark position as visited (using path integration)
             agent.visited_positions[agent_position[1], agent_position[0]] = True
 
             # Learning Signal - Batch training when goal is reached
@@ -514,7 +520,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     batch_inputs = []
                     batch_targets = []
                     
-                    # Include all steps from trajectory buffer (past steps)
                     for past_step in trajectory_buffer:
                         reward_global_pos = agent_position
                         
@@ -528,8 +533,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                         batch_inputs.append(past_step['normalized_grid'])
                         batch_targets.append(past_target_13x13)
                     
-                    # ALSO include the current step (when agent is on goal)
-                    current_target_13x13 =_create_target_view_with_reward(
+                    current_target_13x13 = _create_target_view_with_reward(
                         tuple(agent._get_agent_pos_from_env()),
                         agent._get_agent_dir_from_env(),
                         agent_position,
@@ -539,10 +543,9 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     batch_inputs.append(ego_obs)
                     batch_targets.append(current_target_13x13)
                     
-                    # Train autoencoder on batch
-                    _train_ae_on_batch(ae_model, optimizer, loss_fn, batch_inputs, batch_targets, device)
+                    _train_ae_on_batch(ae_model, optimizer, loss_fn, batch_inputs, batch_targets, vision_device)
 
-            # Map the 13x13 predicted reward map to the 10x10 global map
+            # Map predicted reward to global map
             agent_x, agent_z = agent_position
             ego_center_x = 6
             ego_center_z = 12
@@ -553,16 +556,16 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     dx_ego = view_x - ego_center_x
                     dz_ego = view_z - ego_center_z
                     
-                    if agent_dir == 3:  # North
+                    if agent_dir == 3:
                         dx_world = dx_ego
                         dz_world = dz_ego
-                    elif agent_dir == 0:  # East
+                    elif agent_dir == 0:
                         dx_world = -dz_ego
                         dz_world = dx_ego
-                    elif agent_dir == 1:  # South
+                    elif agent_dir == 1:
                         dx_world = -dx_ego
                         dz_world = -dz_ego
-                    elif agent_dir == 2:  # West
+                    elif agent_dir == 2:
                         dx_world = dz_ego
                         dz_world = -dx_ego
                     
@@ -574,7 +577,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                             predicted_value = predicted_reward_map_2d[view_z, view_x]
                             agent.true_reward_map[global_z, global_x] = predicted_value
 
-            # Extract the 13x13 target from the true reward map
+            # Extract target from true reward map
             target_13x13 = np.zeros((13, 13), dtype=np.float32)
             
             for view_z in range(13):
@@ -603,7 +606,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     else:
                         target_13x13[view_z, view_x] = 0.0
 
-            # # Check for prediction errors and trigger training if needed
+            # Check for prediction errors and trigger training if needed
             trigger_ae_training = False
             view_error = np.abs(predicted_reward_map_2d - target_13x13)
             max_error = np.max(view_error)
@@ -615,7 +618,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             if trigger_ae_training:
                 ae_triggers_this_episode += 1 
                 target_tensor = torch.tensor(target_13x13[np.newaxis, ..., np.newaxis], dtype=torch.float32)
-                target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)
+                target_tensor = target_tensor.permute(0, 3, 1, 2).to(vision_device)
 
                 ae_model.train()
                 optimizer.zero_grad()
@@ -625,56 +628,24 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                 optimizer.step()
                 
                 step_loss = loss.item()
-
-
-            # ============= Got up to here also have to do action with WVF================
-            # Place the value from true reward mao into the reward map if the position is the same as where goals were detected
-
-            # Update reward maps
-            agent.reward_maps.fill(0)
-
-            for y in range(agent.grid_size):
-                for x in range(agent.grid_size):
-                    curr_reward = agent.true_reward_map[y, x]
-                    idx = y * agent.grid_size + x
-                    if agent.true_reward_map[y, x] >= 0.25:
-                        agent.reward_maps[idx, y, x] = curr_reward
-
-            MOVE_FORWARD = 2
-            M_forward = agent.M[MOVE_FORWARD, :, :]
-            R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-            V_all = M_forward @ R_flat_all.T
-            agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
-
+            # ============================= END VISION MODEL ====================================
             
             # Move to next step
             current_state = next_state
             current_action = next_action
             
-            total_reward += reward
-            steps += 1
-            
             if terminated or truncated:
                 break
         
-        # Episode ended 
-        episode += 1
-        # print(f"\n=== Episode {episode}/{max_episodes} ended after {step} steps! ===")
-        # print(f"Episode reward: {episode_reward:.2f}")
-        # print(f"Cubes detected this episode: {episode_cubes}")
-        # print(f"Total cubes detected: {total_cubes_detected}")
-        # print(f"Reward map sum: {reward_map.sum()}")
-        # print(f"SR Matrix stats: mean={agent.M.mean():.4f}, std={agent.M.std():.4f}")
-        # print(f"Total steps so far: {total_steps}")
-        
-        # Compose and plot WVF every 50 episodes or on last episode
-        # if episode % 1000 == 0 or episode == max_episodes:
-        #     if reward_map.sum() > 0:  # Only if we've detected rewards
-        #         wvf = compose_wvf(agent, reward_map)
-        #         plot_wvf(wvf, episode, agent.grid_size)
-        #     plot_sr_matrix(agent, episode)
-
+        # Episode ended
         ae_triggers_per_episode.append(ae_triggers_this_episode)
+        episode_rewards.append(episode_reward)
+        episode_lengths.append(step)
+        task_specific_rewards.append(episode_task_reward)
+        task_rewards.append((episode, episode_task_reward, episode_reward, current_task['name']))
+        
+        # Decay epsilon
+        epsilon = max(epsilon_end, epsilon * epsilon_decay)
 
         # Create ground truth reward space
         ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
@@ -682,64 +653,47 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         box_red_pos = env.box_red.pos
         box_blue_pos = env.box_blue.pos
 
-        # Convert to grid coordinates
         red_x = int(round(box_red_pos[0]))
         red_z = int(round(box_red_pos[2]))
         blue_x = int(round(box_blue_pos[0]))
         blue_z = int(round(box_blue_pos[2]))
 
-        # Mark both boxes in ground truth reward space
         if 0 <= red_x < env.size and 0 <= red_z < env.size:
             ground_truth_reward_space[red_z, red_x] = 1
         if 0 <= blue_x < env.size and 0 <= blue_z < env.size:
             ground_truth_reward_space[blue_z, blue_x] = 1
 
         # Generate visualizations occasionally
-        if episode % 1 == 0 or episode == max_episodes or episode == 0:
-
-            # # Right before creating ground_truth_reward_space
-            # print(f"\n=== Debug Info for Episode {episode} ===")
-            # print(f"Agent position: ({agent_x}, {agent_z})")
-            # print(f"Agent raw pos: {env.agent.pos}")
-
-            # box_red_pos = env.box_red.pos
-            # box_blue_pos = env.box_blue.pos
-            # print(f"Red box raw pos: {box_red_pos}")
-            # print(f"Blue box raw pos: {box_blue_pos}")
-
-            # # Convert to grid coordinates
-            # red_x = int(round(box_red_pos[0]))
-            # red_z = int(round(box_red_pos[2]))
-            # blue_x = int(round(box_blue_pos[0]))
-            # blue_z = int(round(box_blue_pos[2]))
-
-            # print(f"Red box grid: ({red_x}, {red_z})")
-            # print(f"Blue box grid: ({blue_x}, {blue_z})")
-
-            # # Check what's in true_reward_map at those locations
-            # print(f"true_reward_map[{red_z}, {red_x}] = {agent.true_reward_map[red_z, red_x]}")
-            # print(f"true_reward_map[{blue_z}, {blue_x}] = {agent.true_reward_map[blue_z, blue_x]}")
-            # print(f"ground_truth[{red_z}, {red_x}] = {ground_truth_reward_space[red_z, red_x]}")
-            # print(f"ground_truth[{blue_z}, {blue_x}] = {ground_truth_reward_space[blue_z, blue_x]}")
-
-            save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
-
-            # Saving the Move Forward SR
-            forward_M = agent.M[MOVE_FORWARD, :, :]
-
-            plt.figure(figsize=(6, 5))
-            im = plt.imshow(forward_M, cmap='hot')
-            plt.title(f"Forward SR Matrix (Episode {episode})")
-            plt.colorbar(im, label="SR Value")
+        if episode % 50 == 0 or episode == max_episodes - 1 or episode == 0:
+            # Save feature maps
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            
+            # Plot each feature map
+            for idx, (feature_name, feature_map) in enumerate(agent.feature_map.items()):
+                row = idx // 3
+                col = idx % 3
+                im = axes[row, col].imshow(feature_map, cmap='viridis', origin='lower')
+                axes[row, col].set_title(f'Feature Map: {feature_name}')
+                axes[row, col].plot(agent_x, agent_z, 'ro', markersize=8, label='Agent')
+                plt.colorbar(im, ax=axes[row, col], fraction=0.046)
+            
+            # Plot composed reward map
+            im = axes[1, 1].imshow(agent.composed_reward_map, cmap='viridis', origin='lower')
+            axes[1, 1].set_title(f'Composed Map: {current_task["name"]}')
+            axes[1, 1].plot(agent_x, agent_z, 'ro', markersize=8, label='Agent')
+            plt.colorbar(im, ax=axes[1, 1], fraction=0.046)
+            
+            # Plot WVF
+            im = axes[1, 2].imshow(agent.wvf, cmap='hot', origin='lower')
+            axes[1, 2].set_title(f'WVF (Task: {current_task["name"]})')
+            axes[1, 2].plot(agent_x, agent_z, 'ro', markersize=8, label='Agent')
+            plt.colorbar(im, ax=axes[1, 2], fraction=0.046)
+            
             plt.tight_layout()
-            plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
+            plt.savefig(generate_save_path(f"feature_maps/ep{episode}.png"), dpi=150)
             plt.close()
 
-            box_red_pos = env.box_red.pos
-            box_blue_pos = env.box_blue.pos
-
-
-            # Create vision plots
+            # Vision plots (keep existing)
             fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
 
             all_values = np.concatenate([
@@ -757,7 +711,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             plt.colorbar(im1, ax=ax1, fraction=0.046)
 
             im2 = ax2.imshow(target_13x13, cmap='viridis', vmin=vmin, vmax=vmax)
-            ax2.set_title(f'Target 7x7 View (Ground Truth)')
+            ax2.set_title(f'Target 13x13 View (Ground Truth)')
             ax2.plot(6, 12, 'ro', markersize=8, label='Agent')
             plt.colorbar(im2, ax=ax2, fraction=0.046)
 
@@ -773,53 +727,28 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             plt.tight_layout()
             plt.savefig(generate_save_path(f"vision_plots/maps_ep{episode}_step{step}.png"), dpi=150, bbox_inches='tight')
             plt.close()
-
-            # Plot AE triggers over episodes
-            plt.figure(figsize=(10, 5))
-            
-            window_size = 50
-            if len(ae_triggers_per_episode) >= window_size:
-                smoothed_triggers = np.convolve(ae_triggers_per_episode, np.ones(window_size)/window_size,  mode='valid')
-                smooth_episodes = range(window_size//2, len(ae_triggers_per_episode) - window_size//2 + 1)
-            else:
-                smoothed_triggers = ae_triggers_per_episode
-                smooth_episodes = range(len(ae_triggers_per_episode))
-            
-            plt.plot(ae_triggers_per_episode, alpha=0.3, label='Raw triggers per episode')
-            if len(ae_triggers_per_episode) >= window_size:
-                plt.plot(smooth_episodes, smoothed_triggers, color='red', linewidth=2, 
-                        label=f'Smoothed (window={window_size})')
-            
-            plt.xlabel('Episode')
-            plt.ylabel('Number of AE Training Triggers')
-            plt.title(f'AE Training Frequency Over Episodes (up to ep {episode})')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
-            plt.close()
-                
-        epsilon = max(epsilon_end, epsilon * epsilon_decay)
-        episode_rewards.append(episode_reward)
-        episode_lengths.append(step)
-
         
         # Reset environment for next episode
         obs, info = env.reset()
         agent.reset()
     
     print(f"\n✓ Training complete!")
-    print(f"✓ Completed {episode} episodes")
+    print(f"✓ Completed {max_episodes} episodes")
     print(f"✓ Total steps: {total_steps}")
     print(f"✓ Total cubes detected: {total_cubes_detected}")
-    print(f"✓ Final SR Matrix stats: mean={agent.M.mean():.4f}, std={agent.M.std():.4f}")
+    
+    # Create task-based reward plot
+    plot_task_rewards(task_rewards, tasks, episodes_per_task, max_episodes)
 
     return {
-    "rewards": episode_rewards,
-    "lengths": episode_lengths,
-    "final_epsilon": epsilon,
-    "algorithm": "Masters Successor w/ Path Integration",
-}
+        "rewards": episode_rewards,
+        "task_rewards": task_specific_rewards,
+        "lengths": episode_lengths,
+        "final_epsilon": epsilon,
+        "algorithm": "Compositional Successor Agent",
+        "tasks": tasks,
+        "episodes_per_task": episodes_per_task
+    }
 
 
 def _find_convergence_episode(all_rewards, window):
@@ -856,7 +785,7 @@ if __name__ == "__main__":
     successor_results = run_successor_agent(
         env, 
         agent, 
-        max_episodes=3000,        
+        max_episodes=2000,        
         max_steps_per_episode=200 
     )
 

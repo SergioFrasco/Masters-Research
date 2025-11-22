@@ -65,53 +65,65 @@ class DiscreteMiniWorldWrapper(OneRoom):
         # Call the grandparent step method (MiniWorldEnv), skipping OneRoom's step
         obs, reward, termination, truncation, info = MiniWorldEnv.step(self, action)
         
+        # Track which object was contacted (if any)
+        contacted_object = None
 
         # Check collision with red sphere
         if self.near(self.sphere_red):
             reward += self._reward()
             termination = True
+            contacted_object = "red_sphere"
 
         # Check collision with blue sphere 
-        if self.near(self.sphere_blue):
+        elif self.near(self.sphere_blue):
             reward += self._reward()
             termination = True
+            contacted_object = "blue_sphere"
 
         # Check collision with red box
-        if self.near(self.box_red):
+        elif self.near(self.box_red):
             reward += self._reward()
             termination = True
+            contacted_object = "red_box"
         
         # Check collision with blue box
         elif self.near(self.box_blue):
             reward += self._reward()
             termination = True
+            contacted_object = "blue_box"
         
         # Calculate distances for info
         agent_pos = self.agent.pos
         
-         # Calculate distance to sphere
+        # Calculate distance to red sphere
         sphere_red_pos = self.sphere_red.pos
-        distance_to_sphere = np.sqrt((agent_pos[0] - sphere_red_pos[0])**2 + (agent_pos[2] - sphere_red_pos[2])**2)
+        distance_to_sphere_red = np.sqrt((agent_pos[0] - sphere_red_pos[0])**2 + (agent_pos[2] - sphere_red_pos[2])**2)
 
-         # Calculate distance to sphere
+        # Calculate distance to blue sphere
         sphere_blue_pos = self.sphere_blue.pos
-        distance_to_sphere = np.sqrt((agent_pos[0] - sphere_blue_pos[0])**2 + (agent_pos[2] - sphere_blue_pos[2])**2)
+        distance_to_sphere_blue = np.sqrt((agent_pos[0] - sphere_blue_pos[0])**2 + (agent_pos[2] - sphere_blue_pos[2])**2)
 
         # Calculate distance to red box
         box_red_pos = self.box_red.pos
-        distance_to_box = np.sqrt((agent_pos[0] - box_red_pos[0])**2 + (agent_pos[2] - box_red_pos[2])**2)
+        distance_to_box_red = np.sqrt((agent_pos[0] - box_red_pos[0])**2 + (agent_pos[2] - box_red_pos[2])**2)
         
         # Calculate distance to blue box
         box_blue_pos = self.box_blue.pos
-        distance_to_ball = np.sqrt((agent_pos[0] - box_blue_pos[0])**2 + (agent_pos[2] - box_blue_pos[2])**2)
+        distance_to_box_blue = np.sqrt((agent_pos[0] - box_blue_pos[0])**2 + (agent_pos[2] - box_blue_pos[2])**2)
         
-        # Add both distances to info dictionary
-        info['distance_to_box'] = distance_to_box
-        info['distance_to_ball'] = distance_to_ball
-        info['distance_to_goal'] = min(distance_to_box, distance_to_ball)  # Closest target
+        # Add distances to info dictionary
+        info['distance_to_box_red'] = distance_to_box_red
+        info['distance_to_box_blue'] = distance_to_box_blue
+        info['distance_to_sphere_red'] = distance_to_sphere_red
+        info['distance_to_sphere_blue'] = distance_to_sphere_blue
+        info['distance_to_goal'] = min(distance_to_box_red, distance_to_box_blue, 
+                                        distance_to_sphere_red, distance_to_sphere_blue)
+        
+        # NEW: Add contacted object to info
+        info['contacted_object'] = contacted_object
         
         return obs, reward, termination, truncation, info
-
+    
     def _gen_world(self):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
     

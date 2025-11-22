@@ -1,11 +1,11 @@
 # ============================================================================
-# UPDATED successor_agent.py - Direct environment access (no path integration)
+# With Feature Maps and Task Composition
 # ============================================================================
 
 import numpy as np
 
 class SuccessorAgent:
-    """A Successor agent which samples actions using World Value Function (WVF)"""
+    """A Successor agent with feature-based WVF composition"""
     
     def __init__(self, env, learning_rate=0.01, gamma=0.95):
         self.env = env
@@ -29,36 +29,101 @@ class SuccessorAgent:
         self.prev_state = None
         self.prev_action = None
 
-        # Initialize the true map to track discovered reward locations and predictions
+        # Vision model tracking (keep intact)
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
+        self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
 
-        # World Value Function - Mappings of values to each state goal pair
-        # self.wvf = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
-
-        # This is the composition of WVF slices
-        self.wvf = {
-            "red":  np.zeros((10, 10)), 
-            "blue": np.zeros((10, 10)), 
-            "box": np.zeros((10, 10)), 
-            "sphere": np.zeros((10, 10))
+        # Feature map - accumulates detected object locations by feature
+        self.feature_map = {
+            "red": np.zeros((self.grid_size, self.grid_size)),
+            "blue": np.zeros((self.grid_size, self.grid_size)),
+            "box": np.zeros((self.grid_size, self.grid_size)),
+            "sphere": np.zeros((self.grid_size, self.grid_size))
         }
+        
+        # Composed reward map (task-specific)
+        self.composed_reward_map = np.zeros((self.grid_size, self.grid_size))
+        
+        # WVF - result of SR @ composed_reward_map (for action selection)
+        self.wvf = np.zeros((self.grid_size, self.grid_size))
 
-        # Initialize individual reward maps: one per state
+        # Keep old reward_maps for backward compatibility if needed
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
     
+    def update_feature_map(self, detected_objects, positions):
+        """Update feature map with detected object locations (accumulates over episode)"""
+        
+        # Get agent info
+        agent_x, agent_z = self._get_agent_pos_from_env()
+        agent_dir = self._get_agent_dir_from_env()
+        
+        # Mark detected objects in feature maps
+        for obj_name in detected_objects:
+            if obj_name in positions and positions[obj_name] is not None:
+                dx, dz = positions[obj_name]
+                dx, dz = int(round(dx)), int(round(dz))
+                
+                # Convert ego-centric to global coordinates
+                global_x, global_z = self._ego_to_global(dx, dz, agent_x, agent_z, agent_dir)
+                
+                # Bounds check
+                if not (0 <= global_x < self.grid_size and 0 <= global_z < self.grid_size):
+                    continue
+                
+                # Update relevant feature slices
+                if "red" in obj_name:
+                    self.feature_map["red"][global_z, global_x] = 1.0
+                if "blue" in obj_name:
+                    self.feature_map["blue"][global_z, global_x] = 1.0
+                if "box" in obj_name:
+                    self.feature_map["box"][global_z, global_x] = 1.0
+                if "sphere" in obj_name:
+                    self.feature_map["sphere"][global_z, global_x] = 1.0
+    
+    def _ego_to_global(self, dx_ego, dz_ego, agent_x, agent_z, agent_dir):
+        """Convert egocentric coordinates to global grid coordinates"""
+        if agent_dir == 3:  # North
+            dx_world, dz_world = dx_ego, dz_ego
+        elif agent_dir == 0:  # East
+            dx_world, dz_world = -dz_ego, dx_ego
+        elif agent_dir == 1:  # South
+            dx_world, dz_world = -dx_ego, -dz_ego
+        elif agent_dir == 2:  # West
+            dx_world, dz_world = dz_ego, -dx_ego
+        
+        global_x = agent_x + dx_world
+        global_z = agent_z + dz_world
+        return global_x, global_z
+    
+    def compose_reward_map(self, task):
+        """Compose feature maps based on task requirements using min (AND logic)"""
+        features = task["features"]
+        
+        if len(features) == 1:
+            # Simple task - just copy the feature map
+            self.composed_reward_map = self.feature_map[features[0]].copy()
+        else:
+            # Compositional task - take minimum (AND logic)
+            maps = [self.feature_map[f] for f in features]
+            self.composed_reward_map = np.minimum.reduce(maps)
+    
+    def compute_wvf(self):
+        """Compute WVF by applying SR to composed reward map"""
+        MOVE_FORWARD = 2
+        M_forward = self.M[MOVE_FORWARD, :, :]
+        R_flat = self.composed_reward_map.flatten()
+        V_flat = M_forward @ R_flat
+        self.wvf = V_flat.reshape(self.grid_size, self.grid_size)
+    
     def sample_action_with_wvf(self, obs, epsilon=0.0):
-
-        """Sample action using WVF"""
-        # if not self.initialized:
-        #     self.initialize_path_integration(obs)
-            
+        """Sample action using WVF (computed from feature composition)"""
         if np.random.uniform(0, 1) < epsilon:
             return np.random.randint(self.action_size)
         
         x, z = self._get_agent_pos_from_env()
         current_dir = self._get_agent_dir_from_env()
         
-        # Fixed: neighbors in (x, y) format
+        # Neighbors in (x, z) format
         neighbors = [
             ((x + 1, z), 0),  # Right
             ((x, z + 1), 1),  # Down
@@ -70,13 +135,14 @@ class SuccessorAgent:
         valid_values = []
         
         for neighbor_pos, target_dir in neighbors:
-            if self._is_valid_position(neighbor_pos):  # Now passing (x, y)
-                next_x, next_y = neighbor_pos  # Unpack as (x, y)
-                max_value_across_maps = np.max(self.wvf[:, next_y, next_x])  # Index as [y, x]
+            if self._is_valid_position(neighbor_pos):
+                next_x, next_z = neighbor_pos
+                # Use composed WVF for action selection
+                value = self.wvf[next_z, next_x]
                 action_to_take = self._get_action_toward_direction(current_dir, target_dir)
                 
                 valid_actions.append(action_to_take)
-                valid_values.append(max_value_across_maps)
+                valid_values.append(value)
         
         if not valid_actions:
             return np.random.randint(self.action_size)
@@ -91,24 +157,16 @@ class SuccessorAgent:
     
     def _is_valid_position(self, pos):
         """Check if position is valid by simulating movement"""
-        import numpy as np
-        
         x, z = pos[0], pos[1]
         
         # Store original agent position
         original_pos = self._get_agent_pos_from_env()
-        original_dir = self._get_agent_dir_from_env()
         
-        # Calculate direction vector to new position
-        dx = x - original_pos[0]
-        dz = z - original_pos[1]
-        
-        # Try to move the agent to the new position
-        # Set a temporary position
+        # Calculate new position
         new_pos = np.array([x, original_pos[1], z])
         
         # Check boundaries first
-        boundary = 9  # Adjust based on your environment
+        boundary = self.grid_size - 1
         if abs(x) > boundary or abs(z) > boundary:
             return False
         
@@ -142,16 +200,14 @@ class SuccessorAgent:
     
     def _get_agent_pos_from_env(self):
         """Get agent position directly from environment"""
-        # Use the SAME conversion as you use for boxes
-        x = int(round(self.env.agent.pos[0] /  self.env.grid_size))
-        z = int(round(self.env.agent.pos[2] / self.env.grid_size))
+        x = int(round(self.env.agent.pos[0]))
+        z = int(round(self.env.agent.pos[2]))
         return (x, z)
     
     def _get_agent_dir_from_env(self):
         """Get agent direction directly from environment"""
         angle = self.env.agent.dir
         # Convert angle to cardinal direction: 0=East, 1=South, 2=West, 3=North
-        # MiniWorld uses CLOCKWISE rotation: 0°=East, 90°=North, 180°=West, 270°=South
         degrees = (np.degrees(angle) % 360)
         if degrees < 45 or degrees >= 315:
             return 0  # East (+X)
@@ -206,6 +262,13 @@ class SuccessorAgent:
         """Reset for new episode"""
         self.prev_state = None
         self.prev_action = None
+        
+        # Reset feature maps for new episode
+        for feature in self.feature_map:
+            self.feature_map[feature].fill(0)
+        
+        self.composed_reward_map.fill(0)
+        self.wvf.fill(0)
     
     def create_egocentric_observation(self, goal_pos_red_box=None, goal_pos_blue_box=None, 
                                     goal_pos_red_sphere=None, goal_pos_blue_sphere=None, 
@@ -214,22 +277,9 @@ class SuccessorAgent:
         Create an egocentric observation matrix where:
         - Agent is always at the bottom-middle cell, facing upward.
         - Goal positions (red box, blue box, red sphere, blue sphere) are given in the agent's egocentric coordinates.
-            (x = right, z = forward)
         
-        Args:
-            goal_pos_red_box    : Tuple (x_right, z_forward) or None
-            goal_pos_blue_box   : Tuple (x_right, z_forward) or None
-            goal_pos_red_sphere : Tuple (x_right, z_forward) or None
-            goal_pos_blue_sphere: Tuple (x_right, z_forward) or None
-            matrix_size         : Size of the square matrix (default 13x13)
-
-        Returns:
-            ego_matrix: numpy array of shape (matrix_size, matrix_size)
-                        All goals marked as 1
+        This is kept intact for vision model training.
         """
-        import numpy as np
-
-        # Initialize empty egocentric matrix
         ego_matrix = np.zeros((matrix_size, matrix_size), dtype=np.float32)
 
         # Agent position (bottom-center)
@@ -255,21 +305,3 @@ class SuccessorAgent:
         place_goal(goal_pos_blue_sphere, 1.0)
 
         return ego_matrix
-
-        # def place_goal(pos, value):
-        #     if pos is None:
-        #         return
-        #     gx, gz = pos  # (right, forward)
-        #     # Convert to matrix coordinates
-        #     ego_row = agent_row - gz  # forward is upward (smaller row)
-        #     ego_col = agent_col - gx  # right is right (larger col)
-
-        #     # Check bounds and place marker
-        #     if 0 <= ego_row < matrix_size and 0 <= ego_col < matrix_size:
-        #         ego_matrix[int(ego_row), int(ego_col)] = value
-
-        # # Place red and blue goals
-        # place_goal(goal_pos_red, 1.0)
-        # place_goal(goal_pos_blue, 1.0)
-
-        # return ego_matrix
