@@ -1,6 +1,6 @@
 import os
-os.environ['PYGLET_HEADLESS'] = '1'
-os.environ['MPLBACKEND'] = 'Agg'  # Force matplotlib to use non-GUI backend
+os.environ["MINIWORLD_HEADLESS"] = "1"
+os.environ["PYGLET_HEADLESS"] = "True" 
 
 import matplotlib
 matplotlib.use('Agg')  # Must be called before importing pyplot
