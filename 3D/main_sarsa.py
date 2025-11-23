@@ -29,8 +29,6 @@ import gc
 import pandas as pd
 from train_advanced_cube_detector2 import CubeDetector
 
-# Rest of your code stays the same...
-
 # class CubeDetector(nn.Module):
 #     """Lightweight CNN for cube detection using MobileNetV2"""
 #     def __init__(self, pretrained=False):
