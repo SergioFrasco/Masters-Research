@@ -2,7 +2,7 @@ import gymnasium as gym
 import miniworld
 from miniworld.manual_control import ManualControl
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
-from agents import RandomAgent, RandomAgentWithSR
+from agents import RandomAgent
 from utils import plot_sr_matrix, generate_save_path
 import time
 

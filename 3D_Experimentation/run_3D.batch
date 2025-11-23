@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python collect_4_object_dataset.py
+python main.py

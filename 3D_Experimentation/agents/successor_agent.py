@@ -1,5 +1,9 @@
 # ============================================================================
+<<<<<<< HEAD
 # With Feature Maps and Task Composition + Confidence Accumulation
+=======
+# With Feature Maps and Task Composition
+>>>>>>> d8893b27e2274c7fcb0bb234b1d26839a985d6ca
 # ============================================================================
 
 import numpy as np
@@ -33,6 +37,7 @@ class SuccessorAgent:
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
         self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
 
+<<<<<<< HEAD
         # Feature map - now stores confidence values (0.0 to 1.0)
         self.feature_map = {
             "red": np.zeros((self.grid_size, self.grid_size), dtype=np.float32),
@@ -46,6 +51,16 @@ class SuccessorAgent:
         self.decay_factor = 0.95     # How much confidence decays each step
         self.confidence_threshold = 0.5  # Threshold for considering a location valid
         
+=======
+        # Feature map - accumulates detected object locations by feature
+        self.feature_map = {
+            "red": np.zeros((self.grid_size, self.grid_size)),
+            "blue": np.zeros((self.grid_size, self.grid_size)),
+            "box": np.zeros((self.grid_size, self.grid_size)),
+            "sphere": np.zeros((self.grid_size, self.grid_size))
+        }
+        
+>>>>>>> d8893b27e2274c7fcb0bb234b1d26839a985d6ca
         # Composed reward map (task-specific)
         self.composed_reward_map = np.zeros((self.grid_size, self.grid_size))
         
@@ -56,6 +71,7 @@ class SuccessorAgent:
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
     
     def update_feature_map(self, detected_objects, positions):
+<<<<<<< HEAD
         """Update feature map with confidence accumulation and temporal decay"""
         
         # FIRST: Decay existing confidence (objects not seen recently fade)
@@ -67,6 +83,18 @@ class SuccessorAgent:
         agent_dir = self._get_agent_dir_from_env()
         
         # THIRD: Boost confidence for newly detected objects
+=======
+        """Update feature map with detected object locations, validated by vision model"""
+        
+        # Get agent info
+        agent_x, agent_z = self._get_agent_pos_from_env()
+        agent_dir = self._get_agent_dir_from_env()
+        
+        # Vision model confidence threshold
+        vision_threshold = 0.25  # lower = more permissive
+        
+        # Mark detected objects in feature maps (only if vision model agrees)
+>>>>>>> d8893b27e2274c7fcb0bb234b1d26839a985d6ca
         for obj_name in detected_objects:
             if obj_name in positions and positions[obj_name] is not None:
                 dx, dz = positions[obj_name]
@@ -79,6 +107,7 @@ class SuccessorAgent:
                 if not (0 <= global_x < self.grid_size and 0 <= global_z < self.grid_size):
                     continue
                 
+<<<<<<< HEAD
                 # Accumulate confidence (cap at 1.0)
                 if "red" in obj_name:
                     self.feature_map["red"][global_z, global_x] = min(1.0, 
@@ -92,6 +121,24 @@ class SuccessorAgent:
                 if "sphere" in obj_name:
                     self.feature_map["sphere"][global_z, global_x] = min(1.0,
                         self.feature_map["sphere"][global_z, global_x] + self.confidence_boost)
+=======
+                # VISION VALIDATION: Check if vision model predicts reward at this location
+                vision_confidence = self.true_reward_map[global_z, global_x]
+                
+                if vision_confidence < vision_threshold:
+                    # Vision model doesn't see anything here - skip this detection
+                    continue
+                
+                # Vision model agrees - add to feature maps
+                if "red" in obj_name:
+                    self.feature_map["red"][global_z, global_x] = 1.0
+                if "blue" in obj_name:
+                    self.feature_map["blue"][global_z, global_x] = 1.0
+                if "box" in obj_name:
+                    self.feature_map["box"][global_z, global_x] = 1.0
+                if "sphere" in obj_name:
+                    self.feature_map["sphere"][global_z, global_x] = 1.0
+>>>>>>> d8893b27e2274c7fcb0bb234b1d26839a985d6ca
     
     def _ego_to_global(self, dx_ego, dz_ego, agent_x, agent_z, agent_dir):
         """Convert egocentric coordinates to global grid coordinates"""
@@ -109,6 +156,7 @@ class SuccessorAgent:
         return global_x, global_z
     
     def compose_reward_map(self, task):
+<<<<<<< HEAD
         """Compose feature maps based on task requirements with confidence thresholding"""
         features = task["features"]
         
@@ -123,6 +171,18 @@ class SuccessorAgent:
                 thresholded = (self.feature_map[f] > self.confidence_threshold).astype(np.float32)
                 thresholded_maps.append(thresholded)
             self.composed_reward_map = np.minimum.reduce(thresholded_maps)
+=======
+        """Compose feature maps based on task requirements using min (AND logic)"""
+        features = task["features"]
+        
+        if len(features) == 1:
+            # Simple task - just copy the feature map
+            self.composed_reward_map = self.feature_map[features[0]].copy()
+        else:
+            # Compositional task - take minimum (AND logic)
+            maps = [self.feature_map[f] for f in features]
+            self.composed_reward_map = np.minimum.reduce(maps)
+>>>>>>> d8893b27e2274c7fcb0bb234b1d26839a985d6ca
     
     def compute_wvf(self):
         """Compute WVF by applying SR to composed reward map"""
@@ -280,7 +340,11 @@ class SuccessorAgent:
         self.prev_state = None
         self.prev_action = None
         
+<<<<<<< HEAD
         # Reset feature maps for new episode (zero out confidence)
+=======
+        # Reset feature maps for new episode
+>>>>>>> d8893b27e2274c7fcb0bb234b1d26839a985d6ca
         for feature in self.feature_map:
             self.feature_map[feature].fill(0)
         
@@ -321,6 +385,7 @@ class SuccessorAgent:
         place_goal(goal_pos_red_sphere, 1.0)
         place_goal(goal_pos_blue_sphere, 1.0)
 
+<<<<<<< HEAD
         return ego_matrix
 
 
@@ -360,3 +425,6 @@ class SuccessorAgent:
 # Step 2: feature_map["red"][2, 7] = 0.38 (decay, no re-detection)
 # Step 3: feature_map["red"][2, 7] = 0.36
 # Step 4: feature_map["red"][2, 7] = 0.34 (below threshold of 0.5, ignored)
+=======
+        return ego_matrix
+>>>>>>> d8893b27e2274c7fcb0bb234b1d26839a985d6ca
