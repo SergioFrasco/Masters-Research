@@ -8,7 +8,6 @@ import numpy as np
 import random
 from tqdm import tqdm
 
-# Import your wrapper (adjust path if needed)
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 
 # ---------------------------
