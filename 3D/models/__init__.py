@@ -1,2 +1,2 @@
 from .Autoencoder import Autoencoder
-from .wvf_mlp import WVF_CNN
+from .wvf_mlp import WVF_MLP
