@@ -1,3 +1,7 @@
+import os
+os.environ["MINIWORLD_HEADLESS"] = "1"
+os.environ["PYGLET_HEADLESS"] = "True"
+
 from miniworld.envs.oneroom import OneRoom
 from miniworld.miniworld import MiniWorldEnv
 import numpy as np
