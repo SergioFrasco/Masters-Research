@@ -1353,10 +1353,10 @@ def main():
     print("Starting 3D baseline comparison experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner3D(env_size=10, num_seeds=1)
+    runner = ExperimentRunner3D(env_size=10, num_seeds=2)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=1, max_steps=200)
+    results = runner.run_comparison_experiment(episodes=3000, max_steps=200)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
