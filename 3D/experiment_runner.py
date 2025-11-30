@@ -1,9 +1,6 @@
 import os
 import sys
 
-# CRITICAL: Patch pyglet FIRST
-import patch_pyglet  # This must come before any miniworld imports
-
 # Set environment variables
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
@@ -1368,7 +1365,7 @@ def main():
     print("Starting 3D baseline comparison experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner3D(env_size=10, num_seeds=3)
+    runner = ExperimentRunner3D(env_size=10, num_seeds=2)
 
     # Run experiments
     results = runner.run_comparison_experiment(episodes=3000, max_steps=200)
