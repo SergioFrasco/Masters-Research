@@ -1,11 +1,14 @@
 import os
 import sys
 
-# CRITICAL: Set these BEFORE any other imports
+# CRITICAL: Patch pyglet FIRST
+import patch_pyglet  # This must come before any miniworld imports
+
+# Set environment variables
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
-os.environ["PYOPENGL_PLATFORM"] = "egl"  # Use EGL for headless rendering
-os.environ["DISPLAY"] = ""  # Disable X11 display
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+os.environ["DISPLAY"] = ""
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 
@@ -26,7 +29,7 @@ import torch.optim as optim
 from torchvision import transforms
 from PIL import Image
 
-# Import project modules AFTER environment setup
+# Import project modules AFTER patching
 from env import DiscreteMiniWorldWrapper
 from agents import DQNAgentPartial, SuccessorAgentQLearning, SuccessorAgentSARSA, WVFAgent
 from models import Autoencoder, WVF_MLP
