@@ -46,6 +46,7 @@ class MockGL:
     GL_DEPTH_ATTACHMENT = 0x8D00
     GL_RENDERBUFFER = 0x8D41
     GL_DEPTH_COMPONENT = 0x1902
+    GL_FRAMEBUFFER_COMPLETE = 0x8CD5  # 36053 in decimal
     
     @staticmethod
     def glGenFramebuffers(n, *args):
@@ -100,7 +101,7 @@ class MockGL:
     
     @staticmethod
     def glCheckFramebufferStatus(*args):
-        return 0x8CD5  # GL_FRAMEBUFFER_COMPLETE
+        return 36053  # GL_FRAMEBUFFER_COMPLETE in decimal
     
     @staticmethod
     def glViewport(*args):
