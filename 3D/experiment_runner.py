@@ -1,6 +1,13 @@
 import os
+import sys
+
+# CRITICAL: Set these BEFORE any other imports
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
+os.environ["PYOPENGL_PLATFORM"] = "egl"  # Use EGL for headless rendering
+os.environ["DISPLAY"] = ""  # Disable X11 display
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
 
 import matplotlib
 matplotlib.use('Agg')
@@ -10,24 +17,21 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from collections import deque
 from tqdm import tqdm
-from env import DiscreteMiniWorldWrapper
-from agents import DQNAgentPartial, SuccessorAgentQLearning, SuccessorAgentSARSA, WVFAgent
-from models import Autoencoder, WVF_MLP
-from utils.plotting import generate_save_path
 import json
 import time
 import gc
-from utils.plotting import save_all_wvf
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import transforms
-from train_advanced_cube_detector2 import CubeDetector
 from PIL import Image
 
-# Set environment variables to prevent memory issues
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['MKL_NUM_THREADS'] = '1'
+# Import project modules AFTER environment setup
+from env import DiscreteMiniWorldWrapper
+from agents import DQNAgentPartial, SuccessorAgentQLearning, SuccessorAgentSARSA, WVFAgent
+from models import Autoencoder, WVF_MLP
+from utils.plotting import generate_save_path, save_all_wvf
+from train_advanced_cube_detector2 import CubeDetector
 
 
 # ============================================================================
@@ -1361,7 +1365,7 @@ def main():
     print("Starting 3D baseline comparison experiment...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner3D(env_size=10, num_seeds=2)
+    runner = ExperimentRunner3D(env_size=10, num_seeds=3)
 
     # Run experiments
     results = runner.run_comparison_experiment(episodes=3000, max_steps=200)
