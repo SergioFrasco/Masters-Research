@@ -1,0 +1,62 @@
+{
+  "DQN": [
+    {
+      "rewards": [
+        0.99784
+      ],
+      "lengths": [
+        108
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "DQN with Vision",
+      "dqn_losses": [
+        8.634322554601792e-05
+      ]
+    }
+  ],
+  "SR Q-Learning": [
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "SR Q-Learning with Vision",
+      "ae_triggers": [
+        0.0
+      ]
+    }
+  ],
+  "SR SARSA": [
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "SR SARSA with Vision",
+      "ae_triggers": [
+        0.0
+      ]
+    }
+  ],
+  "WVF": [
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "WVF Baseline",
+      "wvf_losses": [
+        1.1238786672304024e-05
+      ]
+    }
+  ]
+}
