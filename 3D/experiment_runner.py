@@ -1154,7 +1154,11 @@ class ExperimentRunner3D:
                 loss_key = "wvf_losses"
             
             if loss_key:
-                all_losses = np.array([run[loss_key] for run in runs])
+                # Find minimum length across all runs
+                min_length = min(len(run[loss_key]) for run in runs)
+                
+                # Truncate all runs to minimum length
+                all_losses = np.array([run[loss_key][:min_length] for run in runs])
                 mean_losses = np.mean(all_losses, axis=0)
                 std_losses = np.std(all_losses, axis=0)
 
@@ -1211,7 +1215,11 @@ class ExperimentRunner3D:
         ax6 = axes[1, 2]
         for alg_name, runs in self.results.items():
             if "ae_triggers" in runs[0]:
-                all_triggers = np.array([run["ae_triggers"] for run in runs])
+                # Find minimum length across all runs
+                min_length = min(len(run["ae_triggers"]) for run in runs)
+                
+                # Truncate all runs to minimum length
+                all_triggers = np.array([run["ae_triggers"][:min_length] for run in runs])
                 mean_triggers = np.mean(all_triggers, axis=0)
                 std_triggers = np.std(all_triggers, axis=0)
 
