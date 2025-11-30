@@ -10,6 +10,7 @@ os.environ["PYOPENGL_PLATFORM"] = "osmesa"
 import sys
 from unittest.mock import MagicMock
 import ctypes
+from types import ModuleType
 
 # Create a proper mock Window class
 class MockWindow:
@@ -31,122 +32,62 @@ class MockWindow:
     def on_draw(self):
         pass
 
-# Create comprehensive GL mock that returns proper ctypes
-class MockGL:
-    """Mock pyglet.gl module with OpenGL functions"""
-    
-    # GL constants
-    GL_TEXTURE_2D = 0x0DE1
-    GL_RGB = 0x1907
-    GL_RGBA = 0x1908
-    GL_UNSIGNED_BYTE = 0x1401
-    GL_FLOAT = 0x1406
-    GL_FRAMEBUFFER = 0x8D40
-    GL_COLOR_ATTACHMENT0 = 0x8CE0
-    GL_DEPTH_ATTACHMENT = 0x8D00
-    GL_RENDERBUFFER = 0x8D41
-    GL_DEPTH_COMPONENT = 0x1902
-    GL_FRAMEBUFFER_COMPLETE = 0x8CD5  # 36053 in decimal
-    
-    @staticmethod
-    def glGenFramebuffers(n, *args):
-        # Return a mock framebuffer ID
-        if args:
+# Create comprehensive GL mock as a proper module
+mock_gl_module = ModuleType('pyglet.gl')
+mock_gl_module.__name__ = 'pyglet.gl'
+
+# Add GL constants
+mock_gl_module.GL_TEXTURE_2D = 0x0DE1
+mock_gl_module.GL_RGB = 0x1907
+mock_gl_module.GL_RGBA = 0x1908
+mock_gl_module.GL_UNSIGNED_BYTE = 0x1401
+mock_gl_module.GL_FLOAT = 0x1406
+mock_gl_module.GL_FRAMEBUFFER = 0x8D40
+mock_gl_module.GL_COLOR_ATTACHMENT0 = 0x8CE0
+mock_gl_module.GL_DEPTH_ATTACHMENT = 0x8D00
+mock_gl_module.GL_RENDERBUFFER = 0x8D41
+mock_gl_module.GL_DEPTH_COMPONENT = 0x1902
+mock_gl_module.GL_FRAMEBUFFER_COMPLETE = 36053
+
+# Add GL functions
+def _make_gl_func(return_value=None):
+    def func(*args, **kwargs):
+        if args and hasattr(args[0], 'value'):
             args[0].value = 1
-        return 1
-    
-    @staticmethod
-    def glGenRenderbuffers(n, *args):
-        if args:
-            args[0].value = 1
-        return 1
-    
-    @staticmethod
-    def glGenTextures(n, *args):
-        if args:
-            args[0].value = 1
-        return 1
-    
-    @staticmethod
-    def glBindFramebuffer(*args):
-        pass
-    
-    @staticmethod
-    def glBindRenderbuffer(*args):
-        pass
-    
-    @staticmethod
-    def glBindTexture(*args):
-        pass
-    
-    @staticmethod
-    def glFramebufferTexture2D(*args):
-        pass
-    
-    @staticmethod
-    def glFramebufferRenderbuffer(*args):
-        pass
-    
-    @staticmethod
-    def glRenderbufferStorageMultisample(*args):
-        pass
-    
-    @staticmethod
-    def glRenderbufferStorage(*args):
-        pass
-    
-    @staticmethod
-    def glTexImage2D(*args):
-        pass
-    
-    @staticmethod
-    def glCheckFramebufferStatus(*args):
-        return 36053  # GL_FRAMEBUFFER_COMPLETE in decimal
-    
-    @staticmethod
-    def glViewport(*args):
-        pass
-    
-    @staticmethod
-    def glClear(*args):
-        pass
-    
-    @staticmethod
-    def glClearColor(*args):
-        pass
-    
-    @staticmethod
-    def glEnable(*args):
-        pass
-    
-    @staticmethod
-    def glDisable(*args):
-        pass
-    
-    @staticmethod
-    def glReadPixels(*args):
-        # Return empty pixel data
-        pass
-    
-    @staticmethod
-    def glDeleteFramebuffers(*args):
-        pass
-    
-    @staticmethod
-    def glDeleteRenderbuffers(*args):
-        pass
-    
-    @staticmethod
-    def glDeleteTextures(*args):
-        pass
-    
-    def __getattr__(self, name):
-        # Return mock for any GL function we didn't explicitly define
-        if name.startswith('GL_'):
-            return 0
-        elif name.startswith('gl'):
-            return lambda *args, **kwargs: None
-        return MagicMock()
+        return return_value
+    return func
+
+mock_gl_module.glGenFramebuffers = _make_gl_func(1)
+mock_gl_module.glGenRenderbuffers = _make_gl_func(1)
+mock_gl_module.glGenTextures = _make_gl_func(1)
+mock_gl_module.glBindFramebuffer = _make_gl_func()
+mock_gl_module.glBindRenderbuffer = _make_gl_func()
+mock_gl_module.glBindTexture = _make_gl_func()
+mock_gl_module.glFramebufferTexture2D = _make_gl_func()
+mock_gl_module.glFramebufferRenderbuffer = _make_gl_func()
+mock_gl_module.glRenderbufferStorageMultisample = _make_gl_func()
+mock_gl_module.glRenderbufferStorage = _make_gl_func()
+mock_gl_module.glTexImage2D = _make_gl_func()
+mock_gl_module.glCheckFramebufferStatus = _make_gl_func(36053)
+mock_gl_module.glViewport = _make_gl_func()
+mock_gl_module.glClear = _make_gl_func()
+mock_gl_module.glClearColor = _make_gl_func()
+mock_gl_module.glEnable = _make_gl_func()
+mock_gl_module.glDisable = _make_gl_func()
+mock_gl_module.glReadPixels = _make_gl_func()
+mock_gl_module.glDeleteFramebuffers = _make_gl_func()
+mock_gl_module.glDeleteRenderbuffers = _make_gl_func()
+mock_gl_module.glDeleteTextures = _make_gl_func()
+
+# Add a __getattr__ to handle any other GL calls
+def _gl_getattr(name):
+    if name.startswith('GL_'):
+        return 0
+    elif name.startswith('gl'):
+        return _make_gl_func()
+    return MagicMock()
+
+mock_gl_module.__getattr__ = _gl_getattr
 
 # Create mock for ctypes functions that miniworld uses
 original_byref = ctypes.byref
@@ -154,37 +95,43 @@ original_byref = ctypes.byref
 def mock_byref(obj):
     """Mock byref that works with both real ctypes and MagicMocks"""
     if isinstance(obj, MagicMock):
-        # Create a mock ctypes pointer
         mock_ptr = MagicMock()
         mock_ptr.value = 1
         return mock_ptr
     return original_byref(obj)
 
-# Patch ctypes.byref
 ctypes.byref = mock_byref
 
-# Create mock window module with Window class
-class MockWindowModule:
-    """Mock pyglet.window module"""
-    Window = MockWindow
-    NoSuchConfigException = Exception
-    
-    def __getattr__(self, name):
-        return MagicMock()
+# Create mock window module
+mock_window_module = ModuleType('pyglet.window')
+mock_window_module.__name__ = 'pyglet.window'
+mock_window_module.Window = MockWindow
+mock_window_module.NoSuchConfigException = Exception
 
-# Create mock for pyglet.graphics
-class MockGraphics:
-    def __getattr__(self, name):
-        return MagicMock()
+# Create mock text module
+mock_text_module = ModuleType('pyglet.text')
+mock_text_module.__name__ = 'pyglet.text'
 
-# Patch pyglet modules before they're imported
-mock_gl = MockGL()
-sys.modules['pyglet.gl'] = mock_gl
-sys.modules['pyglet.window'] = MockWindowModule()
-sys.modules['pyglet.graphics'] = MockGraphics()
+class MockLabel:
+    def __init__(self, *args, **kwargs):
+        pass
+    def draw(self):
+        pass
+
+mock_text_module.Label = MockLabel
+
+# Create mock graphics module  
+mock_graphics_module = ModuleType('pyglet.graphics')
+mock_graphics_module.__name__ = 'pyglet.graphics'
+
+# Patch pyglet modules
+sys.modules['pyglet.gl'] = mock_gl_module
+sys.modules['pyglet.window'] = mock_window_module
+sys.modules['pyglet.text'] = mock_text_module
+sys.modules['pyglet.graphics'] = mock_graphics_module
 
 # Also patch OpenGL directly
-sys.modules['OpenGL'] = MagicMock()
-sys.modules['OpenGL.GL'] = mock_gl
+sys.modules['OpenGL'] = mock_gl_module
+sys.modules['OpenGL.GL'] = mock_gl_module
 
 print("✓ Pyglet and OpenGL patched for headless mode")
