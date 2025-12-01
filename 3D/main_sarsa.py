@@ -1,11 +1,10 @@
 import os
 os.environ["MINIWORLD_HEADLESS"] = "1"
-os.environ["PYGLET_HEADLESS"] = "True"  # extra safety for pyglet itself
+os.environ["PYGLET_HEADLESS"] = "True" 
 
 import matplotlib
 matplotlib.use('Agg')
 
-# NOW import everything else
 import gymnasium as gym
 import miniworld
 
@@ -60,7 +59,6 @@ def load_cube_detector(model_path='models/advanced_cube_detector.pth', force_cpu
         pos_mean = checkpoint.get('pos_mean', 0.0)
         pos_std = checkpoint.get('pos_std', 1.0)
     else:
-        # Old format - just state dict
         model.load_state_dict(checkpoint)
         pos_mean = 0.0
         pos_std = 1.0
@@ -138,36 +136,6 @@ def detect_cube(model, obs, device, transform, pos_mean=0.0, pos_std=1.0):
         "regression": regression_values
     }
 
-# def compose_wvf(agent, reward_map):
-#     """Compose world value functions from SR and reward map"""
-#     grid_size = agent.grid_size
-#     state_size = agent.state_size
-    
-#     # Initialize reward maps for each state
-#     reward_maps = np.zeros((state_size, grid_size, grid_size))
-    
-#     # Fill reward maps based on threshold
-#     for z in range(grid_size):
-#         for x in range(grid_size):
-#             curr_reward = reward_map[z, x]
-#             idx = z * grid_size + x
-#             # Threshold
-#             if reward_map[z, x] >= 0.5:
-#                 reward_maps[idx, z, x] = curr_reward
-    
-#     MOVE_FORWARD = 2
-#     M_forward = agent.M[MOVE_FORWARD, :, :]
-    
-#     # Flatten reward maps
-#     R_flat_all = reward_maps.reshape(state_size, -1)
-    
-#     # Compute WVF: V = M @ R^T
-#     V_all = M_forward @ R_flat_all.T
-    
-#     # Reshape back to grid
-#     wvf = V_all.T.reshape(state_size, grid_size, grid_size)
-    
-#     return wvf
 
 def plot_wvf(wvf, episode, grid_size, maps_per_row=10):
     """Plot all world value functions in a grid"""
@@ -235,7 +203,6 @@ def _create_target_view_with_reward(past_agent_pos, past_agent_dir, reward_pos, 
 
 def _train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
     """Train autoencoder on batch of trajectory data"""
-    # print("Done: Batch training triggered")
     # Convert to tensors and stack
     input_batch = np.stack([inp[np.newaxis, ..., np.newaxis] for inp in inputs])
     target_batch = np.stack([tgt[np.newaxis, ..., np.newaxis] for tgt in targets])
@@ -260,16 +227,15 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
     print(f"Max episodes: {max_episodes}")
     print(f"Max steps per episode: {max_steps_per_episode}\n")
     print("Loading cube detector model...")
-    # 1. Load the model
+    # Load the model
     cube_model, device, pos_mean, pos_std = load_cube_detector('models/advanced_cube_detector.pth', force_cpu=False)
     
-    # 2. Define transform
+    # Define transform
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-
 
     # Vision Model from 2D
     print("Loading 2D vision model...")
@@ -343,7 +309,6 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
             # if regression_values is not None:
                 # print(f"Positions: {regression_values}")
 
-
             if label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
                 # Update counters
                 if label == 'Red' or label == 'Blue':
@@ -352,17 +317,8 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                 else:
                     episode_cubes += 2
                     total_cubes_detected += 2
-
-                # We have:
-                # pos x is forward
-                # pos z is right
-
-                # We need:
-                # pos x is right
-                # pos z is south
-
-                # so swap x and z and make x negative
                 
+                # Might be a coordinate conversion between model output and what we need, can't remember
                 # Check goal position from model
                 if label == 'Red':
                     goal_pos_red  = (-rz, rx)
@@ -442,16 +398,7 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
                     episode_cubes += 2
                     total_cubes_detected += 2
 
-                # We have:
-                # pos x is forward
-                # pos z is right
-
-                # We need:
-                # pos x is right
-                # pos z is south
-
-                # so swap x and z and make x negative
-                
+                # Might be a coordinate conversion between model output and what we need, can't remember
                 # Check goal position from model
                 if label == 'Red':
                     goal_pos_red  = (-rz, rx)
