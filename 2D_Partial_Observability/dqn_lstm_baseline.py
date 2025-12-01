@@ -630,10 +630,10 @@ def main():
     print("Starting DQN experiment with partial observability and vision...")
 
     # Initialize experiment runner
-    runner = DQNExperimentRunner(env_size=10, num_seeds=3)
+    runner = DQNExperimentRunner(env_size=10, num_seeds=2)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=10000, max_steps=200, manual=False)
+    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual=False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
