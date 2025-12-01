@@ -12,7 +12,7 @@ class DiscreteMiniWorldWrapper(OneRoom):
         max_steps: int | None = None,
         forward_step=1.0,      # Custom forward step size
         turn_step=90,          # Custom turn step (90 degrees)
-        grid_size=1.0,         # NEW: Grid discretization size (separate from room size)
+        grid_size=1.0,         # Grid discretization size (separate from room size)
         **kwargs,
     ):
         if max_steps is None:
@@ -22,6 +22,8 @@ class DiscreteMiniWorldWrapper(OneRoom):
         self.custom_forward_step = forward_step
         self.custom_turn_step = turn_step
         self.grid_size = grid_size
+
+        self.current_task = None
 
         super().__init__(size=size, max_episode_steps=max_steps, **kwargs)
         
@@ -70,27 +72,25 @@ class DiscreteMiniWorldWrapper(OneRoom):
 
         # Check collision with red sphere
         if self.near(self.sphere_red):
-            reward += self._reward()
-            termination = True
             contacted_object = "red_sphere"
 
         # Check collision with blue sphere 
         elif self.near(self.sphere_blue):
-            reward += self._reward()
-            termination = True
             contacted_object = "blue_sphere"
 
         # Check collision with red box
         elif self.near(self.box_red):
-            reward += self._reward()
-            termination = True
             contacted_object = "red_box"
         
         # Check collision with blue box
         elif self.near(self.box_blue):
-            reward += self._reward()
-            termination = True
             contacted_object = "blue_box"
+
+        # Only terminate and reward if task is satisfied
+        if contacted_object is not None:
+            if self._check_task_satisfaction(contacted_object):
+                reward += self._reward()
+                termination = True
         
         # Calculate distances for info
         agent_pos = self.agent.pos
@@ -124,6 +124,44 @@ class DiscreteMiniWorldWrapper(OneRoom):
         
         return obs, reward, termination, truncation, info
     
+    def _check_task_satisfaction(self, contacted_object):
+        """Check if the contacted object satisfies the current task"""
+        if self.current_task is None:
+            # No task set - terminate on any contact (backward compatible)
+            print('Warning: No current task set in DiscreteMiniWorldWrapper. Terminating on any contact.')
+            return True
+        
+        features = self.current_task.get("features", [])
+        
+        # Single feature tasks
+        if len(features) == 1:
+            feature = features[0]
+            if feature == "blue":
+                return contacted_object in ["blue_box", "blue_sphere"]
+            elif feature == "red":
+                return contacted_object in ["red_box", "red_sphere"]
+            elif feature == "box":
+                return contacted_object in ["blue_box", "red_box"]
+            elif feature == "sphere":
+                return contacted_object in ["blue_sphere", "red_sphere"]
+        
+        # Compositional tasks (2 features - AND logic)
+        elif len(features) == 2:
+            if set(features) == {"blue", "sphere"}:
+                return contacted_object == "blue_sphere"
+            elif set(features) == {"red", "sphere"}:
+                return contacted_object == "red_sphere"
+            elif set(features) == {"blue", "box"}:
+                return contacted_object == "blue_box"
+            elif set(features) == {"red", "box"}:
+                return contacted_object == "red_box"
+        
+        return False
+
+    def set_task(self, task):
+        """Set the current task for conditional termination"""
+        self.current_task = task
+
     def _gen_world(self):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
     

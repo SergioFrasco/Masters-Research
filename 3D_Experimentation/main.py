@@ -3,7 +3,7 @@ os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True" 
 
 import matplotlib
-matplotlib.use('Agg')  # Must be called before importing pyplot
+matplotlib.use('Agg')  
 
 import gymnasium as gym
 import miniworld
@@ -21,23 +21,12 @@ from torchvision import transforms, models
 from PIL import Image
 from models import Autoencoder
 import numpy as np
-import matplotlib.pyplot as plt  # This must come AFTER matplotlib.use('Agg')
+import matplotlib.pyplot as plt 
 from collections import deque
 import gc
 import pandas as pd
 from train_vision import CubeDetector
 
-# class CubeDetector(nn.Module):
-#     """Lightweight CNN for cube detection using MobileNetV2"""
-#     def __init__(self, pretrained=False):
-#         super(CubeDetector, self).__init__()
-#         # Use MobileNetV2 as backbone
-#         self.backbone = models.mobilenet_v2(pretrained=pretrained)
-#         # Replace final classifier
-#         self.backbone.classifier[1] = nn.Linear(self.backbone.last_channel, 2)
-    
-#     def forward(self, x):
-#         return self.backbone(x)
 
 def plot_task_rewards(task_rewards, tasks, episodes_per_task, max_episodes):
     """Plot rewards with task boundaries and labels"""
@@ -191,13 +180,11 @@ def load_cube_detector(model_path='models/advanced_cube_detector.pth', force_cpu
     # Load checkpoint
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     
-    # Handle both old and new checkpoint formats
     if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
         pos_mean = checkpoint.get('pos_mean', 0.0)
         pos_std = checkpoint.get('pos_std', 1.0)
     else:
-        # Old format - just state dict
         model.load_state_dict(checkpoint)
         pos_mean = 0.0
         pos_std = 1.0
@@ -326,7 +313,6 @@ def _create_target_view_with_reward(past_agent_pos, past_agent_dir, reward_pos, 
 
 def _train_ae_on_batch(model, optimizer, loss_fn, inputs, targets, device):
     """Train autoencoder on batch of trajectory data"""
-    # print("Done: Batch training triggered")
     # Convert to tensors and stack
     input_batch = np.stack([inp[np.newaxis, ..., np.newaxis] for inp in inputs])
     target_batch = np.stack([tgt[np.newaxis, ..., np.newaxis] for tgt in targets])
@@ -401,6 +387,9 @@ def run_successor_agent(env, agent, max_episodes=100, max_steps_per_episode=200)
         # Determine current task
         task_idx = episode // episodes_per_task
         current_task = tasks[min(task_idx, len(tasks) - 1)]
+
+        # Pass task to environment for termination satisfaction checks
+        env.set_task(current_task)
         
         # Initialize first action
         current_state = agent.get_state_index()
