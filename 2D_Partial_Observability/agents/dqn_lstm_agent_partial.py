@@ -452,7 +452,8 @@ class LSTM_DQN_Agent:
         episode_length = len(self.current_episode)
         
         # Create sequences with sliding window
-        for start_idx in range(episode_length - self.sequence_length + 1):
+        stride = self.sequence_length // 2  # 50% overlap instead of 95%
+        for start_idx in range(0, episode_length - self.sequence_length + 1, stride):
             sequence = self.current_episode[start_idx:start_idx + self.sequence_length]
             self.memory.push_sequence(sequence)
     

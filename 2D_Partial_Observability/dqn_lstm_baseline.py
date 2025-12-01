@@ -49,14 +49,14 @@ class DQNExperimentRunner:
             sequence_length=16,
             frame_stack_k=4,
             lstm_hidden_dim=128, 
-            learning_rate=0.0001,
+            learning_rate=0.00005,
             gamma=0.99,
             epsilon_start=1.0,
             epsilon_end=0.05,
             epsilon_decay=0.9995,
             memory_size=5000,
-            batch_size=8,
-            target_update_freq=500
+            batch_size=32,
+            target_update_freq=200
         )
 
         # Tracking variables
@@ -630,10 +630,10 @@ def main():
     print("Starting DQN experiment with partial observability and vision...")
 
     # Initialize experiment runner
-    runner = DQNExperimentRunner(env_size=10, num_seeds=1)
+    runner = DQNExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual=False)
+    results = runner.run_comparison_experiment(episodes=10000, max_steps=200, manual=False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
