@@ -1,0 +1,17 @@
+{
+  "LSTM-WVF": [
+    {
+      "rewards": [
+        0.0
+      ],
+      "lengths": [
+        200
+      ],
+      "wvf_losses": [
+        0.0084555491048377
+      ],
+      "final_epsilon": 0.9995,
+      "algorithm": "LSTM-WVF"
+    }
+  ]
+}

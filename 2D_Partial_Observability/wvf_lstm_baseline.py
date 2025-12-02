@@ -32,19 +32,7 @@ os.environ['MKL_NUM_THREADS'] = '1'
 from agents import LSTM_WVF_Agent
 from models import LSTM_WVF, FrameStack, RewardPredictor
 
-
-def generate_save_path(filename):
-    """Generate save path, creating directories if needed."""
-    results_dir = "results"
-    
-    if "/" in filename:
-        subdir = os.path.dirname(filename)
-        full_dir = os.path.join(results_dir, subdir)
-        os.makedirs(full_dir, exist_ok=True)
-    else:
-        os.makedirs(results_dir, exist_ok=True)
-    
-    return os.path.join(results_dir, filename)
+from utils import generate_save_path
 
 
 class LSTM_WVF_ExperimentRunner:
@@ -506,10 +494,10 @@ def main():
     print("\nCombines: LSTM memory + Goal conditioning + Learned reward prediction")
     print()
     
-    runner = LSTM_WVF_ExperimentRunner(env_size=10, num_seeds=1)
+    runner = LSTM_WVF_ExperimentRunner(env_size=10, num_seeds=2)
     from env import SimpleEnv
     env = SimpleEnv(size=10)
-    results = runner.run_comparison_experiment(episodes=1500, max_steps=200, env=env)
+    results = runner.run_comparison_experiment(episodes=3000, max_steps=200, env=env)
     
     # For testing with mock environment:
     # results = runner.run_comparison_experiment(episodes=500, max_steps=200)
