@@ -506,11 +506,10 @@ def main():
     print("\nCombines: LSTM memory + Goal conditioning + Learned reward prediction")
     print()
     
-    runner = LSTM_WVF_ExperimentRunner(env_size=10, num_seeds=2)
-    
+    runner = LSTM_WVF_ExperimentRunner(env_size=10, num_seeds=1)
     from env import SimpleEnv
     env = SimpleEnv(size=10)
-    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, env=env)
+    results = runner.run_comparison_experiment(episodes=1500, max_steps=200, env=env)
     
     # For testing with mock environment:
     # results = runner.run_comparison_experiment(episodes=500, max_steps=200)

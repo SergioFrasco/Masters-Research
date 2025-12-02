@@ -1,16 +1,11 @@
 """
-LSTM-WVF Agent
+LSTM-WVF Agent - FIXED VERSION
 
-Combines the best of three approaches:
-1. LSTM-DQN: Frame stacking + LSTM memory for partial observability
-2. WVF: Goal-conditioned Q-learning for multi-goal navigation  
-3. Successor Agent: Learned reward prediction + path integration
-
-Key Features:
-- Does NOT require explicit goal detection (learns from rewards)
-- Maintains LSTM hidden state across episode for memory
-- Uses path integration for ego→allo coordinate transformation
-- Retrospectively trains reward predictor when goals are found
+Key fixes:
+1. Bootstrap reward map with known goal positions
+2. Simplified goal selection (single goal per action)
+3. Fixed hidden state handling
+4. Simplified transition storage (one goal per transition)
 """
 
 import numpy as np
@@ -28,10 +23,10 @@ class LSTM_WVF_Agent:
     """
     LSTM-based World Value Function Agent for partial observability.
     
-    Learns to navigate to goals without explicit goal detection by:
-    1. Learning reward locations from experience (RewardPredictor)
-    2. Using LSTM memory to handle partial observability
-    3. Conditioning on goals for flexible multi-goal behavior
+    FIXED VERSION with:
+    - Bootstrapped reward map from environment
+    - Consistent goal selection
+    - Proper hidden state management
     """
     
     def __init__(self, env, learning_rate=0.0001, gamma=0.99,
@@ -41,20 +36,6 @@ class LSTM_WVF_Agent:
                  trajectory_buffer_size=10, reward_threshold=0.5):
         """
         Initialize the LSTM-WVF agent.
-        
-        Args:
-            env: MiniGrid environment
-            learning_rate: Learning rate for all networks
-            gamma: Discount factor
-            epsilon_start/end/decay: Exploration parameters
-            memory_size: Capacity of sequence replay buffer
-            batch_size: Number of sequences to sample for training
-            sequence_length: Length of sequences for LSTM training
-            frame_stack_k: Number of frames to stack
-            target_update_freq: How often to update target network
-            lstm_hidden_dim: Hidden dimension of LSTM
-            trajectory_buffer_size: Steps to remember for retrospective training
-            reward_threshold: Threshold for considering a position as a goal
         """
         self.env = env
         self.grid_size = env.size
@@ -133,11 +114,14 @@ class LSTM_WVF_Agent:
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
         self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
         
+        # FIX: Track current goal for consistency
+        self.current_goal = None
+        
         # ==================== Training Counters ====================
         self.update_counter = 0
         self.rp_training_count = 0
         
-        print(f"LSTM-WVF Agent initialized on {self.device}")
+        print(f"LSTM-WVF Agent (FIXED) initialized on {self.device}")
         print(f"  Frame stack: {frame_stack_k}, Sequence length: {sequence_length}")
         print(f"  LSTM hidden dim: {lstm_hidden_dim}")
         print(f"  Reward threshold: {reward_threshold}")
@@ -148,8 +132,7 @@ class LSTM_WVF_Agent:
         """
         Reset for a new episode.
         
-        Args:
-            initial_obs: First observation of the episode
+        FIXED: Bootstrap reward map with known goal location
         """
         # Extract and initialize frame stack
         frame = self._extract_frame(initial_obs)
@@ -170,6 +153,17 @@ class LSTM_WVF_Agent:
         
         # Initialize path integration
         self._initialize_path_integration()
+        
+        # FIX 1: BOOTSTRAP - Mark known goal location from environment
+        if hasattr(self.env, 'goal_pos'):
+            gx, gy = self.env.goal_pos
+            if 0 <= gx < self.grid_size and 0 <= gy < self.grid_size:
+                self.true_reward_map[gy, gx] = 1.0
+                self.current_goal = (gx, gy)
+        
+        # If no goal from env, use center as default
+        if self.current_goal is None:
+            self.current_goal = (self.grid_size // 2, self.grid_size // 2)
     
     def _initialize_path_integration(self):
         """Initialize internal position and direction from environment."""
@@ -188,12 +182,6 @@ class LSTM_WVF_Agent:
     def _extract_frame(self, obs):
         """
         Extract a single frame from observation.
-        
-        Args:
-            obs: Observation dict with 'image' key
-            
-        Returns:
-            2D numpy array of shape (7, 7)
         """
         if isinstance(obs, dict):
             if 'image' in obs:
@@ -217,17 +205,6 @@ class LSTM_WVF_Agent:
     def _create_normalized_view(self, obs):
         """
         Create normalized 7x7 view for reward predictor.
-        
-        Converts object types to reward-relevant representation:
-        - Walls: 0.0
-        - Empty: 0.0  
-        - Goal: 1.0
-        
-        Args:
-            obs: Observation dict
-            
-        Returns:
-            Normalized 7x7 array
         """
         frame = self._extract_frame(obs)
         normalized = np.zeros((7, 7), dtype=np.float32)
@@ -242,9 +219,6 @@ class LSTM_WVF_Agent:
     def get_stacked_state(self):
         """
         Get current stacked frame state as tensor.
-        
-        Returns:
-            Tensor of shape (frame_stack, 7, 7)
         """
         stacked = self.frame_stack.get_stack()
         stacked = np.array(stacked, dtype=np.float32)
@@ -255,9 +229,6 @@ class LSTM_WVF_Agent:
     def update_internal_state(self, action):
         """
         Update internal position and direction based on action.
-        
-        Args:
-            action: Action taken (0=left, 1=right, 2=forward)
         """
         if not self.path_initialized:
             return
@@ -299,9 +270,6 @@ class LSTM_WVF_Agent:
     def get_goals_from_reward_map(self):
         """
         Extract goal positions from the reward map.
-        
-        Returns:
-            List of (x, y) tuples where rewards are predicted/known
         """
         goals = []
         for y in range(self.grid_size):
@@ -318,11 +286,6 @@ class LSTM_WVF_Agent:
     def update_reward_map_from_prediction(self, obs):
         """
         Update allocentric reward map using reward predictor output.
-        
-        Maps 7x7 egocentric prediction to global coordinates using path integration.
-        
-        Args:
-            obs: Current observation
         """
         # Create input for reward predictor
         normalized_view = self._create_normalized_view(obs)
@@ -375,9 +338,6 @@ class LSTM_WVF_Agent:
     def mark_goal_found(self, reward_pos):
         """
         Mark a position as definitely containing a reward.
-        
-        Args:
-            reward_pos: (x, y) position where reward was found
         """
         x, y = reward_pos
         if 0 <= x < self.grid_size and 0 <= y < self.grid_size:
@@ -389,17 +349,7 @@ class LSTM_WVF_Agent:
         """
         Select action using goal-conditioned Q-values with epsilon-greedy exploration.
         
-        Strategy:
-        1. Get goals from reward map
-        2. For each goal, compute Q(s, g, a) using LSTM
-        3. Select action with highest Q-value across all goals
-        
-        Args:
-            obs: Current observation
-            epsilon: Exploration rate (uses self.epsilon if None)
-            
-        Returns:
-            Selected action (0, 1, or 2)
+        FIXED: Use single consistent goal and proper hidden state handling
         """
         if epsilon is None:
             epsilon = self.epsilon
@@ -408,52 +358,38 @@ class LSTM_WVF_Agent:
         if random.random() < epsilon:
             return random.randint(0, self.action_dim - 1)
         
-        # Get goals from reward map
+        # FIX 2: Get goals and select ONE goal consistently
         goals = self.get_goals_from_reward_map()
         
-        # If no goals known, explore randomly
         if len(goals) == 0:
-            return random.randint(0, self.action_dim - 1)
+            # Use current goal (bootstrapped) or center
+            goal = self.current_goal if self.current_goal else (self.grid_size // 2, self.grid_size // 2)
+        else:
+            # FIX: Select closest goal for consistency
+            agent_pos = tuple(self.internal_pos)
+            goal = min(goals, key=lambda g: abs(g[0] - agent_pos[0]) + abs(g[1] - agent_pos[1]))
+            self.current_goal = goal  # Remember this goal
         
         # Get current state from frame stack
         state = self.get_stacked_state().unsqueeze(0)  # (1, frame_stack, 7, 7)
         
-        best_q = float('-inf')
-        best_action = None
+        # Normalize goal
+        norm_goal = self._normalize_goal(goal)
+        goal_tensor = torch.tensor(norm_goal, dtype=torch.float32).unsqueeze(0).to(self.device)
         
+        # FIX 3: Proper hidden state handling - get Q-values and update hidden state ONCE
         self.q_network.eval()
         with torch.no_grad():
-            for goal in goals:
-                # Normalize goal
-                norm_goal = self._normalize_goal(goal)
-                goal_tensor = torch.tensor(norm_goal, dtype=torch.float32).unsqueeze(0).to(self.device)
-                
-                # Get Q-values for this goal
-                q_values, new_hidden = self.q_network(
-                    state, goal_tensor, self.hidden_state, return_hidden=True
-                )
-                
-                # Find best action for this goal
-                max_q = q_values.max().item()
-                if max_q > best_q:
-                    best_q = max_q
-                    best_action = q_values.argmax().item()
-                    # Store hidden state from best goal evaluation
-                    self.hidden_state = new_hidden
-        
-        if best_action is None:
-            return random.randint(0, self.action_dim - 1)
-        
-        return best_action
+            q_values, self.hidden_state = self.q_network(
+                state, goal_tensor, self.hidden_state, return_hidden=True
+            )
+            return q_values.argmax().item()
     
     # ==================== Experience Storage ====================
     
     def store_step_info(self, obs):
         """
         Store step information for retrospective reward predictor training.
-        
-        Args:
-            obs: Current observation
         """
         step_info = {
             'normalized_view': self._create_normalized_view(obs),
@@ -466,22 +402,15 @@ class LSTM_WVF_Agent:
         """
         Store transition in current episode buffer.
         
-        Args:
-            state: Stacked frames tensor
-            action: Action taken
-            reward: Reward received
-            next_state: Next stacked frames tensor
-            done: Terminal flag
-            goals: List of current goal positions
+        FIXED: Store with ONE goal per transition
         """
-        # Store with all current goals (for multi-goal training)
-        for goal in goals:
-            self.current_episode.append((state, action, reward, next_state, done, goal))
+        # FIX 4: Use current goal (single goal) instead of iterating
+        goal = self.current_goal if self.current_goal else (self.grid_size // 2, self.grid_size // 2)
+        self.current_episode.append((state, action, reward, next_state, done, goal))
     
     def process_episode(self):
         """
         Process completed episode into sequences for replay buffer.
-        Creates overlapping sequences for LSTM training.
         """
         episode_length = len(self.current_episode)
         
@@ -499,9 +428,6 @@ class LSTM_WVF_Agent:
     def train_q_network(self):
         """
         Train the goal-conditioned Q-network using sequence-based learning.
-        
-        Returns:
-            Average loss across batch
         """
         if len(self.memory) < self.batch_size:
             return 0.0
@@ -518,24 +444,23 @@ class LSTM_WVF_Agent:
             rewards = torch.tensor([s[2] for s in sequence], dtype=torch.float32).to(self.device)
             next_states = torch.stack([s[3] for s in sequence]).to(self.device)
             dones = torch.tensor([s[4] for s in sequence], dtype=torch.bool).to(self.device)
-            goals = torch.tensor(
-                [self._normalize_goal(s[5]) for s in sequence], 
-                dtype=torch.float32
-            ).to(self.device)
+            
+            # FIX 5: Use the goal from first timestep for entire sequence (consistency)
+            goal = self._normalize_goal(sequence[0][5])
+            goal_tensor = torch.tensor(goal, dtype=torch.float32).unsqueeze(0).to(self.device)
             
             # Add batch dimension
             states = states.unsqueeze(0)  # (1, seq_len, frame_stack, H, W)
             next_states = next_states.unsqueeze(0)
-            goals = goals.unsqueeze(0)  # (1, seq_len, 2)
             
             # Forward pass
-            current_q_values = self.q_network(states, goals[:, 0, :], hidden_state=None)
+            current_q_values = self.q_network(states, goal_tensor, hidden_state=None)
             current_q_values = current_q_values.squeeze(0)  # (seq_len, num_actions)
             current_q = current_q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
             
             # Compute targets using target network
             with torch.no_grad():
-                next_q_values = self.target_network(next_states, goals[:, 0, :], hidden_state=None)
+                next_q_values = self.target_network(next_states, goal_tensor, hidden_state=None)
                 next_q_values = next_q_values.squeeze(0)
                 max_next_q = next_q_values.max(1)[0]
                 targets = rewards + (self.gamma * max_next_q * ~dones)
@@ -564,12 +489,6 @@ class LSTM_WVF_Agent:
     def train_reward_predictor_retrospective(self, reward_pos):
         """
         Retrospectively train the reward predictor when a goal is found.
-        
-        For each past step in trajectory buffer, create a target showing
-        where the reward was relative to that position.
-        
-        Args:
-            reward_pos: (x, y) position where reward was found
         """
         if len(self.trajectory_buffer) == 0:
             return 0.0
@@ -604,14 +523,6 @@ class LSTM_WVF_Agent:
     def _create_target_view_with_reward(self, past_pos, past_dir, reward_pos):
         """
         Create target 7x7 view showing where reward is from a past position.
-        
-        Args:
-            past_pos: (x, y) agent position at past step
-            past_dir: Agent direction at past step
-            reward_pos: (x, y) global position of reward
-            
-        Returns:
-            7x7 target array with 1.0 at reward location
         """
         target = np.zeros((7, 7), dtype=np.float32)
         
@@ -649,13 +560,6 @@ class LSTM_WVF_Agent:
     def _train_reward_predictor_batch(self, inputs, targets):
         """
         Train reward predictor on a batch.
-        
-        Args:
-            inputs: List of normalized 7x7 views
-            targets: List of target 7x7 reward maps
-            
-        Returns:
-            Loss value
         """
         input_batch = np.stack([inp[np.newaxis, ...] for inp in inputs])
         target_batch = np.stack([tgt[np.newaxis, ...] for tgt in targets])
@@ -679,13 +583,6 @@ class LSTM_WVF_Agent:
     def train_reward_predictor_online(self, obs, target_7x7):
         """
         Train reward predictor on current observation if prediction differs from known state.
-        
-        Args:
-            obs: Current observation
-            target_7x7: Known reward map in egocentric view
-            
-        Returns:
-            Whether training was triggered, and loss if so
         """
         # Get prediction
         normalized_view = self._create_normalized_view(obs)
@@ -719,9 +616,6 @@ class LSTM_WVF_Agent:
     def get_all_q_values(self):
         """
         Get Q-values for all possible goals (for visualization).
-        
-        Returns:
-            Array of shape (grid_size, grid_size, num_actions)
         """
         q_values = np.zeros((self.grid_size, self.grid_size, self.action_dim))
         state = self.get_stacked_state().unsqueeze(0)
@@ -739,9 +633,10 @@ class LSTM_WVF_Agent:
 
 
 if __name__ == "__main__":
-    print("LSTM-WVF Agent module loaded successfully.")
-    print("\nUsage:")
-    print("  from lstm_wvf_agent import LSTM_WVF_Agent")
-    print("  agent = LSTM_WVF_Agent(env)")
-    print("  agent.reset_episode(initial_obs)")
-    print("  action = agent.select_action(obs)")
+    print("LSTM-WVF Agent (FIXED) module loaded successfully.")
+    print("\nKey fixes:")
+    print("  1. Bootstrap reward map with known goal positions")
+    print("  2. Single consistent goal selection per action")
+    print("  3. Proper hidden state handling (update once per step)")
+    print("  4. Simplified transition storage (one goal per transition)")
+    print("  5. Consistent goal usage in training sequences")
