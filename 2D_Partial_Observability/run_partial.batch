@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python wvf_lstm_baseline.py
+python experiment_runner.py

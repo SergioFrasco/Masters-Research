@@ -5,13 +5,22 @@ import os
 from collections import deque
 from tqdm import tqdm
 from env import SimpleEnv
-from agents import SuccessorAgentPartialSARSA, SuccessorAgentPartialQLearning, DQNAgentPartial, LSTM_DQN_Agent  # Import the new path integration agent
+from agents import (
+    SuccessorAgentPartialSARSA, 
+    SuccessorAgentPartialQLearning, 
+    DQNAgentPartial, 
+    LSTM_DQN_Agent,
+    LSTM_WVF_Agent  # NEW
+)
 from models import Autoencoder
 from utils.plotting import generate_save_path
 import json
 import time
 import gc
-from utils.plotting import overlay_values_on_grid, visualize_sr, save_all_reward_maps, save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path, getch
+from utils.plotting import (
+    overlay_values_on_grid, visualize_sr, save_all_reward_maps, 
+    save_all_wvf, save_max_wvf_maps, save_env_map_pred, generate_save_path, getch
+)
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -28,7 +37,6 @@ def execute_turns_until_forward(agent, obs, epsilon, env, manual=False):
     Returns the final observation after all turns and the forward action.
     """
     while True:
-
         action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
         
         # If it's a forward, we're done turning
@@ -41,6 +49,7 @@ def execute_turns_until_forward(agent, obs, epsilon, env, manual=False):
         
         # Update agent's internal state for the turn
         agent.update_internal_state(action)
+
 
 class ExperimentRunner:
     """Handles running experiments and collecting results for multiple agents"""
@@ -72,8 +81,12 @@ class ExperimentRunner:
             print(f"Error loading optimal SR: {e}")
             return None
 
-    def run_successor_experiment_sarsa(self, episodes=5000, max_steps=200, seed=20, manual = False):
-        """Run Master agent experiment with path integration"""
+    # ========================================================================
+    # SUCCESSOR REPRESENTATION EXPERIMENTS (UNCHANGED)
+    # ========================================================================
+    
+    def run_successor_experiment_sarsa(self, episodes=5000, max_steps=200, seed=20, manual=False):
+        """Run Master agent experiment with path integration - SARSA version"""
         
         np.random.seed(seed)
 
@@ -101,7 +114,7 @@ class ExperimentRunner:
 
         path_integration_errors = []
 
-        for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
+        for episode in tqdm(range(episodes), desc=f"Masters Successor SARSA (seed {seed})"):
             obs, _ = env.reset()
             obs['image'] = obs['image'].T
             
@@ -368,612 +381,279 @@ class ExperimentRunner:
             # ============================= POST-EPISODE PROCESSING =============================
             ae_triggers_per_episode.append(ae_triggers_this_episode)
             path_integration_errors.append(episode_path_errors)
-            
-            # Create ground truth reward space
-            ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
-
-            if hasattr(env, 'goal_pos'):
-                goal_x, goal_y = env.goal_pos
-                ground_truth_reward_space[goal_y, goal_x] = 1.0
-            elif hasattr(env, '_goal_pos'):
-                goal_x, goal_y = env._goal_pos
-                ground_truth_reward_space[goal_y, goal_x] = 1.0
-            else:
-                if hasattr(env, 'grid'):
-                    for y in range(env.size):
-                        for x in range(env.size):
-                            cell = env.grid.get(x, y)
-                            if cell is not None and hasattr(cell, 'type') and cell.type == 'goal':
-                                ground_truth_reward_space[y, x] = 1.0
-            
-
-            # Generate visualizations occasionally
-            if episode % 1000 == 0:
-                save_all_wvf(agent, save_path=generate_save_path(f"wvfs/wvf_episode_{episode}"))
-
-                # Saving the Move Forward SR
-                forward_M = agent.M[MOVE_FORWARD, :, :]
-
-                # ============================= SR COMPARISON =============================
-                if self.sr_comparator is not None:
-                    print("Attempting SR comparison...")
-                    try:
-                        # Compare with optimal SR
-                        metrics = self.sr_comparator.compare(forward_M, episode)
-                        
-                        if metrics:
-                            print(f"\nSR Comparison Metrics (Episode {episode}):")
-                            for key, value in metrics.items():
-                                print(f"  {key}: {value:.6f}")
-                        else:
-                            print("Warning: metrics returned None!")
-                        
-                        # Visualize comparison
-                        print("Creating SR comparison visualization...")
-                        self.sr_comparator.visualize_comparison(forward_M, episode)
-                        print("SR comparison visualization completed!")
-                        
-                    except Exception as e:
-                        print(f"ERROR in SR comparison: {e}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print("WARNING: sr_comparator is None - SR comparison skipped!")
-                
-                print(f"{'='*60}\n")
-
-                plt.figure(figsize=(6, 5))
-                im = plt.imshow(forward_M, cmap='hot')
-                plt.title(f"Forward SR Matrix (Episode {episode})")
-                plt.colorbar(im, label="SR Value")
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f'sr/averaged_M_{episode}.png'))
-                plt.close()
-
-                # Create vision plots
-                fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-
-                all_values = np.concatenate([
-                    predicted_reward_map_2d.flatten(),
-                    target_7x7.flatten(),
-                    agent.true_reward_map.flatten(),
-                    ground_truth_reward_space.flatten()
-                ])
-                vmin = np.min(all_values)
-                vmax = np.max(all_values)
-
-                im1 = ax1.imshow(predicted_reward_map_2d, cmap='viridis', vmin=vmin, vmax=vmax)
-                ax1.set_title(f'Predicted 7x7 View - Ep{episode} Step{step}')
-                ax1.plot(3, 6, 'ro', markersize=8, label='Agent')
-                plt.colorbar(im1, ax=ax1, fraction=0.046)
-
-                im2 = ax2.imshow(target_7x7, cmap='viridis', vmin=vmin, vmax=vmax)
-                ax2.set_title(f'Target 7x7 View (Ground Truth)')
-                ax2.plot(3, 6, 'ro', markersize=8, label='Agent')
-                plt.colorbar(im2, ax=ax2, fraction=0.046)
-
-                im3 = ax3.imshow(agent.true_reward_map, cmap='viridis', vmin=vmin, vmax=vmax)
-                ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_y})')
-                ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')
-                plt.colorbar(im3, ax=ax3, fraction=0.046)
-
-                im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis', vmin=vmin, vmax=vmax)
-                ax4.set_title('Ground Truth Reward Space')
-                plt.colorbar(im4, ax=ax4, fraction=0.046)
-
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f"vision_plots/maps_ep{episode}_step{step}.png"), dpi=150, bbox_inches='tight')
-                plt.close()
-
-                # Plot path integration accuracy
-                if episode > 0:
-                    plt.figure(figsize=(10, 5))
-                    plt.plot(path_integration_errors, alpha=0.7, label='Path integration errors per episode')
-                    plt.xlabel('Episode')
-                    plt.ylabel('Number of Position/Direction Errors')
-                    plt.title(f'Path Integration Accuracy (up to ep {episode})')
-                    plt.legend()
-                    plt.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    plt.savefig(generate_save_path(f'path_integration/errors_up_to_ep_{episode}.png'))
-                    plt.close()
-
-                # Plot AE triggers over episodes
-                plt.figure(figsize=(10, 5))
-                
-                window_size = 50
-                if len(ae_triggers_per_episode) >= window_size:
-                    smoothed_triggers = np.convolve(ae_triggers_per_episode, 
-                                                np.ones(window_size)/window_size, 
-                                                mode='valid')
-                    smooth_episodes = range(window_size//2, len(ae_triggers_per_episode) - window_size//2 + 1)
-                else:
-                    smoothed_triggers = ae_triggers_per_episode
-                    smooth_episodes = range(len(ae_triggers_per_episode))
-                
-                plt.plot(ae_triggers_per_episode, alpha=0.3, label='Raw triggers per episode')
-                if len(ae_triggers_per_episode) >= window_size:
-                    plt.plot(smooth_episodes, smoothed_triggers, color='red', linewidth=2, 
-                            label=f'Smoothed (window={window_size})')
-                
-                plt.xlabel('Episode')
-                plt.ylabel('Number of AE Training Triggers')
-                plt.title(f'AE Training Frequency Over Episodes (up to ep {episode})')
-                plt.legend()
-                plt.grid(True, alpha=0.3)
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
-                plt.close()
-                
+                    
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
-
-        # Print final path integration statistics
-        total_errors = sum(path_integration_errors)
-        print(f"\nPath Integration Summary for seed {seed}:")
-        print(f"Total position/direction errors: {total_errors}")
-        print(f"Episodes with errors: {sum(1 for x in path_integration_errors if x > 0)}")
-        print(f"Average errors per episode: {total_errors / episodes:.4f}")
 
         return {
             "rewards": episode_rewards,
             "lengths": episode_lengths,
             "final_epsilon": epsilon,
-            "algorithm": "Masters Successor w/ Path Integration",
+            "algorithm": "Masters Successor SARSA w/ Path Integration",
             "path_integration_errors": path_integration_errors,
         }
-    
-    
 
-    def run_successor_experiment_q_learning(self, episodes=5000, max_steps=200, seed=20, manual = False):
-            """Run Master agent experiment with path integration"""
+    def run_successor_experiment_q_learning(self, episodes=5000, max_steps=200, seed=20, manual=False):
+        """Run Master agent experiment with path integration - Q-Learning version"""
+        
+        np.random.seed(seed)
+
+        if manual:
+            print("Manual control mode activated. Use W/A/S/D keys to move, Enter to let agent act.")
+            env = SimpleEnv(size=self.env_size, render_mode='human')
+        else:
+            env = SimpleEnv(size=self.env_size)
+
+        agent = SuccessorAgentPartialQLearning(env) 
+
+        # Setup torch
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        input_shape = (env.size, env.size, 1)
+        ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
+        optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
+        loss_fn = nn.MSELoss()
+
+        ae_triggers_per_episode = [] 
+        episode_rewards = []
+        episode_lengths = []
+        epsilon = 1
+        epsilon_end = 0.05
+        epsilon_decay = 0.9995
+
+        path_integration_errors = []
+
+        for episode in tqdm(range(episodes), desc=f"Masters Successor Q-Learning (seed {seed})"):
+            obs, _ = env.reset()
+            obs['image'] = obs['image'].T
             
-            np.random.seed(seed)
+            # Reset agent for new episode
+            agent.reset_path_integration()
+            agent.initialize_path_integration(obs)
 
-            if manual:
-                print("Manual control mode activated. Use W/A/S/D keys to move, Enter to let agent act.")
-                env = SimpleEnv(size=self.env_size, render_mode='human')
-            else:
-                env = SimpleEnv(size=self.env_size)
+            trajectory_buffer = deque(maxlen=self.trajectory_buffer_size)
+            
+            total_reward = 0
+            steps = 0
+            trajectory = []
+            ae_triggers_this_episode = 0
+            episode_path_errors = 0
 
-            agent = SuccessorAgentPartialQLearning(env) 
+            # Reset maps for new episode 
+            agent.true_reward_map = np.zeros((env.size, env.size))
+            agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
+            agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
 
-            # Setup torch
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            input_shape = (env.size, env.size, 1)
-            ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
-            optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
-            loss_fn = nn.MSELoss()
-
-            ae_triggers_per_episode = [] 
-            episode_rewards = []
-            episode_lengths = []
-            epsilon = 1
-            epsilon_end = 0.05
-            epsilon_decay = 0.9995
-
-            # Track path integration accuracy
-            path_integration_errors = []
-
-            for episode in tqdm(range(episodes), desc=f"Masters Successor (seed {seed})"):
-                obs, _ = env.reset()
-                obs['image'] = obs['image'].T
+            current_state_idx = agent.get_state_index(obs)
+            current_action = agent.sample_random_action(obs, epsilon=epsilon)
+            current_exp = [current_state_idx, current_action, None, None, None]
+            
+            for step in range(max_steps):
+                agent_pos = agent.internal_pos
+                trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
-                
-                # Reset agent for new episode
-                agent.reset_path_integration()
-                agent.initialize_path_integration(obs)
+                agent_view = obs['image'][0]  
+                normalized_grid = np.zeros((7, 7), dtype=np.float32)
+                normalized_grid[agent_view == 2] = 0.0
+                normalized_grid[agent_view == 1] = 0.0  
+                normalized_grid[agent_view == 8] = 1.0 
 
-                trajectory_buffer = deque(maxlen=self.trajectory_buffer_size)
-                
-                total_reward = 0
-                steps = 0
-                trajectory = []
-                ae_triggers_this_episode = 0
-                episode_path_errors = 0
-
-                # Reset maps for new episode 
-                agent.true_reward_map = np.zeros((env.size, env.size))
-                agent.wvf = np.zeros((agent.state_size, agent.grid_size, agent.grid_size), dtype=np.float32)
-                agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
-
-                current_state_idx = agent.get_state_index(obs)
-                current_action = agent.sample_random_action(obs, epsilon=epsilon)
-                current_exp = [current_state_idx, current_action, None, None, None]
-                
-                for step in range(max_steps):
-                    # Record position and action for trajectory (using path integration)
-                    agent_pos = agent.internal_pos
-                    trajectory.append((agent_pos[0], agent_pos[1], current_action))
-                    
-                    # Make the normalized grid for step  info
-                    agent_view = obs['image'][0]  
-
-                    # Convert to channels last for easier processing
-                    normalized_grid = np.zeros((7, 7), dtype=np.float32)
-
-                    # Setting up input for the AE based on agent's partial view
-                    normalized_grid[agent_view == 2] = 0.0  # Wall
-                    normalized_grid[agent_view == 1] = 0.0  # Open space  
-                    normalized_grid[agent_view == 8] = 1.0 
-
-                    if step == 0:
-                        done = False
-                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
-                    if step > 0:
-                        if done:
-                            normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
-
-                    step_info = {
-                        'agent_view': obs['image'][0].copy(),  # 7x7 view
-                        'agent_pos': tuple(agent.internal_pos),
-                        'agent_dir': agent.internal_dir,
-                        'normalized_grid': normalized_grid.copy()  # The AE input
-                    }
-                    trajectory_buffer.append(step_info)
-
-                    # Take action in environment
-                    obs, reward, done, _, _ = env.step(current_action)
-                    
-                    # Update internal state based on action taken
-                    agent.update_internal_state(current_action)
-
-                    next_state_idx = agent.get_state_index(obs)
-                    obs['image'] = obs['image'].T
-
-                    # Complete experience
-                    current_exp[2] = next_state_idx
-                    current_exp[3] = reward
-                    current_exp[4] = done
-
-                    next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
-
-                    next_exp = [next_state_idx, next_action, None, None, None]
-
-                    # Update agent - always pass next_exp since we're not terminating early
-                    agent.update(current_exp, next_exp)
-
-                    # ============================= Vision Model ====================================
-                
-                    # Update the agent's true_reward_map based on current observation
-                    agent_position = agent.internal_pos  # Use path integration position
-
-                    # Get the agent's 7x7 view from observation (already processed)
-                    agent_view = obs['image'][0]  
-
-                    # Convert to channels last for easier processing
-                    normalized_grid = np.zeros((7, 7), dtype=np.float32)
-
-                    # Setting up input for the AE based on agent's partial view
-                    normalized_grid[agent_view == 2] = 0.0  # Wall
-                    normalized_grid[agent_view == 1] = 0.0  # Open space  
-                    normalized_grid[agent_view == 8] = 1.0 
-
-                    # If agent is on goal, force the agent's position in view to show reward, the env overwrites goal with agent pos in obs
+                if step == 0:
+                    done = False
+                if step > 0:
                     if done:
-                        normalized_grid[6, 3] = 1.0  # Agent position in egocentric view
+                        normalized_grid[6, 3] = 1.0
 
-                    # Reshape for the autoencoder (add batch and channel dims)
-                    input_grid = normalized_grid[np.newaxis, ..., np.newaxis] 
+                step_info = {
+                    'agent_view': obs['image'][0].copy(),
+                    'agent_pos': tuple(agent.internal_pos),
+                    'agent_dir': agent.internal_dir,
+                    'normalized_grid': normalized_grid.copy()
+                }
+                trajectory_buffer.append(step_info)
 
-                    with torch.no_grad():
-                        ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
-                        predicted_reward_map_tensor = ae_model(ae_input_tensor)
-                        predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
+                obs, reward, done, _, _ = env.step(current_action)
+                agent.update_internal_state(current_action)
 
-                    # Mark position as visited (using path integration)
-                    agent.visited_positions[agent_position[1], agent_position[0]] = True  # y,x
+                next_state_idx = agent.get_state_index(obs)
+                obs['image'] = obs['image'].T
 
-                    # Learning Signal
-                    if done and step < max_steps:
-                        agent.true_reward_map[agent_position[1], agent_position[0]] = 1
+                current_exp[2] = next_state_idx
+                current_exp[3] = reward
+                current_exp[4] = done
 
-                        # Added: Logic for training on past 10 steps (BATCH) + current step when goal is reached
-                        if len(trajectory_buffer) > 0:  # Changed from > 1 to > 0
-                            batch_inputs = []
-                            batch_targets = []
-                            
-                            # Include all steps from trajectory buffer (past steps)
-                            for past_step in trajectory_buffer:
-                                # Get the reward location in global coordinates
-                                reward_global_pos = agent_position  # Current reward location
-                                
-                                # Create target 7x7 for this past step
-                                past_target_7x7 = self._create_target_view_with_reward(
-                                    past_step['agent_pos'], 
-                                    past_step['agent_dir'],
-                                    reward_global_pos,
-                                    agent.true_reward_map
-                                )
-                                
-                                batch_inputs.append(past_step['normalized_grid'])
-                                batch_targets.append(past_target_7x7)
-                            
-                            # ALSO include the current step (when agent is on goal)
-                            current_target_7x7 = self._create_target_view_with_reward(
-                                tuple(agent.internal_pos),  # Current position (on goal)
-                                agent.internal_dir,         # Current direction
-                                agent_position,             # Reward position (same as current position)
+                next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
+                next_exp = [next_state_idx, next_action, None, None, None]
+                agent.update(current_exp, next_exp)
+
+                agent_position = agent.internal_pos
+                agent_view = obs['image'][0]  
+                normalized_grid = np.zeros((7, 7), dtype=np.float32)
+                normalized_grid[agent_view == 2] = 0.0
+                normalized_grid[agent_view == 1] = 0.0  
+                normalized_grid[agent_view == 8] = 1.0 
+
+                if done:
+                    normalized_grid[6, 3] = 1.0
+
+                input_grid = normalized_grid[np.newaxis, ..., np.newaxis] 
+
+                with torch.no_grad():
+                    ae_input_tensor = torch.tensor(input_grid, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
+                    predicted_reward_map_tensor = ae_model(ae_input_tensor)
+                    predicted_reward_map_2d = predicted_reward_map_tensor.squeeze().cpu().numpy()
+
+                agent.visited_positions[agent_position[1], agent_position[0]] = True
+
+                if done and step < max_steps:
+                    agent.true_reward_map[agent_position[1], agent_position[0]] = 1
+
+                    if len(trajectory_buffer) > 0:
+                        batch_inputs = []
+                        batch_targets = []
+                        
+                        for past_step in trajectory_buffer:
+                            reward_global_pos = agent_position
+                            past_target_7x7 = self._create_target_view_with_reward(
+                                past_step['agent_pos'], 
+                                past_step['agent_dir'],
+                                reward_global_pos,
                                 agent.true_reward_map
                             )
-                            
-                            batch_inputs.append(normalized_grid)  # Current step's input
-                            batch_targets.append(current_target_7x7)  # Current step's target
-                            
-                            # Train autoencoder on batch (now includes current step + up to 9 previous steps)
-                            self._train_ae_on_batch(ae_model, optimizer, loss_fn, 
-                                                batch_inputs, batch_targets, device)
-
-                    # Map the 7x7 predicted reward map to the 10x10 global map
-                    agent_x, agent_y = agent_position
-                    ego_center_x = 3  # Center column
-                    ego_center_y = 6  # Bottom row
-                    agent_dir = agent.internal_dir  # Use path integration direction
-                    
-                    for view_y in range(7):
-                        for view_x in range(7):
-                            # Calculate offset from agent's position in ego view
-                            dx_ego = view_x - ego_center_x  # -3 to 3
-                            dy_ego = view_y - ego_center_y  # -6 to 0
-                            
-                            # Rotate the offset based on agent's direction to get world offsets
-                            if agent_dir == 3:  # Facing up (north)
-                                dx_world = dx_ego
-                                dy_world = dy_ego
-                            elif agent_dir == 0:  # Facing right (east)
-                                dx_world = -dy_ego
-                                dy_world = dx_ego
-                            elif agent_dir == 1:  # Facing down (south)
-                                dx_world = -dx_ego
-                                dy_world = -dy_ego
-                            elif agent_dir == 2:  # Facing left (west)
-                                dx_world = dy_ego
-                                dy_world = -dx_ego
-                            
-                            # Calculate global coordinates
-                            global_x = agent_x + dx_world
-                            global_y = agent_y + dy_world
-                            
-                            # Check if the global coordinates are within the map bounds
-                            if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
-                                # Only update if position hasn't been visited (to preserve ground truth)
-                                if not agent.visited_positions[global_y, global_x]:
-                                    predicted_value = predicted_reward_map_2d[view_y, view_x]
-                                    agent.true_reward_map[global_y, global_x] = predicted_value
-    
-                    # Extract the 7x7 target from the true reward map corresponding to agent's view
-                    target_7x7 = np.zeros((7, 7), dtype=np.float32)
-                    
-                    agent_x, agent_y = agent_position
-                    agent_dir = agent.internal_dir  # Use path integration direction
-                    
-                    for view_y in range(7):
-                        for view_x in range(7):
-                            # Calculate offset from agent's position in ego view
-                            dx_ego = view_x - ego_center_x  # -3 to 3
-                            dy_ego = view_y - ego_center_y  # -6 to 0
-                            
-                            # Rotate the offset based on agent's direction to get world offsets
-                            if agent_dir == 3:  # Facing up (north)
-                                dx_world = dx_ego
-                                dy_world = dy_ego
-                            elif agent_dir == 0:  # Facing right (east)
-                                dx_world = -dy_ego
-                                dy_world = dx_ego
-                            elif agent_dir == 1:  # Facing down (south)
-                                dx_world = -dx_ego
-                                dy_world = -dy_ego
-                            elif agent_dir == 2:  # Facing left (west)
-                                dx_world = dy_ego
-                                dy_world = -dx_ego
-                            
-                            # Calculate global coordinates
-                            global_x = agent_x + dx_world
-                            global_y = agent_y + dy_world
-                            
-                            # Extract value from true reward map if within bounds
-                            if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
-                                target_7x7[view_y, view_x] = agent.true_reward_map[global_y, global_x]
-                            else:
-                                # Out of bounds positions get 0
-                                target_7x7[view_y, view_x] = 0.0
-
-                    trigger_ae_training = False
-                    # Check if ANY position in the view has significant error
-                    view_error = np.abs(predicted_reward_map_2d - target_7x7)
-                    max_error = np.max(view_error)
-                    mean_error = np.mean(view_error)
-
-                    if max_error > 0.05 or mean_error > 0.01:
-                        trigger_ae_training = True
-
-                    if trigger_ae_training:
-                        # print("Training Triggered!")
-                        ae_triggers_this_episode += 1 
-                        target_tensor = torch.tensor(target_7x7[np.newaxis, ..., np.newaxis], dtype=torch.float32)
-                        target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)
-
-                        ae_model.train()
-                        optimizer.zero_grad()
-                        output = ae_model(ae_input_tensor)
-                        loss = loss_fn(output, target_tensor)
-                        loss.backward()
-                        optimizer.step()
+                            batch_inputs.append(past_step['normalized_grid'])
+                            batch_targets.append(past_target_7x7)
                         
-                        step_loss = loss.item()
+                        current_target_7x7 = self._create_target_view_with_reward(
+                            tuple(agent.internal_pos),
+                            agent.internal_dir,
+                            agent_position,
+                            agent.true_reward_map
+                        )
+                        batch_inputs.append(normalized_grid)
+                        batch_targets.append(current_target_7x7)
+                        
+                        self._train_ae_on_batch(ae_model, optimizer, loss_fn, 
+                                            batch_inputs, batch_targets, device)
+
+                agent_x, agent_y = agent_position
+                ego_center_x = 3
+                ego_center_y = 6
+                agent_dir = agent.internal_dir
                 
+                for view_y in range(7):
+                    for view_x in range(7):
+                        dx_ego = view_x - ego_center_x
+                        dy_ego = view_y - ego_center_y
+                        
+                        if agent_dir == 3:
+                            dx_world = dx_ego
+                            dy_world = dy_ego
+                        elif agent_dir == 0:
+                            dx_world = -dy_ego
+                            dy_world = dx_ego
+                        elif agent_dir == 1:
+                            dx_world = -dx_ego
+                            dy_world = -dy_ego
+                        elif agent_dir == 2:
+                            dx_world = dy_ego
+                            dy_world = -dx_ego
+                        
+                        global_x = agent_x + dx_world
+                        global_y = agent_y + dy_world
+                        
+                        if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
+                            if not agent.visited_positions[global_y, global_x]:
+                                predicted_value = predicted_reward_map_2d[view_y, view_x]
+                                agent.true_reward_map[global_y, global_x] = predicted_value
 
-                    agent.reward_maps.fill(0)  # Reset all maps to zero
-
-                    for y in range(agent.grid_size):
-                        for x in range(agent.grid_size):
-                            curr_reward = agent.true_reward_map[y, x]
-                            idx = y * agent.grid_size + x
-                            # Threshold
-                            if agent.true_reward_map[y, x] >= 0.5:
-                                agent.reward_maps[idx, y, x] = curr_reward
-
-                    # # Update agent WVF
-                    # M_flat = np.mean(agent.M, axis=0)
-                    # R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                    # V_all = M_flat @ R_flat_all.T
-                    # agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
-
-                    MOVE_FORWARD = 2
-                    M_forward = agent.M[MOVE_FORWARD, :, :]  # Use only forward action SR
-                    R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
-                    V_all = M_forward @ R_flat_all.T
-                    agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
-
-                    total_reward += reward
-                    steps += 1
-                    current_exp = next_exp
-                    current_action = next_action
-
-                    if done:
-                        break
-
-                ae_triggers_per_episode.append(ae_triggers_this_episode)
-                path_integration_errors.append(episode_path_errors)
+                target_7x7 = np.zeros((7, 7), dtype=np.float32)
                 
-                #  Create ground truth reward space based on environment for plotting
-                ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
+                for view_y in range(7):
+                    for view_x in range(7):
+                        dx_ego = view_x - ego_center_x
+                        dy_ego = view_y - ego_center_y
+                        
+                        if agent_dir == 3:
+                            dx_world = dx_ego
+                            dy_world = dy_ego
+                        elif agent_dir == 0:
+                            dx_world = -dy_ego
+                            dy_world = dx_ego
+                        elif agent_dir == 1:
+                            dx_world = -dx_ego
+                            dy_world = -dy_ego
+                        elif agent_dir == 2:
+                            dx_world = dy_ego
+                            dy_world = -dx_ego
+                        
+                        global_x = agent_x + dx_world
+                        global_y = agent_y + dy_world
+                        
+                        if 0 <= global_x < agent.true_reward_map.shape[1] and 0 <= global_y < agent.true_reward_map.shape[0]:
+                            target_7x7[view_y, view_x] = agent.true_reward_map[global_y, global_x]
+                        else:
+                            target_7x7[view_y, view_x] = 0.0
 
-                # Get the actual goal position from the environment
-                # The goal position should be available from the environment
-                if hasattr(env, 'goal_pos'):
-                    goal_x, goal_y = env.goal_pos
-                    ground_truth_reward_space[goal_y, goal_x] = 1.0
-                elif hasattr(env, '_goal_pos'):
-                    goal_x, goal_y = env._goal_pos
-                    ground_truth_reward_space[goal_y, goal_x] = 1.0
-                else:
-                    # If goal position is not directly accessible, extract from observation
-                    # Look for the goal object (usually object type 8) in the full grid
-                    if hasattr(env, 'grid'):
-                        for y in range(env.size):
-                            for x in range(env.size):
-                                cell = env.grid.get(x, y)
-                                if cell is not None and hasattr(cell, 'type') and cell.type == 'goal':
-                                    ground_truth_reward_space[y, x] = 1.0
-                                    
+                trigger_ae_training = False
+                view_error = np.abs(predicted_reward_map_2d - target_7x7)
+                max_error = np.max(view_error)
+                mean_error = np.mean(view_error)
 
-                # Generate visualizations occasionally
-                if episode % 1000 == 0:
-                    save_all_wvf(agent, save_path=generate_save_path(f"qlearning/wvfs/wvf_episode_{episode}"))
+                if max_error > 0.05 or mean_error > 0.01:
+                    trigger_ae_training = True
 
-                    # Saving the SR
-                    averaged_M = np.mean(agent.M, axis=0)
+                if trigger_ae_training:
+                    ae_triggers_this_episode += 1 
+                    target_tensor = torch.tensor(target_7x7[np.newaxis, ..., np.newaxis], dtype=torch.float32)
+                    target_tensor = target_tensor.permute(0, 3, 1, 2).to(device)
 
-                    # Create a figure
-                    plt.figure(figsize=(6, 5))
-                    im = plt.imshow(averaged_M, cmap='hot')
-                    plt.title(f"Averaged SR Matrix (Episode {episode})")
-                    plt.colorbar(im, label="SR Value")
-                    plt.tight_layout()
-                    plt.savefig(generate_save_path(f'qlearning/sr/averaged_M_{episode}.png'))
-                    plt.close()
-
-                    # Create vision plots
-                    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
-
-                    # Calculate global vmin and vmax across all arrays
-                    all_values = np.concatenate([
-                        predicted_reward_map_2d.flatten(),
-                        target_7x7.flatten(),
-                        agent.true_reward_map.flatten(),
-                        ground_truth_reward_space.flatten()
-                    ])
-                    vmin = np.min(all_values)
-                    vmax = np.max(all_values)
-
-                    # Plot predicted 7x7 view (top-left)
-                    im1 = ax1.imshow(predicted_reward_map_2d, cmap='viridis', vmin=vmin, vmax=vmax)
-                    ax1.set_title(f'Predicted 7x7 View - Ep{episode} Step{step}')
-                    ax1.plot(3, 6, 'ro', markersize=8, label='Agent')
-                    plt.colorbar(im1, ax=ax1, fraction=0.046)
-
-                    # Plot target 7x7 view (top-right)
-                    im2 = ax2.imshow(target_7x7, cmap='viridis', vmin=vmin, vmax=vmax)
-                    ax2.set_title(f'Target 7x7 View (Ground Truth)')
-                    ax2.plot(3, 6, 'ro', markersize=8, label='Agent')
-                    plt.colorbar(im2, ax=ax2, fraction=0.046)
-
-                    # Plot true 10x10 reward map (bottom-left)
-                    im3 = ax3.imshow(agent.true_reward_map, cmap='viridis', vmin=vmin, vmax=vmax)
-                    ax3.set_title(f'True 10x10 Map - Agent at ({agent_x},{agent_y})')
-                    ax3.plot(agent_x, agent_y, 'ro', markersize=8, label='Agent')
-                    plt.colorbar(im3, ax=ax3, fraction=0.046)
-
-                    # Plot ground truth reward space (bottom-right)
-                    im4 = ax4.imshow(ground_truth_reward_space, cmap='viridis', vmin=vmin, vmax=vmax)
-                    ax4.set_title('Ground Truth Reward Space')
-                    plt.colorbar(im4, ax=ax4, fraction=0.046)
-
-                    plt.tight_layout()
-                    plt.savefig(generate_save_path(f"qlearning/vision_plots/maps_ep{episode}_step{step}.png"), dpi=150, bbox_inches='tight')
-                    plt.close()
-
-                    # Plot path integration accuracy
-                    if episode > 0:
-                        plt.figure(figsize=(10, 5))
-                        plt.plot(path_integration_errors, alpha=0.7, label='Path integration errors per episode')
-                        plt.xlabel('Episode')
-                        plt.ylabel('Number of Position/Direction Errors')
-                        plt.title(f'Path Integration Accuracy (up to ep {episode})')
-                        plt.legend()
-                        plt.grid(True, alpha=0.3)
-                        plt.tight_layout()
-                        plt.savefig(generate_save_path(f'qlearning/path_integration/errors_up_to_ep_{episode}.png'))
-                        plt.close()
-
-                    # Plot AE triggers over episodes
-                    plt.figure(figsize=(10, 5))
+                    ae_model.train()
+                    optimizer.zero_grad()
+                    output = ae_model(ae_input_tensor)
+                    loss = loss_fn(output, target_tensor)
+                    loss.backward()
+                    optimizer.step()
                     
-                    window_size = 50
-                    if len(ae_triggers_per_episode) >= window_size:
-                        smoothed_triggers = np.convolve(ae_triggers_per_episode, 
-                                                    np.ones(window_size)/window_size, 
-                                                    mode='valid')
-                        smooth_episodes = range(window_size//2, len(ae_triggers_per_episode) - window_size//2 + 1)
-                    else:
-                        smoothed_triggers = ae_triggers_per_episode
-                        smooth_episodes = range(len(ae_triggers_per_episode))
-                    
-                    plt.plot(ae_triggers_per_episode, alpha=0.3, label='Raw triggers per episode')
-                    if len(ae_triggers_per_episode) >= window_size:
-                        plt.plot(smooth_episodes, smoothed_triggers, color='red', linewidth=2, 
-                                label=f'Smoothed (window={window_size})')
-                    
-                    plt.xlabel('Episode')
-                    plt.ylabel('Number of AE Training Triggers')
-                    plt.title(f'AE Training Frequency Over Episodes (up to ep {episode})')
-                    plt.legend()
-                    plt.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    plt.savefig(generate_save_path(f'qlearning/ae_triggers/triggers_up_to_ep_{episode}.png'))
-                    plt.close()
-                    
-                epsilon = max(epsilon_end, epsilon * epsilon_decay)
-                episode_rewards.append(total_reward)
-                episode_lengths.append(steps)
+                    step_loss = loss.item()
 
-            # Print final path integration statistics
-            # total_errors = sum(path_integration_errors)
-            # print(f"\nPath Integration Summary for seed {seed}:")
-            # print(f"Total position/direction errors: {total_errors}")
-            # print(f"Episodes with errors: {sum(1 for x in path_integration_errors if x > 0)}")
-            # print(f"Average errors per episode: {total_errors / episodes:.4f}")
+                agent.reward_maps.fill(0)
 
-            return {
-                "rewards": episode_rewards,
-                "lengths": episode_lengths,
-                "final_epsilon": epsilon,
-                "algorithm": "Masters Successor w/ Path Integration",
-                "path_integration_errors": path_integration_errors,
-            }
-    
+                for y in range(agent.grid_size):
+                    for x in range(agent.grid_size):
+                        curr_reward = agent.true_reward_map[y, x]
+                        idx = y * agent.grid_size + x
+                        if agent.true_reward_map[y, x] >= 0.5:
+                            agent.reward_maps[idx, y, x] = curr_reward
+
+                MOVE_FORWARD = 2
+                M_forward = agent.M[MOVE_FORWARD, :, :]
+                R_flat_all = agent.reward_maps.reshape(agent.state_size, -1)
+                V_all = M_forward @ R_flat_all.T
+                agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
+
+                total_reward += reward
+                steps += 1
+                current_exp = next_exp
+                current_action = next_action
+
+                if done:
+                    break
+
+            ae_triggers_per_episode.append(ae_triggers_this_episode)
+            path_integration_errors.append(episode_path_errors)
+                    
+            epsilon = max(epsilon_end, epsilon * epsilon_decay)
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "final_epsilon": epsilon,
+            "algorithm": "Masters Successor Q-Learning w/ Path Integration",
+            "path_integration_errors": path_integration_errors,
+        }
+
     def run_dqn_experiment(self, episodes=5000, max_steps=200, seed=20, manual=False):
         """Run DQN agent experiment with path integration and vision"""
         
@@ -988,7 +668,6 @@ class ExperimentRunner:
         else:
             env = SimpleEnv(size=self.env_size)
 
-        # Initialize DQN agent
         agent = DQNAgentPartial(env, 
                                learning_rate=0.001,
                                gamma=0.99,
@@ -999,14 +678,12 @@ class ExperimentRunner:
                                batch_size=32,
                                target_update_freq=100)
 
-        # Setup vision model (autoencoder)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        input_shape = (7, 7, 1)  # 7x7 partial view
+        input_shape = (7, 7, 1)
         ae_model = Autoencoder(input_channels=input_shape[-1]).to(device)
         optimizer = optim.Adam(ae_model.parameters(), lr=0.001)
         loss_fn = nn.MSELoss()
 
-        # Tracking variables
         ae_triggers_per_episode = [] 
         episode_rewards = []
         episode_lengths = []
@@ -1016,8 +693,6 @@ class ExperimentRunner:
         for episode in tqdm(range(episodes), desc=f"DQN Partial Observable (seed {seed})"):
             obs = env.reset()
             
-            
-            # Reset agent for new episode
             agent.reset_path_integration()
             agent.initialize_path_integration(obs)
             
@@ -1028,61 +703,49 @@ class ExperimentRunner:
             episode_path_errors = 0
             episode_dqn_losses = []
 
-            # Reset maps for new episode 
             agent.true_reward_map = np.zeros((env.size, env.size))
             agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
 
-            # Get initial state for DQN
-            # current_obs = obs.copy()
             current_obs = obs
             current_state = agent.get_dqn_state(current_obs)
 
-            # Transpose image for processing
             if 'image' in obs:
                 obs['image'] = obs['image'].T
-
             
             for step in range(max_steps):
-                # Record position and action for trajectory (using path integration)
                 agent_pos = agent.internal_pos
                 
-                # Select action using DQN
                 if manual:
                     print(f"Episode {episode}, Step {step}")
                     key = getch().lower()
                     
                     if key == 'w':
-                        current_action = 2  # forward
+                        current_action = 2
                     elif key == 'a':
-                        current_action = 0  # turn left
+                        current_action = 0
                     elif key == 'd':
-                        current_action = 1  # turn right
+                        current_action = 1
                     elif key == 's':
-                        current_action = 5  # toggle
+                        current_action = 5
                     elif key == 'q':
                         manual = False
                         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
-                    elif key == '\r' or key == '\n':  # Enter key
+                    elif key == '\r' or key == '\n':
                         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
                     else:
                         current_action = agent.select_action_dqn(current_obs, agent.epsilon)
-
                 else:
                     current_action = agent.select_action_dqn(current_obs, agent.epsilon)
 
                 trajectory.append((agent_pos[0], agent_pos[1], current_action))
                 
-                # Take action in environment
                 obs, reward, done, _, _ = env.step(current_action)
 
-                # Transpose image for processing
                 if 'image' in obs:
                     obs['image'] = obs['image'].T
                 
-                # Update internal state based on action taken
                 agent.update_internal_state(current_action)
                 
-                # Verify path integration accuracy periodically
                 if episode % 200 == 0:
                     is_accurate, error_msg = agent.verify_path_integration(obs)
                     if not is_accurate:
@@ -1090,21 +753,15 @@ class ExperimentRunner:
                         if episode_path_errors == 1:
                             print(f"Episode {episode}, Step {step}: {error_msg}")
 
-                # Get next state for DQN
                 next_obs = obs.copy()
                 next_state = agent.get_dqn_state(next_obs)
 
-
-                # === DQN Training (NEW) ===
-                # Store experience in DQN memory
                 agent.remember(current_state, current_action, reward, next_state, done)
                 
-                # Train DQN if enough experiences
                 if len(agent.memory) >= agent.batch_size:
                     dqn_loss = agent.train_dqn()
                     episode_dqn_losses.append(dqn_loss)
 
-                # Update for next iteration
                 total_reward += reward
                 steps += 1
                 current_obs = next_obs
@@ -1113,10 +770,8 @@ class ExperimentRunner:
                 if done:
                     break
 
-            # Decay epsilon
             agent.decay_epsilon()
             
-            # Record episode statistics
             ae_triggers_per_episode.append(ae_triggers_this_episode)
             path_integration_errors.append(episode_path_errors)
             episode_rewards.append(total_reward)
@@ -1127,139 +782,6 @@ class ExperimentRunner:
             else:
                 dqn_losses.append(0.0)
 
-            # Generate visualizations occasionally
-            if episode % 1000 == 0:
-                # Create ground truth reward space
-                ground_truth_reward_space = np.zeros((env.size, env.size), dtype=np.float32)
-
-                if hasattr(env, 'goal_pos'):
-                    goal_x, goal_y = env.goal_pos
-                    ground_truth_reward_space[goal_y, goal_x] = 1.0
-                elif hasattr(env, '_goal_pos'):
-                    goal_x, goal_y = env._goal_pos
-                    ground_truth_reward_space[goal_y, goal_x] = 1.0
-                else:
-                    if hasattr(env, 'grid'):
-                        for y in range(env.size):
-                            for x in range(env.size):
-                                cell = env.grid.get(x, y)
-                                if cell is not None and hasattr(cell, 'type') and cell.type == 'goal':
-                                    ground_truth_reward_space[y, x] = 1.0
-                                    break
-
-                # === Q-Value Heatmap Visualization ===
-                # Get Q-values for all positions in the grid
-                q_value_map = np.zeros((env.size, env.size, 3))
-
-                # Store original position/direction
-                orig_pos = agent.internal_pos
-                orig_dir = agent.internal_dir
-
-                # For each grid position, get Q-values
-                for y in range(env.size):
-                    for x in range(env.size):
-                        # Temporarily set agent position for state creation
-                        agent.internal_pos = (x, y)
-                        
-                        # Create a mock observation at this position
-                        mock_obs = current_obs.copy()  # Use last observation as template
-                        test_state = agent.get_dqn_state(mock_obs)
-                        
-                        # Get Q-values from DQN
-                        with torch.no_grad():
-                            # Check if test_state is already a tensor
-                            if isinstance(test_state, torch.Tensor):
-                                state_tensor = test_state.unsqueeze(0).to(agent.device)
-                            else:
-                                state_tensor = torch.FloatTensor(test_state).unsqueeze(0).to(agent.device)
-                            q_values = agent.q_network(state_tensor).cpu().numpy()[0]
-                            q_value_map[y, x, :] = q_values
-
-                # Restore original position
-                agent.internal_pos = orig_pos
-                agent.internal_dir = orig_dir
-
-                # Plot Q-value heatmaps for each action
-                fig_q, axes_q = plt.subplots(1, 3, figsize=(15, 5))
-                action_names = ['Turn Left', 'Turn Right', 'Move Forward']
-
-                agent_x, agent_y = agent_pos
-
-                for action_idx in range(3):
-                    ax = axes_q[action_idx]
-                    im = ax.imshow(q_value_map[:, :, action_idx], cmap='viridis')
-                    ax.set_title(f'Q-Values: {action_names[action_idx]}')
-                    ax.plot(agent_x, agent_y, 'ro', markersize=10, label='Agent')
-                    plt.colorbar(im, ax=ax, fraction=0.046)
-                    ax.legend()
-
-                plt.suptitle(f'DQN Q-Value Heatmaps - Episode {episode}')
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f"dqn/dqn_q_values/q_values_ep{episode}.png"), dpi=150, bbox_inches='tight')
-                plt.close()
-
-                # Plot max Q-value alongside ground truth reward space
-                max_q_values = np.max(q_value_map, axis=2)
-                fig_max, axes_max = plt.subplots(1, 2, figsize=(16, 6))
-
-                # Left: Max Q-values
-                ax_max = axes_max[0]
-                im_max = ax_max.imshow(max_q_values, cmap='hot')
-                ax_max.set_title(f'Max Q-Value Across Actions')
-                ax_max.plot(agent_x, agent_y, 'bo', markersize=10, label='Agent Position')
-                plt.colorbar(im_max, ax=ax_max, label='Max Q-Value')
-                ax_max.legend()
-
-                # Right: Ground truth reward space
-                ax_truth = axes_max[1]
-                im_truth = ax_truth.imshow(ground_truth_reward_space, cmap='hot')
-                ax_truth.set_title('Ground Truth Reward Space')
-                ax_truth.plot(agent_x, agent_y, 'bo', markersize=10, label='Agent Position')
-                plt.colorbar(im_truth, ax=ax_truth, label='Reward')
-                ax_truth.legend()
-
-                plt.suptitle(f'DQN Learned Values vs Ground Truth - Episode {episode}')
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f"dqn/dqn_q_values/max_q_vs_truth_ep{episode}.png"), dpi=150, bbox_inches='tight')
-                plt.close()
-
-
-                # DQN loss plot
-                plt.figure(figsize=(10, 5))
-                plt.plot(dqn_losses, alpha=0.7, label='DQN Loss')
-                if len(dqn_losses) >= 50:
-                    smoothed_loss = np.convolve(dqn_losses, np.ones(50)/50, mode='valid')
-                    plt.plot(range(25, len(dqn_losses) - 24), smoothed_loss, color='red', linewidth=2, label='Smoothed Loss')
-                plt.xlabel('Episode')
-                plt.ylabel('Mean DQN Loss')
-                plt.title(f'DQN Training Loss (up to ep {episode})')
-                plt.legend()
-                plt.grid(True, alpha=0.3)
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f'dqn/dqn_loss/loss_up_to_ep_{episode}.png'))
-                plt.close()
-
-                # Path integration accuracy
-                plt.figure(figsize=(10, 5))
-                plt.plot(path_integration_errors, alpha=0.7, label='Path integration errors per episode')
-                plt.xlabel('Episode')
-                plt.ylabel('Number of Position/Direction Errors')
-                plt.title(f'Path Integration Accuracy (up to ep {episode})')
-                plt.legend()
-                plt.grid(True, alpha=0.3)
-                plt.tight_layout()
-                plt.savefig(generate_save_path(f'dqn/dqn_path_integration/errors_up_to_ep_{episode}.png'))
-                plt.close()
-
-        # Print final statistics
-        total_errors = sum(path_integration_errors)
-        # print(f"\nDQN Path Integration Summary for seed {seed}:")
-        # print(f"Total position/direction errors: {total_errors}")
-        # print(f"Episodes with errors: {sum(1 for x in path_integration_errors if x > 0)}")
-        # print(f"Average errors per episode: {total_errors / episodes:.4f}")
-        # print(f"Final epsilon: {agent.epsilon:.4f}")
-        # print(f"Average DQN loss (final 100 episodes): {np.mean(dqn_losses[-100:]):.6f}")
-
         return {
             "rewards": episode_rewards,
             "lengths": episode_lengths,
@@ -1269,9 +791,21 @@ class ExperimentRunner:
             "dqn_losses": dqn_losses,
             "ae_triggers": ae_triggers_per_episode,
         }
+
+    # ========================================================================
+    # LSTM-DQN EXPERIMENT (UPDATED)
+    # ========================================================================
     
     def run_lstm_dqn_experiment(self, episodes=5000, max_steps=200, seed=20, manual=False):
-        """Run LSTM-DQN agent experiment"""
+        """
+        Run LSTM-DQN agent experiment.
+        
+        CHANGES FROM ORIGINAL:
+        - Updated to match document 2 implementation
+        - Fixed frame stack update logic (only once per step)
+        - Changed loss tracking from 'dqn_losses' to 'lstm_losses'
+        - Updated visualization paths
+        """
         
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -1303,7 +837,7 @@ class ExperimentRunner:
         # Tracking variables
         episode_rewards = []
         episode_lengths = []
-        lstm_losses = []
+        lstm_losses = []  # CHANGED: was 'dqn_losses' in original
 
         for episode in tqdm(range(episodes), desc=f"LSTM-DQN (seed {seed})"):
             # Reset environment
@@ -1318,12 +852,11 @@ class ExperimentRunner:
             episode_losses = []
             
             for step in range(max_steps):
-                # Update frame stack ONCE per step
-                # Extract and push the current frame to the stack
+                # FIXED: Update frame stack ONCE per step
                 frame = agent._extract_frame(obs)
                 agent.frame_stack.push(frame)
                 
-                # Now get the stacked state 
+                # Get the stacked state 
                 stacked = agent.frame_stack.get_stack()
                 stacked = np.array(stacked, dtype=np.float32)
                 current_state = torch.FloatTensor(stacked).to(agent.device) / 10.0
@@ -1390,22 +923,8 @@ class ExperimentRunner:
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
             
-            # Logging
-            # if episode % 2500 == 0:
-            #     avg_reward = np.mean(episode_rewards[-100:]) if len(episode_rewards) >= 100 else np.mean(episode_rewards)
-            #     avg_length = np.mean(episode_lengths[-100:]) if len(episode_lengths) >= 100 else np.mean(episode_lengths)
-            #     avg_loss = np.mean(lstm_losses[-100:]) if len(lstm_losses) >= 100 else np.mean(lstm_losses)
-                
-            #     print(f"\nEpisode {episode}")
-            #     print(f"  Avg Reward (last 100): {avg_reward:.3f}")
-            #     print(f"  Avg Length (last 100): {avg_length:.1f}")
-            #     print(f"  Avg Loss (last 100): {avg_loss:.6f}")
-            #     print(f"  Epsilon: {agent.epsilon:.4f}")
-            #     print(f"  Replay buffer size: {len(agent.memory)} sequences")
-            
             # Visualizations 
             if episode % 1000 == 0:
-
                 # Loss plot
                 plt.figure(figsize=(10, 5))
                 plt.plot(lstm_losses, alpha=0.7, label='LSTM-DQN Loss')
@@ -1438,39 +957,247 @@ class ExperimentRunner:
                 plt.savefig(generate_save_path(f'lstm_dqn/lstm_dqn_rewards/rewards_up_to_ep_{episode}.png'))
                 plt.close()
         
-        # Print final statistics
-        # print(f"\nLSTM-DQN Summary for seed {seed}:")
-        # print(f"Final epsilon: {agent.epsilon:.4f}")
-        # print(f"Average reward (final 100 episodes): {np.mean(episode_rewards[-100:]):.3f}")
-        # print(f"Average length (final 100 episodes): {np.mean(episode_lengths[-100:]):.1f}")
-        # print(f"Average loss (final 100 episodes): {np.mean(lstm_losses[-100:]):.6f}")
-        
         return {
             "rewards": episode_rewards,
             "lengths": episode_lengths,
             "final_epsilon": agent.epsilon,
             "algorithm": "LSTM-DQN with Frame Stacking",
-            "lstm_losses": lstm_losses,
+            "lstm_losses": lstm_losses,  # CHANGED: was 'dqn_losses'
         }
+
+    # ========================================================================
+    # LSTM-WVF EXPERIMENT (NEW ALGORITHM)
+    # ========================================================================
     
-    def run_comparison_experiment(self, episodes=5000, max_steps=200, manual = False):
-        """Run comparison between all agents across multiple seeds"""
+    def run_lstm_wvf_experiment(self, episodes=5000, max_steps=200, seed=42, manual=False):
+        """
+        Run LSTM-WVF agent experiment.
+        
+        NEW ALGORITHM - Combines:
+        - LSTM memory for temporal dependencies
+        - Goal-conditioned learning (WVF - World Value Function)
+        - Learned reward prediction (no explicit goal detection)
+        - Path integration for coordinate transformation
+        """
+        
+        # Set seeds
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        
+        if manual:
+            print("Manual control mode activated. Use W/A/S/D keys to move, Enter to let agent act.")
+            env = SimpleEnv(size=self.env_size, render_mode='human')
+        else:
+            env = SimpleEnv(size=self.env_size)
+        
+        # Initialize LSTM-WVF agent
+        agent = LSTM_WVF_Agent(
+            env=env,
+            learning_rate=0.0001,
+            gamma=0.99,
+            epsilon_start=1.0,
+            epsilon_end=0.05,
+            epsilon_decay=0.9995,
+            memory_size=5000,
+            batch_size=8,
+            sequence_length=16,
+            frame_stack_k=4,
+            target_update_freq=100,
+            lstm_hidden_dim=128,
+            trajectory_buffer_size=self.trajectory_buffer_size,
+            reward_threshold=0.5
+        )
+        
+        # Tracking variables
+        episode_rewards = []
+        episode_lengths = []
+        wvf_losses = []
+        rp_losses = []  # Reward Predictor losses
+        rp_triggers_per_episode = []  # How often RP trains
+        
+        for episode in tqdm(range(episodes), desc=f"LSTM-WVF (seed {seed})"):
+            # Reset environment
+            obs, _ = env.reset()
+            if isinstance(obs, dict) and 'image' in obs:
+                obs['image'] = obs['image'].T
+            
+            # Reset agent for new episode
+            agent.reset_episode(obs)
+            
+            total_reward = 0
+            steps = 0
+            episode_wvf_losses = []
+            episode_rp_losses = []
+            rp_triggers = 0
+            
+            for step in range(max_steps):
+                # Store step info for retrospective training
+                agent.store_step_info(obs)
+                
+                # Update frame stack
+                frame = agent._extract_frame(obs)
+                agent.frame_stack.push(frame)
+                
+                # Get current stacked state
+                current_state = agent.get_stacked_state()
+                
+                # Update reward map from predictions
+                agent.update_reward_map_from_prediction(obs)
+                
+                # Select action
+                if manual:
+                    action = self._get_manual_action(agent, obs, episode, step)
+                else:
+                    action = agent.select_action(obs)
+                
+                # Take action in environment
+                next_obs, reward, done, truncated, info = env.step(action)
+                if isinstance(next_obs, dict) and 'image' in next_obs:
+                    next_obs['image'] = next_obs['image'].T
+                
+                # Update path integration
+                agent.update_internal_state(action)
+                
+                # Update frame stack with next observation
+                next_frame = agent._extract_frame(next_obs)
+                agent.frame_stack.push(next_frame)
+                next_state = agent.get_stacked_state()
+                
+                # Get current goals for storage
+                goals = agent.get_goals_from_reward_map()
+                if len(goals) == 0:
+                    goals = [(self.env_size // 2, self.env_size // 2)]
+                
+                # Store transition
+                agent.store_transition(current_state, action, reward, next_state, done, goals)
+                
+                # === Reward Predictor Training ===
+                target_7x7 = self._create_target_7x7(agent)
+                triggered, rp_loss = agent.train_reward_predictor_online(next_obs, target_7x7)
+                if triggered:
+                    rp_triggers += 1
+                    episode_rp_losses.append(rp_loss)
+                
+                # If goal found, do retrospective training
+                if done and step < max_steps - 1:
+                    reward_pos = tuple(agent.internal_pos)
+                    agent.mark_goal_found(reward_pos)
+                    retro_loss = agent.train_reward_predictor_retrospective(reward_pos)
+                    episode_rp_losses.append(retro_loss)
+                
+                total_reward += reward
+                steps += 1
+                obs = next_obs
+                
+                if done or truncated:
+                    break
+            
+            # Process episode for replay buffer
+            agent.process_episode()
+            
+            # Train Q-network after episode
+            if len(agent.memory) >= agent.batch_size:
+                wvf_loss = agent.train_q_network()
+                episode_wvf_losses.append(wvf_loss)
+                wvf_losses.append(wvf_loss)
+            else:
+                wvf_losses.append(0.0)
+            
+            agent.decay_epsilon()
+            
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+            rp_triggers_per_episode.append(rp_triggers)
+            
+            if len(episode_rp_losses) > 0:
+                rp_losses.append(np.mean(episode_rp_losses))
+            else:
+                rp_losses.append(0.0)
+            
+            # Visualizations
+            if episode % 1000 == 0 and episode > 0:
+                self._save_lstm_wvf_visualizations(
+                    agent, episode, wvf_losses, rp_losses, 
+                    episode_rewards, rp_triggers_per_episode
+                )
+        
+        print(f"\nLSTM-WVF Summary for seed {seed}:")
+        print(f"Final epsilon: {agent.epsilon:.4f}")
+        print(f"Average reward (final 100): {np.mean(episode_rewards[-100:]):.3f}")
+        print(f"Average length (final 100): {np.mean(episode_lengths[-100:]):.1f}")
+        print(f"Goals detected: {len(agent.get_goals_from_reward_map())}")
+        
+        return {
+            "rewards": episode_rewards,
+            "lengths": episode_lengths,
+            "wvf_losses": wvf_losses,
+            "rp_losses": rp_losses,
+            "rp_triggers": rp_triggers_per_episode,
+            "final_epsilon": agent.epsilon,
+            "algorithm": "LSTM-WVF"
+        }
+
+    # ========================================================================
+    # COMPARISON FRAMEWORK (UPDATED)
+    # ========================================================================
+    
+    def run_comparison_experiment(self, episodes=5000, max_steps=200, manual=False):
+        """
+        Run comparison between all agents across multiple seeds.
+        
+        UPDATED: Now includes 5 algorithms:
+        1. Masters Successor SARSA
+        2. Masters Successor Q-Learning  
+        3. DQN (with path integration & vision)
+        4. LSTM-DQN
+        5. LSTM-WVF (NEW)
+        """
         all_results = {}
         
         for seed in range(self.num_seeds):
-            print(f"\n=== Running experiments with seed {seed} ===")
+            print(f"\n{'='*60}")
+            print(f"Running experiments with seed {seed}")
+            print(f"{'='*60}")
 
-            successor_results_sarsa = self.run_successor_experiment_sarsa(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
+            # Run all algorithms
+            successor_results_sarsa = self.run_successor_experiment_sarsa(
+                episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
+            )
 
-            successor_results_q_learning = self.run_successor_experiment_q_learning(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
+            successor_results_q_learning = self.run_successor_experiment_q_learning(
+                episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
+            )
 
-            dqn_results = self.run_dqn_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
+            dqn_results = self.run_dqn_experiment(
+                episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
+            )
 
-            dqn_lstm_results = self.run_lstm_dqn_experiment(episodes=episodes, max_steps=max_steps, seed=seed, manual = manual)
+            lstm_dqn_results = self.run_lstm_dqn_experiment(
+                episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
+            )
+
+            # NEW: LSTM-WVF
+            lstm_wvf_results = self.run_lstm_wvf_experiment(
+                episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
+            )
 
             # Store results
-            algorithms = ['Masters Successor SARSA', 'Masters Successor Q-Learning', 'DQN', 'LSTM-DQN']
-            results_list = [successor_results_sarsa, successor_results_q_learning, dqn_results, dqn_lstm_results]
+            algorithms = [
+                'Masters Successor SARSA', 
+                'Masters Successor Q-Learning', 
+                'DQN', 
+                'LSTM-DQN',
+                'LSTM-WVF'  # NEW
+            ]
+            results_list = [
+                successor_results_sarsa, 
+                successor_results_q_learning, 
+                dqn_results, 
+                lstm_dqn_results,
+                lstm_wvf_results  # NEW
+            ]
             
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
@@ -1484,15 +1211,23 @@ class ExperimentRunner:
         
         self.results = all_results
         return all_results
+
+    # ========================================================================
+    # ANALYSIS AND VISUALIZATION (UPDATED)
+    # ========================================================================
     
     def analyze_results(self, window=100):
-        """Analyze and plot comparison results"""
+        """
+        Analyze and plot comparison results.
+        
+        UPDATED: Extended to 3x3 grid to accommodate new metrics from LSTM-WVF
+        """
         if not self.results:
             print("No results to analyze. Run experiments first.")
             return
 
-        # Create comparison plots
-        fig, axes = plt.subplots(2, 3, figsize=(20, 12))  # Added one more subplot for path integration
+        # CHANGED: Extended to 3x3 grid for additional metrics
+        fig, axes = plt.subplots(3, 3, figsize=(24, 18))
 
         # Plot 1: Learning curves (rewards)
         ax1 = axes[0, 0]
@@ -1501,7 +1236,6 @@ class ExperimentRunner:
             mean_rewards = np.mean(all_rewards, axis=0)
             std_rewards = np.std(all_rewards, axis=0)
 
-            # Rolling average
             mean_smooth = pd.Series(mean_rewards).rolling(window).mean()
             std_smooth = pd.Series(std_rewards).rolling(window).mean()
 
@@ -1542,7 +1276,7 @@ class ExperimentRunner:
         # Plot 3: Path Integration Accuracy
         ax3 = axes[0, 2]
         for alg_name, runs in self.results.items():
-            if "path_integration_errors" in runs[0]:  # Check if this agent has path integration data
+            if "path_integration_errors" in runs[0]:
                 all_errors = np.array([run["path_integration_errors"] for run in runs])
                 mean_errors = np.mean(all_errors, axis=0)
                 std_errors = np.std(all_errors, axis=0)
@@ -1562,73 +1296,121 @@ class ExperimentRunner:
         ax3.legend()
         ax3.grid(True)
 
-        # Plot 4: Final performance comparison (last 100 episodes)
+        # Plot 4: Final performance comparison
         ax4 = axes[1, 0]
         final_rewards = {}
         for alg_name, runs in self.results.items():
             final_100 = []
             for run in runs:
-                final_100.extend(run["rewards"][-100:])  # Last 100 episodes
+                final_100.extend(run["rewards"][-100:])
             final_rewards[alg_name] = final_100
 
         ax4.boxplot(final_rewards.values(), labels=final_rewards.keys())
         ax4.set_ylabel("Reward")
         ax4.set_title("Final Performance (Last 100 Episodes)")
         ax4.grid(True)
+        plt.setp(ax4.get_xticklabels(), rotation=45, ha='right')
 
-        # Plot 5: Summary statistics
+        # Plot 5: LSTM/DQN Loss Comparison
         ax5 = axes[1, 1]
+        for alg_name, runs in self.results.items():
+            # Check for different loss types
+            if "lstm_losses" in runs[0]:
+                all_losses = np.array([run["lstm_losses"] for run in runs])
+                mean_losses = np.mean(all_losses, axis=0)
+                mean_smooth = pd.Series(mean_losses).rolling(window).mean()
+                x = range(len(mean_smooth))
+                ax5.plot(x, mean_smooth, label=f"{alg_name}", linewidth=2)
+
+        ax5.set_xlabel("Episode")
+        ax5.set_ylabel("Loss")
+        ax5.set_title("LSTM-DQN Training Loss")
+        ax5.legend()
+        ax5.grid(True)
+
+        # NEW Plot 6: WVF Loss (for LSTM-WVF)
+        ax6 = axes[1, 2]
+        for alg_name, runs in self.results.items():
+            if "wvf_losses" in runs[0]:
+                all_losses = np.array([run["wvf_losses"] for run in runs])
+                mean_losses = np.mean(all_losses, axis=0)
+                mean_smooth = pd.Series(mean_losses).rolling(window).mean()
+                x = range(len(mean_smooth))
+                ax6.plot(x, mean_smooth, label=f"{alg_name}", linewidth=2)
+
+        ax6.set_xlabel("Episode")
+        ax6.set_ylabel("WVF Loss")
+        ax6.set_title("LSTM-WVF Q-Network Loss")
+        ax6.legend()
+        ax6.grid(True)
+
+        # NEW Plot 7: Reward Predictor Loss
+        ax7 = axes[2, 0]
+        for alg_name, runs in self.results.items():
+            if "rp_losses" in runs[0]:
+                all_losses = np.array([run["rp_losses"] for run in runs])
+                mean_losses = np.mean(all_losses, axis=0)
+                mean_smooth = pd.Series(mean_losses).rolling(window).mean()
+                x = range(len(mean_smooth))
+                ax7.plot(x, mean_smooth, label=f"{alg_name}", linewidth=2)
+
+        ax7.set_xlabel("Episode")
+        ax7.set_ylabel("RP Loss")
+        ax7.set_title("Reward Predictor Loss (LSTM-WVF)")
+        ax7.legend()
+        ax7.grid(True)
+
+        # NEW Plot 8: RP Training Triggers
+        ax8 = axes[2, 1]
+        for alg_name, runs in self.results.items():
+            if "rp_triggers" in runs[0]:
+                all_triggers = np.array([run["rp_triggers"] for run in runs])
+                mean_triggers = np.mean(all_triggers, axis=0)
+                mean_smooth = pd.Series(mean_triggers).rolling(window).mean()
+                x = range(len(mean_smooth))
+                ax8.plot(x, mean_smooth, label=f"{alg_name}", linewidth=2)
+
+        ax8.set_xlabel("Episode")
+        ax8.set_ylabel("RP Triggers")
+        ax8.set_title("Reward Predictor Training Frequency")
+        ax8.legend()
+        ax8.grid(True)
+
+        # Plot 9: Summary statistics
+        ax9 = axes[2, 2]
         summary_data = []
         for alg_name, runs in self.results.items():
             all_rewards = np.array([run["rewards"] for run in runs])
             final_performance = np.mean([np.mean(run["rewards"][-100:]) for run in runs])
             convergence_episode = self._find_convergence_episode(all_rewards, window)
             
-            # Add path integration statistics if available
+            # Path integration statistics
             total_path_errors = 0
             if "path_integration_errors" in runs[0]:
                 total_path_errors = np.sum([np.sum(run["path_integration_errors"]) for run in runs])
 
             summary_data.append({
-                "Algorithm": alg_name,
-                "Final Performance": f"{final_performance:.3f}",
-                "Convergence Episode": convergence_episode,
-                "Total Path Errors": total_path_errors,
+                "Algorithm": alg_name[:20] + "..." if len(alg_name) > 20 else alg_name,
+                "Final Perf": f"{final_performance:.3f}",
+                "Convergence": convergence_episode,
+                "Path Errors": total_path_errors,
             })
 
         summary_df = pd.DataFrame(summary_data)
-        ax5.axis("tight")
-        ax5.axis("off")
-        table = ax5.table(
+        ax9.axis("tight")
+        ax9.axis("off")
+        table = ax9.table(
             cellText=summary_df.values,
             colLabels=summary_df.columns,
             cellLoc="center",
             loc="center",
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(9)
-        ax5.set_title("Summary Statistics")
-
-        # Plot 6: Path integration error distribution
-        ax6 = axes[1, 2]
-        for alg_name, runs in self.results.items():
-            if "path_integration_errors" in runs[0]:
-                all_errors_flat = []
-                for run in runs:
-                    all_errors_flat.extend(run["path_integration_errors"])
-                
-                # Create histogram of error counts
-                unique_errors, counts = np.unique(all_errors_flat, return_counts=True)
-                ax6.bar(unique_errors, counts, alpha=0.7, label=alg_name)
-
-        ax6.set_xlabel("Errors per Episode")
-        ax6.set_ylabel("Frequency")
-        ax6.set_title("Path Integration Error Distribution")
-        ax6.legend()
-        ax6.grid(True, alpha=0.3)
+        table.set_fontsize(8)
+        ax9.set_title("Summary Statistics")
 
         plt.tight_layout()
-        save_path = generate_save_path("experiment_comparison_with_path_integration.png")
+        save_path = generate_save_path("experiment_comparison_all_algorithms.png")
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"Comparison plot saved to: {save_path}")
 
@@ -1637,12 +1419,15 @@ class ExperimentRunner:
 
         return summary_df
 
+    # ========================================================================
+    # HELPER METHODS
+    # ========================================================================
+
     def _find_convergence_episode(self, all_rewards, window):
         """Find approximate convergence episode"""
         mean_rewards = np.mean(all_rewards, axis=0)
         smoothed = pd.Series(mean_rewards).rolling(window).mean()
 
-        # Simple heuristic: convergence when slope becomes small
         if len(smoothed) < window * 2:
             return len(smoothed)
 
@@ -1659,8 +1444,7 @@ class ExperimentRunner:
         """Save experimental results to files"""
         timestamp = time.strftime("%Y%m%d_%H%M%S")
 
-        # Save raw results as JSON
-        results_file = generate_save_path(f"experiment_results_path_integration_{timestamp}.json")
+        results_file = generate_save_path(f"experiment_results_all_{timestamp}.json")
 
         # Convert numpy arrays to lists for JSON serialization
         json_results = {}
@@ -1673,46 +1457,56 @@ class ExperimentRunner:
                     "final_epsilon": float(run["final_epsilon"]),
                     "algorithm": run["algorithm"],
                 }
-                # Add path integration errors if available
-                if "path_integration_errors" in run:
-                    json_run["path_integration_errors"] = [int(e) for e in run["path_integration_errors"]]
+                
+                # Add optional fields if available
+                optional_fields = [
+                    "path_integration_errors", 
+                    "lstm_losses",  # CHANGED: was dqn_losses
+                    "wvf_losses",  # NEW
+                    "rp_losses",  # NEW
+                    "rp_triggers",  # NEW
+                    "ae_triggers"
+                ]
+                
+                for key in optional_fields:
+                    if key in run:
+                        if key in ["lstm_losses", "wvf_losses", "rp_losses"]:
+                            json_run[key] = [float(x) for x in run[key]]
+                        else:
+                            json_run[key] = [int(x) for x in run[key]]
                 
                 json_results[alg_name].append(json_run)
 
         with open(results_file, "w") as f:
             json.dump(json_results, f, indent=2)
 
-        # print(f"Results saved to: {results_file}")
+        print(f"Results saved to: {results_file}")
 
     def _create_target_view_with_reward(self, past_agent_pos, past_agent_dir, reward_pos, reward_map):
         """Create 7x7 target view from past agent position showing reward location"""
         target_7x7 = np.zeros((7, 7), dtype=np.float32)
         
-        ego_center_x, ego_center_y = 3, 6  # Agent position in 7x7 view
+        ego_center_x, ego_center_y = 3, 6
         past_x, past_y = past_agent_pos
         reward_x, reward_y = reward_pos
         
         for view_y in range(7):
             for view_x in range(7):
-                # Calculate offset from agent's position in ego view
                 dx_ego = view_x - ego_center_x
                 dy_ego = view_y - ego_center_y
                 
-                # Rotate based on past agent direction
-                if past_agent_dir == 3:  # North
+                if past_agent_dir == 3:
                     dx_world, dy_world = dx_ego, dy_ego
-                elif past_agent_dir == 0:  # East
+                elif past_agent_dir == 0:
                     dx_world, dy_world = -dy_ego, dx_ego
-                elif past_agent_dir == 1:  # South
+                elif past_agent_dir == 1:
                     dx_world, dy_world = -dx_ego, -dy_ego
-                elif past_agent_dir == 2:  # West
+                elif past_agent_dir == 2:
                     dx_world, dy_world = dy_ego, -dx_ego
                 
-                # Calculate global coordinates for this view cell
                 global_x = past_x + dx_world
                 global_y = past_y + dy_world
                 
-                # Check if this cell contains the reward
                 if (global_x == reward_x and global_y == reward_y):
                     target_7x7[view_y, view_x] = 1.0
                 else:
@@ -1722,8 +1516,6 @@ class ExperimentRunner:
 
     def _train_ae_on_batch(self, model, optimizer, loss_fn, inputs, targets, device):
         """Train autoencoder on batch of trajectory data"""
-        # print("Done: Batch training triggered")
-        # Convert to tensors and stack
         input_batch = np.stack([inp[np.newaxis, ..., np.newaxis] for inp in inputs])
         target_batch = np.stack([tgt[np.newaxis, ..., np.newaxis] for tgt in targets])
         
@@ -1739,24 +1531,187 @@ class ExperimentRunner:
         
         return loss.item()
 
+    def _create_target_7x7(self, agent):
+        """
+        Create target 7x7 reward map from agent's current knowledge.
+        Used for LSTM-WVF reward predictor training.
+        """
+        target = np.zeros((7, 7), dtype=np.float32)
+        
+        agent_x, agent_y = agent.internal_pos
+        agent_dir = agent.internal_dir
+        ego_center_x, ego_center_y = 3, 6
+        
+        for view_y in range(7):
+            for view_x in range(7):
+                dx_ego = view_x - ego_center_x
+                dy_ego = view_y - ego_center_y
+                
+                if agent_dir == 3:
+                    dx_world, dy_world = dx_ego, dy_ego
+                elif agent_dir == 0:
+                    dx_world, dy_world = -dy_ego, dx_ego
+                elif agent_dir == 1:
+                    dx_world, dy_world = -dx_ego, -dy_ego
+                elif agent_dir == 2:
+                    dx_world, dy_world = dy_ego, -dx_ego
+                else:
+                    dx_world, dy_world = dx_ego, dy_ego
+                
+                global_x = agent_x + dx_world
+                global_y = agent_y + dy_world
+                
+                if 0 <= global_x < agent.grid_size and 0 <= global_y < agent.grid_size:
+                    target[view_y, view_x] = agent.true_reward_map[global_y, global_x]
+        
+        return target
+
+    def _get_manual_action(self, agent, obs, episode, step):
+        """Get action from manual input for debugging"""
+        print(f"Episode {episode}, Step {step} - W=fwd, A=left, D=right, Q=auto")
+        key = getch().lower()
+        
+        if key == 'w':
+            return 2  # forward
+        elif key == 'a':
+            return 0  # turn left
+        elif key == 'd':
+            return 1  # turn right
+        elif key == 'q':
+            return agent.select_action(obs)
+        elif key == '\r' or key == '\n':
+            return agent.select_action(obs)
+        else:
+            return agent.select_action(obs)
+
+    def _save_lstm_wvf_visualizations(self, agent, episode, wvf_losses, rp_losses,
+                                      episode_rewards, rp_triggers):
+        """
+        Save LSTM-WVF specific visualizations.
+        NEW METHOD for LSTM-WVF algorithm.
+        """
+        
+        # WVF Loss plot
+        if len(wvf_losses) > 10:
+            plt.figure(figsize=(10, 5))
+            plt.plot(wvf_losses, alpha=0.7, label='WVF Loss')
+            if len(wvf_losses) >= 50:
+                smoothed = np.convolve(wvf_losses, np.ones(50)/50, mode='valid')
+                plt.plot(range(25, len(wvf_losses) - 24), smoothed, 'r-', lw=2, label='Smoothed')
+            plt.xlabel('Episode')
+            plt.ylabel('Loss')
+            plt.title(f'LSTM-WVF Q-Network Loss (ep {episode})')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'lstm_wvf/wvf_loss/loss_ep_{episode}.png'))
+            plt.close()
+        
+        # RP Loss plot
+        if len(rp_losses) > 10:
+            plt.figure(figsize=(10, 5))
+            plt.plot(rp_losses, alpha=0.7, label='RP Loss')
+            if len(rp_losses) >= 50:
+                smoothed = np.convolve(rp_losses, np.ones(50)/50, mode='valid')
+                plt.plot(range(25, len(rp_losses) - 24), smoothed, 'b-', lw=2, label='Smoothed')
+            plt.xlabel('Episode')
+            plt.ylabel('Loss')
+            plt.title(f'Reward Predictor Loss (ep {episode})')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'lstm_wvf/rp_loss/loss_ep_{episode}.png'))
+            plt.close()
+        
+        # RP Triggers plot
+        if len(rp_triggers) > 10:
+            plt.figure(figsize=(10, 5))
+            plt.plot(rp_triggers, alpha=0.7, label='RP Training Triggers')
+            if len(rp_triggers) >= 50:
+                smoothed = np.convolve(rp_triggers, np.ones(50)/50, mode='valid')
+                plt.plot(range(25, len(rp_triggers) - 24), smoothed, 'g-', lw=2, label='Smoothed')
+            plt.xlabel('Episode')
+            plt.ylabel('Triggers per Episode')
+            plt.title(f'Reward Predictor Training Frequency (ep {episode})')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'lstm_wvf/rp_triggers/triggers_ep_{episode}.png'))
+            plt.close()
+        
+        # Rewards
+        plt.figure(figsize=(10, 5))
+        plt.plot(episode_rewards, alpha=0.7)
+        if len(episode_rewards) >= 50:
+            smoothed = np.convolve(episode_rewards, np.ones(50)/50, mode='valid')
+            plt.plot(range(25, len(episode_rewards) - 24), smoothed, 'g-', lw=2, label='Smoothed')
+        plt.xlabel('Episode')
+        plt.ylabel('Reward')
+        plt.title(f'LSTM-WVF Learning Curve (ep {episode})')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(generate_save_path(f'lstm_wvf/rewards/rewards_ep_{episode}.png'))
+        plt.close()
+        
+        # Q-values heatmap (if agent has the method)
+        if hasattr(agent, 'get_all_q_values'):
+            q_values = agent.get_all_q_values()
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            action_names = ['Turn Left', 'Turn Right', 'Move Forward']
+            for a in range(3):
+                im = axes[a].imshow(q_values[:, :, a], cmap='viridis', origin='lower')
+                axes[a].set_title(f'{action_names[a]} Q-values')
+                plt.colorbar(im, ax=axes[a])
+            plt.tight_layout()
+            plt.savefig(generate_save_path(f'lstm_wvf/qvalues/qvalues_ep_{episode}.png'))
+            plt.close()
+        
+        # Reward map
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        im1 = axes[0].imshow(agent.true_reward_map, cmap='viridis', origin='lower')
+        axes[0].set_title('Learned Reward Map')
+        axes[0].plot(agent.internal_pos[0], agent.internal_pos[1], 'r*', markersize=15, label='Agent')
+        plt.colorbar(im1, ax=axes[0])
+        axes[0].legend()
+        
+        im2 = axes[1].imshow(agent.visited_positions.astype(float), cmap='Blues', origin='lower')
+        axes[1].set_title('Visited Positions')
+        plt.colorbar(im2, ax=axes[1])
+        
+        plt.tight_layout()
+        plt.savefig(generate_save_path(f'lstm_wvf/maps/maps_ep_{episode}.png'))
+        plt.close()
 
 
 def main():
-    """Run the experiment comparison with path integration"""
-    print("Starting baseline comparison experiment with path integration...")
+    """Run the experiment comparison with all algorithms including new LSTM-WVF"""
+    print("="*60)
+    print("Starting comprehensive experiment comparison")
+    print("="*60)
+    print("\nAlgorithms to compare:")
+    print("1. Masters Successor SARSA")
+    print("2. Masters Successor Q-Learning")
+    print("3. DQN (with path integration & vision)")
+    print("4. LSTM-DQN (updated)")
+    print("5. LSTM-WVF (NEW - goal-conditioned learning)")
+    print("="*60)
 
     # Initialize experiment runner
     runner = ExperimentRunner(env_size=10, num_seeds=3)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=10000, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=10000, max_steps=200, manual=False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
-    print("\nExperiment Summary:")
+    print("\n" + "="*60)
+    print("Experiment Summary:")
+    print("="*60)
     print(summary)
-
-    print("\nExperiment completed! Check the results/ folder for plots and data.")
+    print("\n" + "="*60)
+    print("Experiment completed! Check the results/ folder for plots and data.")
+    print("="*60)
 
 
 if __name__ == "__main__":
