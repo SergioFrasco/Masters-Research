@@ -22,7 +22,7 @@ from PIL import Image
 
 # Local imports - adjust these paths as needed for your project structure
 from env import DiscreteMiniWorldWrapper
-from models import DRQNAgentPartial
+from agents import DRQNAgentPartial, create_drqn_agent
 from models import Autoencoder
 from utils.plotting import generate_save_path
 from train_advanced_cube_detector2 import CubeDetector
@@ -161,7 +161,7 @@ class DRQNExperimentRunner:
         return ego_obs
 
     def run_drqn_experiment(self, episodes=5000, max_steps=200, seed=20, 
-                           sequence_length=8, lstm_hidden=128, burn_in_length=4):
+                           sequence_length=5, lstm_hidden=128, burn_in_length=2):
         """Run DRQN agent experiment with LSTM memory and vision"""
         
         # Set seeds for reproducibility
@@ -181,7 +181,7 @@ class DRQNExperimentRunner:
             epsilon_start=1.0,
             epsilon_end=0.05,
             epsilon_decay=0.9995,
-            memory_size=5000,
+            memory_size=3000,
             batch_size=32,
             target_update_freq=100,
             hidden_dim=128,
