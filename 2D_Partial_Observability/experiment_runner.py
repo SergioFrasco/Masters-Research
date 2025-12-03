@@ -824,13 +824,13 @@ class ExperimentRunner:
             sequence_length=16,
             frame_stack_k=4,
             lstm_hidden_dim=128, 
-            learning_rate=0.0001,
+            learning_rate=0.00005,
             gamma=0.99,
             epsilon_start=1.0,
             epsilon_end=0.05,
             epsilon_decay=0.9995,
             memory_size=5000,
-            batch_size=8,
+            batch_size=16,
             target_update_freq=500
         )
 
@@ -991,13 +991,13 @@ class ExperimentRunner:
         # Initialize LSTM-WVF agent (use the optimized version)
         agent = LSTM_WVF_Agent(
             env=env,
-            learning_rate=0.0001,
+            learning_rate=0.00005,
             gamma=0.99,
             epsilon_start=1.0,
             epsilon_end=0.05,
             epsilon_decay=0.9995,
             memory_size=5000,
-            batch_size=8,
+            batch_size=16,
             sequence_length=16,
             frame_stack_k=4,
             target_update_freq=100,
@@ -1159,7 +1159,7 @@ class ExperimentRunner:
             lstm_wvf_results = self.run_lstm_wvf_experiment(
                 episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
             )
-            
+
             # Run all algorithms
             successor_results_sarsa = self.run_successor_experiment_sarsa(
                 episodes=episodes, max_steps=max_steps, seed=seed, manual=manual

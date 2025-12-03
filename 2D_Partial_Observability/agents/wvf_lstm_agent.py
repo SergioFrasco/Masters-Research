@@ -26,10 +26,10 @@ class LSTM_WVF_Agent:
     OPTIMIZED VERSION - significantly faster training.
     """
     
-    def __init__(self, env, learning_rate=0.0001, gamma=0.99,
+    def __init__(self, env, learning_rate=0.00005, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.9995,
                  memory_size=5000, batch_size=8, sequence_length=16,
-                 frame_stack_k=4, target_update_freq=100, lstm_hidden_dim=128,
+                 frame_stack_k=4, target_update_freq=200, lstm_hidden_dim=128,
                  trajectory_buffer_size=10, reward_threshold=0.7,
                  rp_confidence_threshold=0.8):
         
