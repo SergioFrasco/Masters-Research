@@ -965,19 +965,15 @@ class ExperimentRunner:
             "lstm_losses": lstm_losses,  # CHANGED: was 'dqn_losses'
         }
 
-    # ========================================================================
-    # LSTM-WVF EXPERIMENT (NEW ALGORITHM)
-    # ========================================================================
     
     def run_lstm_wvf_experiment(self, episodes=5000, max_steps=200, seed=42, manual=False):
         """
-        Run LSTM-WVF agent experiment.
+        Run LSTM-WVF agent experiment - OPTIMIZED VERSION.
         
-        NEW ALGORITHM - Combines:
-        - LSTM memory for temporal dependencies
-        - Goal-conditioned learning (WVF - World Value Function)
-        - Learned reward prediction (no explicit goal detection)
-        - Path integration for coordinate transformation
+        Changes from original:
+        - Single goal storage instead of multi-goal duplication
+        - Reduced visualization frequency
+        - Skips expensive Q-value computation
         """
         
         # Set seeds
@@ -992,7 +988,7 @@ class ExperimentRunner:
         else:
             env = SimpleEnv(size=self.env_size)
         
-        # Initialize LSTM-WVF agent
+        # Initialize LSTM-WVF agent (use the optimized version)
         agent = LSTM_WVF_Agent(
             env=env,
             learning_rate=0.0001,
@@ -1014,8 +1010,8 @@ class ExperimentRunner:
         episode_rewards = []
         episode_lengths = []
         wvf_losses = []
-        rp_losses = []  # Reward Predictor losses
-        rp_triggers_per_episode = []  # How often RP trains
+        rp_losses = []
+        rp_triggers_per_episode = []
         
         for episode in tqdm(range(episodes), desc=f"LSTM-WVF (seed {seed})"):
             # Reset environment
@@ -1065,13 +1061,11 @@ class ExperimentRunner:
                 agent.frame_stack.push(next_frame)
                 next_state = agent.get_stacked_state()
                 
-                # Get current goals for storage
-                goals = agent.get_goals_from_reward_map()
-                if len(goals) == 0:
-                    goals = [(self.env_size // 2, self.env_size // 2)]
+                # === OPTIMIZATION: Get SINGLE current goal instead of list ===
+                current_goal = agent.get_current_goal()
                 
-                # Store transition
-                agent.store_transition(current_state, action, reward, next_state, done, goals)
+                # === OPTIMIZATION: Store single transition with one goal ===
+                agent.store_transition(current_state, action, reward, next_state, done, current_goal)
                 
                 # === Reward Predictor Training ===
                 target_7x7 = self._create_target_7x7(agent)
@@ -1116,8 +1110,8 @@ class ExperimentRunner:
             else:
                 rp_losses.append(0.0)
             
-            # Visualizations
-            if episode % 1000 == 0 and episode > 0:
+            # === OPTIMIZATION: Reduced visualization frequency (2000 instead of 1000) ===
+            if episode % 2000 == 0 and episode > 0:
                 self._save_lstm_wvf_visualizations(
                     agent, episode, wvf_losses, rp_losses, 
                     episode_rewards, rp_triggers_per_episode
@@ -1584,11 +1578,11 @@ class ExperimentRunner:
         else:
             return agent.select_action(obs)
 
+        
     def _save_lstm_wvf_visualizations(self, agent, episode, wvf_losses, rp_losses,
-                                      episode_rewards, rp_triggers):
+                                    episode_rewards, rp_triggers):
         """
-        Save LSTM-WVF specific visualizations.
-        NEW METHOD for LSTM-WVF algorithm.
+        OPTIMIZED: Skip expensive Q-value heatmap computation.
         """
         
         # WVF Loss plot
@@ -1654,9 +1648,12 @@ class ExperimentRunner:
         plt.savefig(generate_save_path(f'lstm_wvf/rewards/rewards_ep_{episode}.png'))
         plt.close()
         
-        # Q-values heatmap (if agent has the method)
+        # === OPTIMIZATION: SKIP expensive Q-values heatmap ===
+        # The original code did 100 forward passes here - removed for speed
+        # Uncomment below if you need it for debugging (will be slow):
+        """
         if hasattr(agent, 'get_all_q_values'):
-            q_values = agent.get_all_q_values()
+            q_values = agent.get_all_q_values(skip_if_slow=False)  # Set False to compute
             fig, axes = plt.subplots(1, 3, figsize=(15, 5))
             action_names = ['Turn Left', 'Turn Right', 'Move Forward']
             for a in range(3):
@@ -1666,8 +1663,9 @@ class ExperimentRunner:
             plt.tight_layout()
             plt.savefig(generate_save_path(f'lstm_wvf/qvalues/qvalues_ep_{episode}.png'))
             plt.close()
+        """
         
-        # Reward map
+        # Reward map (this is cheap - keep it)
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         im1 = axes[0].imshow(agent.true_reward_map, cmap='viridis', origin='lower')
         axes[0].set_title('Learned Reward Map')
@@ -1684,6 +1682,7 @@ class ExperimentRunner:
         plt.close()
 
 
+
 def main():
     """Run the experiment comparison with all algorithms including new LSTM-WVF"""
     print("="*60)
@@ -1698,10 +1697,10 @@ def main():
     print("="*60)
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=10, num_seeds=3)
+    runner = ExperimentRunner(env_size=10, num_seeds=2)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=10000, max_steps=200, manual=False)
+    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual=False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)

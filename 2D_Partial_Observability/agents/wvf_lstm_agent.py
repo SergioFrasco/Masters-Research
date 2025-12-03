@@ -1,11 +1,12 @@
 """
-LSTM-WVF Agent - Stability Fixes
+LSTM-WVF Agent - OPTIMIZED VERSION
 
-Key changes:
-1. Remove goal bootstrapping - agent must discover goals
-2. Multi-goal training with random goal sampling
-3. Consistent hidden state usage in training
-4. Separate reward predictor confidence thresholding
+Performance fixes:
+1. Single goal selection instead of iterating all goals
+2. Store single transition per step (not duplicated per goal)
+3. Higher thresholds for reward predictor training
+4. Cached goal selection with periodic updates
+5. Optional expensive computations
 """
 
 import numpy as np
@@ -22,6 +23,7 @@ from models import LSTM_WVF, FrameStack, SequenceReplayBuffer, RewardPredictor
 class LSTM_WVF_Agent:
     """
     LSTM-based World Value Function Agent for partial observability.
+    OPTIMIZED VERSION - significantly faster training.
     """
     
     def __init__(self, env, learning_rate=0.0001, gamma=0.99,
@@ -94,10 +96,15 @@ class LSTM_WVF_Agent:
         
         self.discovered_goals = set()
         
+        # === OPTIMIZATION: Cache current goal ===
+        self.current_goal = None
+        self.goal_update_frequency = 10  # Update goal selection every N steps
+        self.steps_since_goal_update = 0
+        
         self.update_counter = 0
         self.rp_training_count = 0
         
-        print(f"LSTM-WVF Agent initialized on {self.device}")
+        print(f"LSTM-WVF Agent (OPTIMIZED) initialized on {self.device}")
     
     def reset_episode(self, initial_obs):
         """Reset for a new episode."""
@@ -111,6 +118,10 @@ class LSTM_WVF_Agent:
         self.true_reward_map = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
         self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
         self.rp_confidence_map = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
+        
+        # === OPTIMIZATION: Reset goal cache ===
+        self.current_goal = None
+        self.steps_since_goal_update = 0
         
         self._initialize_path_integration()
     
@@ -216,6 +227,31 @@ class LSTM_WVF_Agent:
         x, y = goal_xy
         return np.array([x / (self.grid_size - 1), y / (self.grid_size - 1)], dtype=np.float32)
     
+    def _select_best_goal(self, goals):
+        """
+        OPTIMIZATION: Select a single goal to pursue.
+        Uses closest goal by Manhattan distance, with some randomness.
+        """
+        if len(goals) == 0:
+            return (self.grid_size // 2, self.grid_size // 2)
+        
+        if len(goals) == 1:
+            return goals[0]
+        
+        # Prioritize discovered (confirmed) goals
+        confirmed = [g for g in goals if g in self.discovered_goals]
+        if confirmed:
+            goals = confirmed
+        
+        # Select closest goal with 80% probability, random otherwise
+        if random.random() < 0.8 and self.internal_pos is not None:
+            agent_x, agent_y = self.internal_pos
+            distances = [abs(g[0] - agent_x) + abs(g[1] - agent_y) for g in goals]
+            min_idx = np.argmin(distances)
+            return goals[min_idx]
+        else:
+            return random.choice(goals)
+    
     def update_reward_map_from_prediction(self, obs):
         """Update allocentric reward map using reward predictor output."""
         normalized_view = self._create_normalized_view(obs)
@@ -275,42 +311,44 @@ class LSTM_WVF_Agent:
             self.true_reward_map[y, x] = 1.0
             self.rp_confidence_map[y, x] = 1.0
             self.discovered_goals.add((x, y))
+            # === OPTIMIZATION: Update current goal when we find one ===
+            self.current_goal = (x, y)
     
     def select_action(self, obs, epsilon=None):
-        """Select action using goal-conditioned Q-values with epsilon-greedy exploration."""
+        """
+        OPTIMIZED: Select action using a SINGLE goal instead of iterating all.
+        """
         if epsilon is None:
             epsilon = self.epsilon
         
         if random.random() < epsilon:
             return random.randint(0, self.action_dim - 1)
         
-        goals = self.get_goals_from_reward_map()
-        
-        if len(goals) == 0:
-            goals = [(self.grid_size // 2, self.grid_size // 2)]
+        # === OPTIMIZATION: Use cached goal, update periodically ===
+        self.steps_since_goal_update += 1
+        if self.current_goal is None or self.steps_since_goal_update >= self.goal_update_frequency:
+            goals = self.get_goals_from_reward_map()
+            self.current_goal = self._select_best_goal(goals)
+            self.steps_since_goal_update = 0
         
         state = self.get_stacked_state().unsqueeze(0)
-        
-        best_action = None
-        best_value = float('-inf')
+        norm_goal = self._normalize_goal(self.current_goal)
+        goal_tensor = torch.tensor(norm_goal, dtype=torch.float32).unsqueeze(0).to(self.device)
         
         self.q_network.eval()
         with torch.no_grad():
-            for goal in goals:
-                norm_goal = self._normalize_goal(goal)
-                goal_tensor = torch.tensor(norm_goal, dtype=torch.float32).unsqueeze(0).to(self.device)
-                
-                q_values, new_hidden = self.q_network(
-                    state, goal_tensor, self.hidden_state, return_hidden=True
-                )
-                
-                max_q = q_values.max().item()
-                if max_q > best_value:
-                    best_value = max_q
-                    best_action = q_values.argmax().item()
-                    self.hidden_state = new_hidden
+            q_values, new_hidden = self.q_network(
+                state, goal_tensor, self.hidden_state, return_hidden=True
+            )
+            self.hidden_state = new_hidden
         
-        return best_action if best_action is not None else random.randint(0, self.action_dim - 1)
+        return q_values.argmax().item()
+    
+    def get_current_goal(self):
+        """Return the currently selected goal for storage."""
+        if self.current_goal is None:
+            return (self.grid_size // 2, self.grid_size // 2)
+        return self.current_goal
     
     def store_step_info(self, obs):
         """Store step information for retrospective reward predictor training."""
@@ -321,13 +359,13 @@ class LSTM_WVF_Agent:
         }
         self.trajectory_buffer.append(step_info)
     
-    def store_transition(self, state, action, reward, next_state, done, goals):
-        """Store transition in current episode buffer with multiple goals."""
-        if len(goals) == 0:
-            goals = [(self.grid_size // 2, self.grid_size // 2)]
-        
-        for goal in goals:
-            self.current_episode.append((state, action, reward, next_state, done, goal))
+    def store_transition(self, state, action, reward, next_state, done, goal):
+        """
+        OPTIMIZED: Store a SINGLE transition with ONE goal.
+        (Previously stored duplicates for each goal)
+        """
+        # Just store with the single provided goal
+        self.current_episode.append((state, action, reward, next_state, done, goal))
     
     def process_episode(self):
         """Process completed episode into sequences for replay buffer."""
@@ -481,7 +519,9 @@ class LSTM_WVF_Agent:
         return loss.item()
     
     def train_reward_predictor_online(self, obs, target_7x7):
-        """Train reward predictor on current observation if prediction differs from known state."""
+        """
+        OPTIMIZED: Higher thresholds to reduce unnecessary training.
+        """
         normalized_view = self._create_normalized_view(obs)
         input_tensor = torch.tensor(
             normalized_view[np.newaxis, np.newaxis, ...],
@@ -497,7 +537,8 @@ class LSTM_WVF_Agent:
         max_error = np.max(error)
         mean_error = np.mean(error)
         
-        if max_error > 0.05 or mean_error > 0.01:
+        # === OPTIMIZATION: Higher thresholds (was 0.05 and 0.01) ===
+        if max_error > 0.15 or mean_error > 0.05:
             return True, self._train_reward_predictor_batch([normalized_view], [target_7x7])
         
         return False, 0.0
@@ -506,8 +547,15 @@ class LSTM_WVF_Agent:
         """Decay exploration rate."""
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
     
-    def get_all_q_values(self):
-        """Get Q-values for all possible goals."""
+    def get_all_q_values(self, skip_if_slow=True):
+        """
+        Get Q-values for all possible goals.
+        OPTIMIZED: Can be skipped for performance.
+        """
+        if skip_if_slow:
+            # Return empty array to skip expensive computation
+            return np.zeros((self.grid_size, self.grid_size, self.action_dim))
+        
         q_values = np.zeros((self.grid_size, self.grid_size, self.action_dim))
         state = self.get_stacked_state().unsqueeze(0)
         
@@ -524,4 +572,4 @@ class LSTM_WVF_Agent:
 
 
 if __name__ == "__main__":
-    print("LSTM-WVF Agent module loaded successfully.")
+    print("LSTM-WVF Agent (OPTIMIZED) module loaded successfully.")
