@@ -1155,6 +1155,11 @@ class ExperimentRunner:
             print(f"Running experiments with seed {seed}")
             print(f"{'='*60}")
 
+            # NEW: LSTM-WVF
+            lstm_wvf_results = self.run_lstm_wvf_experiment(
+                episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
+            )
+            
             # Run all algorithms
             successor_results_sarsa = self.run_successor_experiment_sarsa(
                 episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
@@ -1172,10 +1177,7 @@ class ExperimentRunner:
                 episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
             )
 
-            # NEW: LSTM-WVF
-            lstm_wvf_results = self.run_lstm_wvf_experiment(
-                episodes=episodes, max_steps=max_steps, seed=seed, manual=manual
-            )
+            
 
             # Store results
             algorithms = [
