@@ -1,3 +1,19 @@
+# Egocentric Observation (13×13)     Allocentric Reward Map (10×10)
+#         ↓                                    ↓
+#    Flattened (169)                   Extract goal positions [(x,z), ...]
+#         ↓                                    ↓
+#    + position (2)                    Normalize each goal
+#    + direction (4)                          ↓
+#         ↓                            Goal (2) ← one at a time
+#         ↓                                    ↓
+#         └──────────────┬─────────────────────┘
+#                        ↓
+#                  Concatenate
+#                        ↓
+#                 Network Input (177)
+#                        ↓
+#                  Q(s, g, a)
+
 import os
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
