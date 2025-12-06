@@ -741,7 +741,7 @@ if __name__ == "__main__":
     results = run_compositional_wvf_agent(
         env,
         agent,
-        max_episodes=5000,
+        max_episodes=2000,
         max_steps_per_episode=200
     )
     
