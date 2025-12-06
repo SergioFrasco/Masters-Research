@@ -42,6 +42,10 @@ def run_random_agent(env, agent):
         if 'distance_to_goal' in info:
             print(f"Step {step} | Action: {action} | Distance: {info['distance_to_goal']:.2f} | Reward: {reward}")
         
+        # Print contact info
+        if info.get('contacted_object'):
+            print(f"  -> Contacted: {info['contacted_object']} | Terminated: {terminated}")
+        
         # Reset if episode ends
         if terminated or truncated:
             episode += 1
@@ -112,11 +116,44 @@ def run_successor_agent(env, agent):
         # time.sleep(0.2)
 
 
+def select_task():
+    """Let user select a task"""
+    print("\nSelect a task:")
+    print("1. Go to BLUE object (box or sphere)")
+    print("2. Go to RED object (box or sphere)")
+    print("3. Go to any BOX (red or blue)")
+    print("4. Go to any SPHERE (red or blue)")
+    print("5. Go to BLUE BOX (specific)")
+    print("6. Go to RED BOX (specific)")
+    print("7. Go to BLUE SPHERE (specific)")
+    print("8. Go to RED SPHERE (specific)")
+    
+    task_choice = input("Enter task (1-8): ").strip()
+    
+    tasks = {
+        "1": {"features": ["blue"], "description": "Go to BLUE object"},
+        "2": {"features": ["red"], "description": "Go to RED object"},
+        "3": {"features": ["box"], "description": "Go to any BOX"},
+        "4": {"features": ["sphere"], "description": "Go to any SPHERE"},
+        "5": {"features": ["blue", "box"], "description": "Go to BLUE BOX"},
+        "6": {"features": ["red", "box"], "description": "Go to RED BOX"},
+        "7": {"features": ["blue", "sphere"], "description": "Go to BLUE SPHERE"},
+        "8": {"features": ["red", "sphere"], "description": "Go to RED SPHERE"},
+    }
+    
+    task = tasks.get(task_choice, tasks["5"])  # Default to blue box
+    print(f"\n>>> TASK: {task['description']} <<<\n")
+    return task
+
+
 if __name__ == "__main__":
     # Create environment
     env = DiscreteMiniWorldWrapper(size=10, render_mode="human")
     # env = DiscreteMiniWorldWrapper(size=10)
 
+    # Select and set task
+    task = select_task()
+    env.set_task(task)
     
     # Choose mode
     print("Choose control mode:")
@@ -131,9 +168,6 @@ if __name__ == "__main__":
     elif choice == "2":
         agent = RandomAgent(env)
         run_random_agent(env, agent)
-    elif choice == "3":
-        agent = RandomAgentWithSR(env)
-        run_successor_agent(env, agent)
 
     else:
         print("Invalid choice. Exiting.")
