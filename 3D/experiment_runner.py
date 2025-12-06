@@ -28,7 +28,7 @@ from PIL import Image
 
 # Import project modules AFTER patching
 from env import DiscreteMiniWorldWrapper
-from agents import DQNAgentPartial, SuccessorAgentQLearning, SuccessorAgentSARSA, WVFAgent
+from agents import DQNAgentPartial, SuccessorAgentQLearning, SuccessorAgentSARSA, WVFAgent, DRQNAgentPartial
 from models import Autoencoder, WVF_MLP
 from utils.plotting import generate_save_path, save_all_wvf
 from train_advanced_cube_detector2 import CubeDetector
@@ -259,6 +259,13 @@ class ExperimentRunner3D:
         self.num_seeds = num_seeds
         self.results = {}
         self.trajectory_buffer_size = 10
+        self.current_algo_folder = None  # Track current algorithm for saving
+
+    def _get_algo_save_path(self, filename):
+        """Generate save path within current algorithm's subfolder"""
+        if self.current_algo_folder:
+            return generate_save_path(f"{self.current_algo_folder}/{filename}")
+        return generate_save_path(filename)
 
     # ========================================================================
     # DQN EXPERIMENT
@@ -266,6 +273,7 @@ class ExperimentRunner3D:
     
     def run_dqn_experiment(self, episodes=3000, max_steps=200, seed=20):
         """Run DQN agent experiment with vision"""
+        self.current_algo_folder = "dqn"
         
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -285,7 +293,7 @@ class ExperimentRunner3D:
                                batch_size=32,
                                target_update_freq=100)
 
-        # Load cube detector
+        # Load cube detector ONCE outside loop (fixed from individual file)
         cube_model, cube_device, pos_mean, pos_std = load_cube_detector(
             'models/advanced_cube_detector.pth', force_cpu=False
         )
@@ -384,15 +392,253 @@ class ExperimentRunner3D:
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
-            plt.savefig(generate_save_path(f'dqn/dqn_loss/loss_up_to_ep_{episode}.png'))
+            plt.savefig(self._get_algo_save_path(f'loss/loss_up_to_ep_{episode}.png'))
             plt.close()
+
+    # ========================================================================
+    # DRQN EXPERIMENT (NEW - from run_drqn_experiment.py)
+    # ========================================================================
+    
+    def run_drqn_experiment(self, episodes=3000, max_steps=200, seed=20,
+                           sequence_length=5, lstm_hidden=128, burn_in_length=2,
+                           train_frequency=4, use_intrinsic_reward=True):
+        """Run DRQN agent experiment with vision - matches run_drqn_experiment.py"""
+        self.current_algo_folder = "drqn"
+        
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+        env = DiscreteMiniWorldWrapper(size=self.env_size)
+
+        # Initialize DRQN agent with stabilized settings (from v2)
+        agent = DRQNAgentPartial(
+            env,
+            learning_rate=0.0005,
+            gamma=0.99,
+            epsilon_start=1.0,
+            epsilon_end=0.05,
+            epsilon_decay=0.9998,  # Slower decay
+            memory_size=5000,
+            batch_size=32,
+            target_update_freq=50,
+            hidden_dim=128,
+            lstm_hidden=lstm_hidden,
+            num_lstm_layers=1,
+            sequence_length=sequence_length,
+            burn_in_length=burn_in_length,
+            use_intrinsic_reward=use_intrinsic_reward,
+            use_double_dqn=True,
+            tau=0.005
+        )
+
+        # Load cube detector ONCE
+        cube_model, cube_device, pos_mean, pos_std = load_cube_detector(
+            'models/advanced_cube_detector.pth', force_cpu=False
+        )
+        cube_model.eval()
+        
+        transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+        episode_rewards = []
+        episode_lengths = []
+        drqn_losses = []
+        extrinsic_rewards = []
+        global_step = 0
+        
+        # Track best performance
+        best_success_rate = 0.0
+        best_episode = 0
+
+        for episode in tqdm(range(episodes), desc=f"DRQN (seed {seed})"):
+            obs, info = env.reset()
+            agent.reset_for_new_episode()
+            
+            # Process initial observation
+            detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
+            ego_obs, goal_red, goal_blue = self._process_drqn_observation(agent, detection_result)
+            current_state = agent.get_state_tensor(ego_obs, goal_red, goal_blue)
+            
+            total_reward = 0
+            total_extrinsic = 0
+            steps = 0
+            episode_losses = []
+
+            for step in range(max_steps):
+                action = agent.select_action(ego_obs, agent.epsilon)
+                
+                obs, env_reward, done, truncated, info = env.step(action)
+                
+                # Process next observation
+                detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
+                next_ego_obs, next_goal_red, next_goal_blue = self._process_drqn_observation(agent, detection_result)
+                
+                # Check if timed out
+                timed_out = (step == max_steps - 1) and not done
+                
+                # Compute shaped reward with timeout penalty
+                shaped_reward = agent.compute_intrinsic_reward(
+                    env_reward, next_goal_red, next_goal_blue, done, timed_out
+                )
+                
+                next_state = agent.get_state_tensor(next_ego_obs, next_goal_red, next_goal_blue)
+                
+                # Mark as done if timed out
+                effective_done = done or timed_out
+                
+                agent.store_transition(current_state, action, shaped_reward, next_state, effective_done)
+                
+                global_step += 1
+                if global_step % train_frequency == 0 and len(agent.replay_buffer) >= agent.batch_size:
+                    loss = agent.train()
+                    episode_losses.append(loss)
+
+                total_reward += shaped_reward
+                total_extrinsic += env_reward
+                steps += 1
+                current_state = next_state
+                ego_obs = next_ego_obs
+
+                if done:
+                    break
+
+            agent.decay_epsilon()
+            
+            episode_rewards.append(total_reward)
+            episode_lengths.append(steps)
+            extrinsic_rewards.append(total_extrinsic)
+            drqn_losses.append(np.mean(episode_losses) if episode_losses else 0.0)
+
+            # Track best performance
+            if episode >= 100:
+                recent_success = np.mean(np.array(extrinsic_rewards[-100:]) > 0)
+                if recent_success > best_success_rate:
+                    best_success_rate = recent_success
+                    best_episode = episode
+
+            # Visualizations
+            if episode % 250 == 0:
+                self._visualize_drqn(episode, drqn_losses, episode_rewards,
+                                    extrinsic_rewards, episode_lengths, seed)
+
+        return {
+            "rewards": episode_rewards,
+            "extrinsic_rewards": extrinsic_rewards,
+            "lengths": episode_lengths,
+            "drqn_losses": drqn_losses,
+            "final_epsilon": agent.epsilon,
+            "algorithm": "DRQN (Stabilized)",
+            "best_success_rate": best_success_rate,
+            "best_episode": best_episode,
+        }
+
+    def _process_drqn_observation(self, agent, detection_result):
+        """Process observation for DRQN agent"""
+        label = detection_result['label']
+        confidence = detection_result['confidence']
+        regression_values = detection_result['regression']
+        
+        goal_pos_red = None
+        goal_pos_blue = None
+        
+        if regression_values is not None and label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
+            regression_values = np.round(regression_values).astype(int)
+            rx, rz, bx, bz = regression_values
+            
+            if label == 'Red':
+                goal_pos_red = (-rz, rx)
+            elif label == 'Blue':
+                goal_pos_blue = (-bz, bx)
+            elif label == 'Both':
+                goal_pos_red = (-rz, rx)
+                goal_pos_blue = (-bz, bx)
+
+        ego_obs = agent.create_egocentric_observation(
+            goal_pos_red=goal_pos_red,
+            goal_pos_blue=goal_pos_blue,
+            matrix_size=13
+        )
+        
+        return ego_obs, goal_pos_red, goal_pos_blue
+
+    def _visualize_drqn(self, episode, losses, rewards, extrinsic_rewards, lengths, seed):
+        """Generate DRQN-specific visualizations"""
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        
+        # Loss plot
+        ax1 = axes[0, 0]
+        if len(losses) > 10:
+            ax1.plot(losses, alpha=0.3, color='blue')
+            if len(losses) >= 50:
+                smoothed = np.convolve(losses, np.ones(50)/50, mode='valid')
+                ax1.plot(range(25, len(losses) - 24), smoothed,
+                        color='red', linewidth=2, label='Smoothed')
+        ax1.set_xlabel('Episode')
+        ax1.set_ylabel('DRQN Loss')
+        ax1.set_title('Training Loss')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Extrinsic rewards
+        ax2 = axes[0, 1]
+        ax2.plot(extrinsic_rewards, alpha=0.3, color='blue')
+        if len(extrinsic_rewards) >= 50:
+            smoothed = np.convolve(extrinsic_rewards, np.ones(50)/50, mode='valid')
+            ax2.plot(range(25, len(extrinsic_rewards) - 24), smoothed,
+                    color='red', linewidth=2, label='Smoothed')
+        ax2.set_xlabel('Episode')
+        ax2.set_ylabel('Extrinsic Reward')
+        ax2.set_title('Environment Reward')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        # Success rate
+        ax3 = axes[1, 0]
+        if len(extrinsic_rewards) >= 100:
+            success_rates = []
+            for i in range(100, len(extrinsic_rewards)):
+                rate = np.mean(np.array(extrinsic_rewards[i-100:i]) > 0)
+                success_rates.append(rate)
+            ax3.plot(range(100, len(extrinsic_rewards)), success_rates, 
+                    linewidth=2, color='green')
+            ax3.axhline(y=0.8, color='red', linestyle='--', label='80% target')
+        ax3.set_xlabel('Episode')
+        ax3.set_ylabel('Success Rate')
+        ax3.set_title('Success Rate (Rolling 100 Episodes)')
+        ax3.set_ylim([0, 1])
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+
+        # Episode lengths
+        ax4 = axes[1, 1]
+        ax4.plot(lengths, alpha=0.3, color='blue')
+        if len(lengths) >= 50:
+            smoothed = np.convolve(lengths, np.ones(50)/50, mode='valid')
+            ax4.plot(range(25, len(lengths) - 24), smoothed,
+                    color='red', linewidth=2, label='Smoothed')
+        ax4.axhline(y=50, color='green', linestyle='--', label='Target (50 steps)')
+        ax4.set_xlabel('Episode')
+        ax4.set_ylabel('Steps')
+        ax4.set_title('Episode Length (Lower is Better)')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(self._get_algo_save_path(f'progress/progress_seed{seed}_ep{episode}.png'), dpi=150)
+        plt.close()
 
     # ========================================================================
     # SUCCESSOR REPRESENTATION (Q-LEARNING) EXPERIMENT
     # ========================================================================
     
     def run_sr_qlearning_experiment(self, episodes=3000, max_steps=200, seed=20):
-        """Run SR Q-Learning agent experiment with vision"""
+        """Run SR Q-Learning agent experiment with vision - matches run_3d_sr_qlearning.py"""
+        self.current_algo_folder = "sr_qlearning"
         
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -442,9 +688,11 @@ class ExperimentRunner3D:
             
             trajectory_buffer = deque(maxlen=self.trajectory_buffer_size)
 
+            # Q-LEARNING: Initialize first action
             current_state_idx = agent.get_state_index()
             current_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
             
+            # Take initial step
             obs, reward, terminated, truncated, info = env.step(current_action)
             current_exp = [current_state_idx, current_action, None, None, None]
             
@@ -462,7 +710,7 @@ class ExperimentRunner3D:
                 }
                 trajectory_buffer.append(step_info)
                 
-                # Select next action
+                # Q-LEARNING: Select next action for execution
                 next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
                 
                 # Step environment
@@ -477,7 +725,7 @@ class ExperimentRunner3D:
                 next_state = agent.get_state_index()
                 done = terminated or truncated
                 
-                # Update SR
+                # Update SR - Q-LEARNING doesn't need next_action
                 current_exp[2] = next_state
                 current_exp[3] = reward
                 current_exp[4] = done
@@ -492,6 +740,7 @@ class ExperimentRunner3D:
                 # Update reward maps and WVF
                 self._update_sr_maps(agent)
                 
+                # Q-LEARNING: Move to next step
                 current_state = next_state
                 current_action = next_action
                 
@@ -507,7 +756,7 @@ class ExperimentRunner3D:
 
             # Visualizations
             if episode % 250 == 0:
-                self._visualize_sr(agent, env, episode, steps, ae_triggers_per_episode, "sr_qlearning")
+                self._visualize_sr(agent, env, episode, steps, ae_triggers_per_episode)
 
         return {
             "rewards": episode_rewards,
@@ -522,7 +771,8 @@ class ExperimentRunner3D:
     # ========================================================================
     
     def run_sr_sarsa_experiment(self, episodes=3000, max_steps=200, seed=20):
-        """Run SR SARSA agent experiment with vision"""
+        """Run SR SARSA agent experiment with vision - matches run_3d_sr_sarsa.py"""
+        self.current_algo_folder = "sr_sarsa"
         
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -572,9 +822,11 @@ class ExperimentRunner3D:
             
             trajectory_buffer = deque(maxlen=self.trajectory_buffer_size)
 
+            # SARSA: Initialize first action
             current_state_idx = agent.get_state_index()
             current_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
             
+            # Take initial step
             obs, reward, terminated, truncated, info = env.step(current_action)
             current_exp = [current_state_idx, current_action, None, None, None]
             
@@ -592,7 +844,7 @@ class ExperimentRunner3D:
                 }
                 trajectory_buffer.append(step_info)
                 
-                # Step environment
+                # Step environment (SARSA uses current_action, not next_action)
                 obs, reward, terminated, truncated, info = env.step(current_action)
                 steps += 1
                 total_reward += reward
@@ -601,12 +853,12 @@ class ExperimentRunner3D:
                 detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
                 ego_obs = get_ego_obs_from_detection(agent, detection_result)
                 
-                # Select NEXT action (SARSA)
+                # SARSA: Select NEXT action before update
                 next_state = agent.get_state_index()
                 next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
                 done = terminated or truncated
                 
-                # Update SR
+                # Update SR with SARSA (needs next_exp)
                 current_exp[2] = next_state
                 current_exp[3] = reward
                 current_exp[4] = done
@@ -639,7 +891,7 @@ class ExperimentRunner3D:
 
             # Visualizations
             if episode % 250 == 0:
-                self._visualize_sr(agent, env, episode, steps, ae_triggers_per_episode, "sr_sarsa")
+                self._visualize_sr(agent, env, episode, steps, ae_triggers_per_episode)
 
         return {
             "rewards": episode_rewards,
@@ -795,7 +1047,7 @@ class ExperimentRunner3D:
         V_all = M_forward @ R_flat_all.T
         agent.wvf = V_all.T.reshape(agent.state_size, agent.grid_size, agent.grid_size)
 
-    def _visualize_sr(self, agent, env, episode, step, ae_triggers, algo_name):
+    def _visualize_sr(self, agent, env, episode, step, ae_triggers):
         """Generate SR-specific visualizations"""
         # SR matrix
         MOVE_FORWARD = 2
@@ -806,11 +1058,11 @@ class ExperimentRunner3D:
         plt.title(f"Forward SR Matrix (Episode {episode})")
         plt.colorbar(im, label="SR Value")
         plt.tight_layout()
-        plt.savefig(generate_save_path(f'{algo_name}/sr/averaged_M_{episode}.png'))
+        plt.savefig(self._get_algo_save_path(f'sr/averaged_M_{episode}.png'))
         plt.close()
 
         # WVF
-        save_all_wvf(agent, save_path=generate_save_path(f"{algo_name}/wvfs/wvf_episode_{episode}"))
+        save_all_wvf(agent, save_path=self._get_algo_save_path(f"wvfs/wvf_episode_{episode}"))
 
         # Vision plots
         agent_x, agent_z = agent._get_agent_pos_from_env()
@@ -839,7 +1091,7 @@ class ExperimentRunner3D:
         plt.colorbar(im2, ax=ax2, fraction=0.046)
 
         plt.tight_layout()
-        plt.savefig(generate_save_path(f"{algo_name}/vision_plots/maps_ep{episode}.png"), dpi=150)
+        plt.savefig(self._get_algo_save_path(f"vision_plots/maps_ep{episode}.png"), dpi=150)
         plt.close()
 
         # AE triggers
@@ -864,15 +1116,16 @@ class ExperimentRunner3D:
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(generate_save_path(f'{algo_name}/ae_triggers/triggers_up_to_ep_{episode}.png'))
+        plt.savefig(self._get_algo_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
         plt.close()
 
     # ========================================================================
-    # WVF EXPERIMENT
+    # WVF EXPERIMENT (Fixed to match run_wvf_baseline.py)
     # ========================================================================
     
     def run_wvf_experiment(self, episodes=3000, max_steps=200, seed=20):
-        """Run WVF agent experiment"""
+        """Run WVF agent experiment - matches run_wvf_baseline.py exactly"""
+        self.current_algo_folder = "wvf"
         
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -930,10 +1183,10 @@ class ExperimentRunner3D:
             agent.true_reward_map = np.zeros((env.size, env.size))
             agent.visited_positions = np.zeros((env.size, env.size), dtype=bool)
             
-            # Get initial observation
+            # Get initial observation - FIXED: set ego observation BEFORE getting state features
             detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
             ego_obs = get_ego_obs_from_detection(agent, detection_result)
-            agent.set_ego_observation(ego_obs)
+            agent.set_ego_observation(ego_obs)  # CRITICAL: This was missing!
             
             current_state_features = agent._get_state_features()
             
@@ -950,10 +1203,10 @@ class ExperimentRunner3D:
                 total_reward += reward
                 done = terminated or truncated
                 
-                # Get new observation
+                # Get new observation - FIXED: set ego observation BEFORE getting state features
                 detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
                 next_ego_obs = get_ego_obs_from_detection(agent, detection_result)
-                agent.set_ego_observation(next_ego_obs)
+                agent.set_ego_observation(next_ego_obs)  # CRITICAL: This was missing!
                 
                 next_state_features = agent._get_state_features()
                 
@@ -1007,7 +1260,7 @@ class ExperimentRunner3D:
                 plt.colorbar(im, ax=axes[a])
             
             plt.tight_layout()
-            plt.savefig(generate_save_path(f'wvf/wvf_qvalues/qvalues_ep{episode}.png'), dpi=150)
+            plt.savefig(self._get_algo_save_path(f'qvalues/qvalues_ep{episode}.png'), dpi=150)
             plt.close()
         
         # Reward map
@@ -1034,7 +1287,7 @@ class ExperimentRunner3D:
         plt.colorbar(im2, ax=axes[1])
         
         plt.tight_layout()
-        plt.savefig(generate_save_path(f'wvf/vision_plots/reward_map_ep{episode}.png'), dpi=150)
+        plt.savefig(self._get_algo_save_path(f'vision_plots/reward_map_ep{episode}.png'), dpi=150)
         plt.close()
         
         # Loss
@@ -1052,14 +1305,14 @@ class ExperimentRunner3D:
             plt.title(f'WVF Learning (up to episode {episode})')
             plt.legend()
             plt.grid(True, alpha=0.3)
-            plt.savefig(generate_save_path(f'wvf/wvf_loss/loss_ep{episode}.png'), dpi=150)
+            plt.savefig(self._get_algo_save_path(f'loss/loss_ep{episode}.png'), dpi=150)
             plt.close()
 
     # ========================================================================
     # COMPARISON EXPERIMENT
     # ========================================================================
     
-    def run_comparison_experiment(self, episodes=3000, max_steps=200):
+    def run_comparison_experiment(self, episodes=3000, max_steps=200, include_drqn=True):
         """Run comparison between all agents across multiple seeds"""
         all_results = {}
         
@@ -1082,6 +1335,12 @@ class ExperimentRunner3D:
             algorithms = ['DQN', 'SR Q-Learning', 'SR SARSA', 'WVF']
             results_list = [dqn_results, sr_qlearning_results, sr_sarsa_results, wvf_results]
             
+            # Optionally include DRQN
+            if include_drqn:
+                drqn_results = self.run_drqn_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
+                algorithms.append('DRQN')
+                results_list.append(drqn_results)
+            
             for alg, result in zip(algorithms, results_list):
                 if alg not in all_results:
                     all_results[alg] = []
@@ -1093,6 +1352,7 @@ class ExperimentRunner3D:
                 torch.cuda.empty_cache()
         
         self.results = all_results
+        self.current_algo_folder = None  # Reset for comparison plots
         return all_results
 
     # ========================================================================
@@ -1111,7 +1371,9 @@ class ExperimentRunner3D:
         # Plot 1: Learning curves (rewards)
         ax1 = axes[0, 0]
         for alg_name, runs in self.results.items():
-            all_rewards = np.array([run["rewards"] for run in runs])
+            # Use extrinsic_rewards for DRQN, rewards for others
+            reward_key = "extrinsic_rewards" if "extrinsic_rewards" in runs[0] else "rewards"
+            all_rewards = np.array([run[reward_key] for run in runs])
             mean_rewards = np.mean(all_rewards, axis=0)
             std_rewards = np.std(all_rewards, axis=0)
 
@@ -1154,24 +1416,26 @@ class ExperimentRunner3D:
             loss_key = None
             if "dqn_losses" in runs[0]:
                 loss_key = "dqn_losses"
+            elif "drqn_losses" in runs[0]:
+                loss_key = "drqn_losses"
             elif "wvf_losses" in runs[0]:
                 loss_key = "wvf_losses"
             
             if loss_key:
                 # Find minimum length across all runs
-                min_length = min(len(run[loss_key]) for run in runs)
-                
-                # Truncate all runs to minimum length
-                all_losses = np.array([run[loss_key][:min_length] for run in runs])
-                mean_losses = np.mean(all_losses, axis=0)
-                std_losses = np.std(all_losses, axis=0)
+                min_length = min(len(run[loss_key]) for run in runs if len(run[loss_key]) > 0)
+                if min_length > 0:
+                    all_losses = np.array([run[loss_key][:min_length] for run in runs if len(run[loss_key]) > 0])
+                    if len(all_losses) > 0:
+                        mean_losses = np.mean(all_losses, axis=0)
+                        std_losses = np.std(all_losses, axis=0)
 
-                mean_smooth = pd.Series(mean_losses).rolling(window).mean()
-                std_smooth = pd.Series(std_losses).rolling(window).mean()
+                        mean_smooth = pd.Series(mean_losses).rolling(window).mean()
+                        std_smooth = pd.Series(std_losses).rolling(window).mean()
 
-                x = range(len(mean_smooth))
-                ax3.plot(x, mean_smooth, label=f"{alg_name}", linewidth=2)
-                ax3.fill_between(x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3)
+                        x = range(len(mean_smooth))
+                        ax3.plot(x, mean_smooth, label=f"{alg_name}", linewidth=2)
+                        ax3.fill_between(x, mean_smooth - std_smooth, mean_smooth + std_smooth, alpha=0.3)
 
         ax3.set_xlabel("Episode")
         ax3.set_ylabel("Loss")
@@ -1183,9 +1447,10 @@ class ExperimentRunner3D:
         ax4 = axes[1, 0]
         final_rewards = {}
         for alg_name, runs in self.results.items():
+            reward_key = "extrinsic_rewards" if "extrinsic_rewards" in runs[0] else "rewards"
             final_100 = []
             for run in runs:
-                final_100.extend(run["rewards"][-100:])
+                final_100.extend(run[reward_key][-100:])
             final_rewards[alg_name] = final_100
 
         if final_rewards:
@@ -1198,7 +1463,8 @@ class ExperimentRunner3D:
         # Plot 5: Success rate over time
         ax5 = axes[1, 1]
         for alg_name, runs in self.results.items():
-            all_rewards = np.array([run["rewards"] for run in runs])
+            reward_key = "extrinsic_rewards" if "extrinsic_rewards" in runs[0] else "rewards"
+            all_rewards = np.array([run[reward_key] for run in runs])
             success_rates = []
             for episode in range(100, len(all_rewards[0])):
                 recent_rewards = all_rewards[:, max(0, episode-100):episode]
@@ -1215,14 +1481,11 @@ class ExperimentRunner3D:
         ax5.legend()
         ax5.grid(True)
 
-        # Plot 6: AE triggers comparison
+        # Plot 6: AE triggers comparison (for SR algorithms)
         ax6 = axes[1, 2]
         for alg_name, runs in self.results.items():
             if "ae_triggers" in runs[0]:
-                # Find minimum length across all runs
                 min_length = min(len(run["ae_triggers"]) for run in runs)
-                
-                # Truncate all runs to minimum length
                 all_triggers = np.array([run["ae_triggers"][:min_length] for run in runs])
                 mean_triggers = np.mean(all_triggers, axis=0)
                 std_triggers = np.std(all_triggers, axis=0)
@@ -1243,13 +1506,16 @@ class ExperimentRunner3D:
         # Plot 7: Convergence comparison
         ax7 = axes[2, 0]
         convergence_data = []
+        alg_names = []
         for alg_name, runs in self.results.items():
-            all_rewards = np.array([run["rewards"] for run in runs])
+            reward_key = "extrinsic_rewards" if "extrinsic_rewards" in runs[0] else "rewards"
+            all_rewards = np.array([run[reward_key] for run in runs])
             convergence_episode = self._find_convergence_episode(all_rewards, window)
             convergence_data.append(convergence_episode)
+            alg_names.append(alg_name)
 
         if convergence_data:
-            ax7.bar(self.results.keys(), convergence_data)
+            ax7.bar(alg_names, convergence_data)
             ax7.set_ylabel("Episode")
             ax7.set_title("Convergence Speed")
             ax7.grid(True, axis='y')
@@ -1275,9 +1541,10 @@ class ExperimentRunner3D:
         ax9 = axes[2, 2]
         summary_data = []
         for alg_name, runs in self.results.items():
-            all_rewards = np.array([run["rewards"] for run in runs])
-            final_performance = np.mean([np.mean(run["rewards"][-100:]) for run in runs])
-            final_success_rate = np.mean([np.mean(np.array(run["rewards"][-100:]) > 0) for run in runs])
+            reward_key = "extrinsic_rewards" if "extrinsic_rewards" in runs[0] else "rewards"
+            all_rewards = np.array([run[reward_key] for run in runs])
+            final_performance = np.mean([np.mean(run[reward_key][-100:]) for run in runs])
+            final_success_rate = np.mean([np.mean(np.array(run[reward_key][-100:]) > 0) for run in runs])
             convergence_episode = self._find_convergence_episode(all_rewards, window)
             final_lengths = np.mean([np.mean(run["lengths"][-100:]) for run in runs])
 
@@ -1348,9 +1615,15 @@ class ExperimentRunner3D:
                 }
                 
                 # Add optional fields if available
-                for key in ["dqn_losses", "wvf_losses", "ae_triggers"]:
+                for key in ["dqn_losses", "drqn_losses", "wvf_losses", "ae_triggers", "extrinsic_rewards"]:
                     if key in run:
                         json_run[key] = [float(x) for x in run[key]]
+                
+                # Add DRQN-specific fields
+                if "best_success_rate" in run:
+                    json_run["best_success_rate"] = float(run["best_success_rate"])
+                if "best_episode" in run:
+                    json_run["best_episode"] = int(run["best_episode"])
                 
                 json_results[alg_name].append(json_run)
 
@@ -1363,12 +1636,20 @@ class ExperimentRunner3D:
 def main():
     """Run the 3D experiment comparison"""
     print("Starting 3D baseline comparison experiment...")
+    print("="*60)
+    print("Algorithms included:")
+    print("  1. DQN with Vision")
+    print("  2. SR Q-Learning with Vision")
+    print("  3. SR SARSA with Vision")
+    print("  4. WVF Baseline (Nangue Tasse)")
+    print("  5. DRQN (Stabilized v2)")
+    print("="*60)
 
     # Initialize experiment runner
-    runner = ExperimentRunner3D(env_size=10, num_seeds=2)
+    runner = ExperimentRunner3D(env_size=10, num_seeds=3)
 
-    # Run experiments
-    results = runner.run_comparison_experiment(episodes=3000, max_steps=200)
+    # Run experiments (set include_drqn=False to skip DRQN)
+    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, include_drqn=True)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
