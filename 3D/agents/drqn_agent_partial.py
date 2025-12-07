@@ -1,6 +1,10 @@
 """
-DRQN Agent v2 - Stabilized Learning
-Fixes: reduced intrinsic rewards, timeout penalty, Double DQN, better epsilon schedule
+DRQN Agent v3 - Fair Comparison Version
+Changes from v2:
+1. REMOVED intrinsic rewards (exploration bonus, distance shaping, speed bonus)
+2. REMOVED extra goal features from state (now matches DQN's 175 dims)
+3. Kept Double DQN and soft updates (these are legitimate algorithmic improvements)
+4. Added option to use hard target updates like DQN for even fairer comparison
 """
 
 import numpy as np
@@ -152,22 +156,31 @@ class SequenceReplayBuffer:
 
 class DRQNAgentPartial:
     """
-    DRQN Agent v2 - Stabilized Learning
+    DRQN Agent v3 - Fair Comparison Version
     
-    Changes from v1:
-    1. Reduced intrinsic reward magnitudes (prevent reward hacking)
-    2. Added timeout penalty
-    3. Double DQN for stable Q-learning
-    4. Better epsilon schedule (slower decay)
-    5. Soft target updates instead of hard copy
+    Key changes for fair comparison:
+    1. State dimension matches DQN exactly (175 features)
+       - ego_obs (13*13=169) + position (2) + direction_onehot (4)
+       - NO extra goal features
+    2. NO intrinsic rewards - only uses environment reward
+    3. Same epsilon schedule as DQN
+    4. Option for hard target updates (like DQN) or soft updates
+    
+    The ONLY advantage DRQN should have is the LSTM memory.
     """
     
-    def __init__(self, env, learning_rate=0.0005, gamma=0.99, epsilon_start=1.0,
-                 epsilon_end=0.05, epsilon_decay=0.9998, memory_size=5000,
-                 batch_size=32, target_update_freq=50, hidden_dim=128,
+    def __init__(self, env, learning_rate=0.001, gamma=0.99, epsilon_start=1.0,
+                 epsilon_end=0.05, epsilon_decay=0.9995, memory_size=10000,
+                 batch_size=32, target_update_freq=100, hidden_dim=128,
                  lstm_hidden=128, num_lstm_layers=1, sequence_length=8,
-                 burn_in_length=2, use_intrinsic_reward=True,
-                 use_double_dqn=True, tau=0.005):
+                 burn_in_length=2, use_double_dqn=True, 
+                 use_soft_update=False, tau=0.005):
+        """
+        Args:
+            use_soft_update: If False, uses hard target updates like DQN (fairer)
+                           If True, uses soft updates (slightly better but still fair)
+            All other hyperparameters match DQN where applicable
+        """
         
         self.env = env
         self.grid_size = env.size
@@ -177,13 +190,14 @@ class DRQNAgentPartial:
         
         self.sequence_length = sequence_length
         self.burn_in_length = burn_in_length
-        self.use_intrinsic_reward = use_intrinsic_reward
         self.use_double_dqn = use_double_dqn
-        self.tau = tau  # Soft update coefficient
+        self.use_soft_update = use_soft_update
+        self.tau = tau
         
-        # State representation
+        # State representation - MATCHES DQN EXACTLY
+        # ego_obs (13*13=169) + position (2) + direction_onehot (4) = 175
         self.view_size = 13 * 13
-        self.state_dim = self.view_size + 2 + 4 + 2 + 2  # 179 features
+        self.state_dim = self.view_size + 2 + 4  # 175 features (same as DQN!)
         
         self.q_network = DRQN(
             input_size=self.state_dim,
@@ -214,31 +228,29 @@ class DRQNAgentPartial:
         self.episode_buffer = EpisodeBuffer()
         self.hidden_state = None
         
-        # Hyperparameters
+        # Hyperparameters - MATCH DQN
         self.learning_rate = learning_rate
         self.gamma = gamma
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
-        self.epsilon_decay = epsilon_decay  # Slower decay: 0.9998 instead of 0.9995
+        self.epsilon_decay = epsilon_decay  # Same as DQN: 0.9995
         self.batch_size = batch_size
-        self.target_update_freq = target_update_freq
+        self.target_update_freq = target_update_freq  # Same as DQN: 100
         self.update_counter = 0
         
-        # Intrinsic reward tracking
-        self.visited_positions = set()
-        self.prev_goal_distance = None
-        self.steps_this_episode = 0
-        
-        # Goal info
+        # For visualization (store current goals but DON'T use in state)
         self.current_goal_red = None
         self.current_goal_blue = None
         
-        print(f"DRQN Agent v2 (Stabilized) initialized:")
-        print(f"  - State dim: {self.state_dim}")
+        print(f"DRQN Agent v3 (Fair Comparison) initialized:")
+        print(f"  - State dim: {self.state_dim} (matches DQN)")
+        print(f"  - NO intrinsic rewards")
+        print(f"  - NO extra goal features")
         print(f"  - LSTM hidden: {lstm_hidden}")
         print(f"  - Sequence length: {sequence_length}")
         print(f"  - Double DQN: {use_double_dqn}")
-        print(f"  - Soft update tau: {tau}")
+        print(f"  - Soft updates: {use_soft_update} (tau={tau if use_soft_update else 'N/A'})")
+        print(f"  - Target update freq: {target_update_freq}")
         print(f"  - Epsilon decay: {epsilon_decay}")
         print(f"  - Device: {self.device}")
 
@@ -246,14 +258,11 @@ class DRQNAgentPartial:
         """Reset agent state at the start of a new episode"""
         self.hidden_state = None
         
-        # Save episode buffer even on timeout
+        # Save episode buffer
         if len(self.episode_buffer) > 0:
             self.replay_buffer.add_episode(self.episode_buffer)
         self.episode_buffer.clear()
         
-        self.visited_positions = set()
-        self.prev_goal_distance = None
-        self.steps_this_episode = 0
         self.current_goal_red = None
         self.current_goal_blue = None
 
@@ -300,104 +309,39 @@ class DRQNAgentPartial:
         place_goal(goal_pos_red, 1.0)
         place_goal(goal_pos_blue, 0.8)
         
+        # Store for visualization only (NOT used in state)
         self.current_goal_red = goal_pos_red
         self.current_goal_blue = goal_pos_blue
 
         return ego_matrix
 
-    def compute_goal_features(self, goal_pos_red, goal_pos_blue):
-        """Compute additional features about goals"""
-        features = np.zeros(4, dtype=np.float32)
-        
-        if goal_pos_red is not None:
-            dist_red = np.sqrt(goal_pos_red[0]**2 + goal_pos_red[1]**2)
-            features[0] = min(dist_red / 10.0, 1.0)
-            features[2] = 1.0
-        else:
-            features[0] = 1.0
-            features[2] = 0.0
-        
-        if goal_pos_blue is not None:
-            dist_blue = np.sqrt(goal_pos_blue[0]**2 + goal_pos_blue[1]**2)
-            features[1] = min(dist_blue / 10.0, 1.0)
-            features[3] = 1.0
-        else:
-            features[1] = 1.0
-            features[3] = 0.0
-        
-        return features
-
     def get_state_tensor(self, obs, goal_pos_red=None, goal_pos_blue=None):
-        """Convert observation to state tensor"""
+        """
+        Convert observation to state tensor.
+        
+        MATCHES DQN EXACTLY - 175 features:
+        - ego_obs flattened (169)
+        - normalized position (2)
+        - direction one-hot (4)
+        
+        NOTE: goal_pos_red and goal_pos_blue are accepted for API compatibility
+        but are NOT included in the state vector for fair comparison.
+        """
+        # 1. Flatten egocentric observation (13x13 = 169)
         view_flat = obs.flatten().astype(np.float32)
         
+        # 2. Normalized position (2)
         pos_x = self._get_agent_pos_from_env()[0] / (self.grid_size - 1)
         pos_z = self._get_agent_pos_from_env()[1] / (self.grid_size - 1)
         position = np.array([pos_x, pos_z], dtype=np.float32)
         
+        # 3. Direction one-hot (4)
         direction_onehot = np.zeros(4, dtype=np.float32)
         direction_onehot[self._get_agent_dir_from_env()] = 1.0
         
-        goal_features = self.compute_goal_features(goal_pos_red, goal_pos_blue)
-        
-        state = np.concatenate([view_flat, position, direction_onehot, goal_features])
+        # Concatenate: 169 + 2 + 4 = 175 (same as DQN!)
+        state = np.concatenate([view_flat, position, direction_onehot])
         return torch.FloatTensor(state).to(self.device)
-
-    def compute_intrinsic_reward(self, env_reward, goal_pos_red, goal_pos_blue, 
-                                  done, timed_out=False):
-        """
-        Compute intrinsic reward - REDUCED MAGNITUDES for stability.
-        
-        Changes from v1:
-        - Exploration bonus: 0.01 -> 0.001 (10x smaller)
-        - Distance shaping: 0.1 -> 0.02 (5x smaller)
-        - Step penalty: 0.001 -> 0.0005 (2x smaller)
-        - NEW: Timeout penalty of -0.3
-        """
-        intrinsic = 0.0
-        
-        if not self.use_intrinsic_reward:
-            return env_reward
-        
-        self.steps_this_episode += 1
-        
-        # 1. Exploration bonus (REDUCED)
-        pos = self._get_agent_pos_from_env()
-        if pos not in self.visited_positions:
-            intrinsic += 0.001  # Was 0.01
-            self.visited_positions.add(pos)
-        
-        # 2. Distance-based shaping (REDUCED)
-        current_min_dist = float('inf')
-        
-        if goal_pos_red is not None:
-            dist_red = np.sqrt(goal_pos_red[0]**2 + goal_pos_red[1]**2)
-            current_min_dist = min(current_min_dist, dist_red)
-        
-        if goal_pos_blue is not None:
-            dist_blue = np.sqrt(goal_pos_blue[0]**2 + goal_pos_blue[1]**2)
-            current_min_dist = min(current_min_dist, dist_blue)
-        
-        if current_min_dist < float('inf'):
-            if self.prev_goal_distance is not None:
-                dist_improvement = self.prev_goal_distance - current_min_dist
-                intrinsic += 0.02 * dist_improvement  # Was 0.1
-            self.prev_goal_distance = current_min_dist
-        
-        # 3. Small step penalty (REDUCED)
-        intrinsic -= 0.0005  # Was 0.001
-        
-        # 4. NEW: Timeout penalty
-        if timed_out and not done:
-            intrinsic -= 0.3  # Significant penalty for not reaching goal
-        
-        # 5. NEW: Success bonus scaling (encourage faster completion)
-        if done and env_reward > 0:
-            # Bonus for finishing quickly (max 0.2 extra for very fast episodes)
-            speed_bonus = max(0, 0.2 * (1 - self.steps_this_episode / 200))
-            intrinsic += speed_bonus
-        
-        return env_reward + intrinsic
 
     def select_action(self, obs, epsilon=None):
         """Select action using DRQN with epsilon-greedy exploration"""
@@ -417,6 +361,7 @@ class DRQNAgentPartial:
             return q_values.argmax().item()
 
     def select_action_dqn(self, obs, epsilon):
+        """Alias for compatibility"""
         return self.select_action(obs, epsilon)
 
     def store_transition(self, state, action, reward, next_state, done):
@@ -428,9 +373,14 @@ class DRQNAgentPartial:
             self.episode_buffer.clear()
 
     def remember(self, state, action, reward, next_state, done):
+        """Alias for compatibility"""
         self.store_transition(state, action, reward, next_state, done)
 
-    def soft_update_target(self):
+    def _hard_update_target(self):
+        """Hard update target network (like DQN)"""
+        self.target_network.load_state_dict(self.q_network.state_dict())
+
+    def _soft_update_target(self):
         """Soft update target network: θ_target = τ*θ_local + (1-τ)*θ_target"""
         for target_param, local_param in zip(self.target_network.parameters(), 
                                               self.q_network.parameters()):
@@ -439,12 +389,7 @@ class DRQNAgentPartial:
             )
 
     def train(self):
-        """
-        Train DRQN with Double DQN for stability.
-        
-        Double DQN: Use online network to SELECT action, target network to EVALUATE.
-        This reduces overestimation of Q-values.
-        """
+        """Train DRQN with Double DQN"""
         if len(self.replay_buffer) < self.batch_size:
             return 0.0
         
@@ -499,7 +444,7 @@ class DRQNAgentPartial:
         q_values, _ = self.q_network(states, None)
         current_q = q_values.gather(2, actions.unsqueeze(-1)).squeeze(-1)
         
-        # Target Q values with Double DQN
+        # Target Q values
         with torch.no_grad():
             if self.use_double_dqn:
                 # Double DQN: use online network to select action
@@ -530,21 +475,28 @@ class DRQNAgentPartial:
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
         self.optimizer.step()
         
-        # Soft update target network (every step)
-        self.soft_update_target()
-        
         self.update_counter += 1
+        
+        # Update target network
+        if self.use_soft_update:
+            self._soft_update_target()
+        else:
+            # Hard update like DQN
+            if self.update_counter % self.target_update_freq == 0:
+                self._hard_update_target()
         
         return masked_loss.item()
 
     def train_dqn(self):
+        """Alias for compatibility"""
         return self.train()
 
     def decay_epsilon(self):
-        """Decay epsilon - slower schedule for more exploration"""
+        """Decay epsilon - same schedule as DQN"""
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
     def get_dqn_state(self, obs):
+        """Alias for compatibility"""
         return self.get_state_tensor(obs, self.current_goal_red, self.current_goal_blue)
 
     @property

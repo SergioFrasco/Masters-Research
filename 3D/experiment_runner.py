@@ -395,14 +395,20 @@ class ExperimentRunner3D:
             plt.savefig(self._get_algo_save_path(f'loss/loss_up_to_ep_{episode}.png'))
             plt.close()
 
-    # ========================================================================
-    # DRQN EXPERIMENT (NEW - from run_drqn_experiment.py)
-    # ========================================================================
     
-    def run_drqn_experiment(self, episodes=3000, max_steps=200, seed=20,
-                           sequence_length=5, lstm_hidden=128, burn_in_length=2,
-                           train_frequency=4, use_intrinsic_reward=True):
-        """Run DRQN agent experiment with vision - matches run_drqn_experiment.py"""
+
+    def run_drqn_experiment(self, episodes=3000, max_steps=200, seed=20):
+        """
+        Run DRQN agent experiment - FAIR COMPARISON VERSION
+        
+        Key differences from original:
+        1. Uses DRQNAgentFair (no intrinsic rewards, same 175-dim state as DQN)
+        2. Only tracks and returns EXTRINSIC (environment) rewards
+        3. Same hyperparameters as DQN where applicable
+        4. No intrinsic reward shaping at all
+        
+        The ONLY advantage DRQN has is the LSTM memory for temporal dependencies.
+        """
         self.current_algo_folder = "drqn"
         
         np.random.seed(seed)
@@ -412,28 +418,27 @@ class ExperimentRunner3D:
 
         env = DiscreteMiniWorldWrapper(size=self.env_size)
 
-        # Initialize DRQN agent with stabilized settings (from v2)
+        # Initialize FAIR DRQN agent - SAME hyperparams as DQN
         agent = DRQNAgentPartial(
             env,
-            learning_rate=0.0005,
-            gamma=0.99,
-            epsilon_start=1.0,
-            epsilon_end=0.05,
-            epsilon_decay=0.9998,  # Slower decay
-            memory_size=5000,
-            batch_size=32,
-            target_update_freq=50,
-            hidden_dim=128,
-            lstm_hidden=lstm_hidden,
+            learning_rate=0.0005,        # Same as DQN (lowered for stability)
+            gamma=0.99,                   # Same as DQN
+            epsilon_start=1.0,            # Same as DQN
+            epsilon_end=0.05,             # Same as DQN
+            epsilon_decay=0.9995,         # Same as DQN (was 0.9998, now matched)
+            memory_size=10000,            # Same as DQN
+            batch_size=32,                # Same as DQN
+            target_update_freq=100,       # Same as DQN
+            hidden_dim=128,               # Same as DQN
+            lstm_hidden=128,              # DRQN-specific (LSTM is the only difference)
             num_lstm_layers=1,
-            sequence_length=sequence_length,
-            burn_in_length=burn_in_length,
-            use_intrinsic_reward=use_intrinsic_reward,
-            use_double_dqn=True,
-            tau=0.005
+            sequence_length=8,            # DRQN-specific
+            burn_in_length=2,             # DRQN-specific
+            use_double_dqn=True,          # Can keep this (legitimate improvement)
+            use_soft_update=False,        # Use HARD updates like DQN for fairness
         )
 
-        # Load cube detector ONCE
+        # Load cube detector
         cube_model, cube_device, pos_mean, pos_std = load_cube_detector(
             'models/advanced_cube_detector.pth', force_cpu=False
         )
@@ -445,61 +450,50 @@ class ExperimentRunner3D:
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        episode_rewards = []
+        # Tracking - ONLY extrinsic rewards
+        episode_rewards = []  # These are ONLY environment rewards
         episode_lengths = []
         drqn_losses = []
-        extrinsic_rewards = []
         global_step = 0
-        
-        # Track best performance
-        best_success_rate = 0.0
-        best_episode = 0
+        train_frequency = 4  # Train every 4 steps (can match DQN's every-step if desired)
 
-        for episode in tqdm(range(episodes), desc=f"DRQN (seed {seed})"):
+        for episode in tqdm(range(episodes), desc=f"DRQN Fair (seed {seed})"):
             obs, info = env.reset()
             agent.reset_for_new_episode()
             
             # Process initial observation
             detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
-            ego_obs, goal_red, goal_blue = self._process_drqn_observation(agent, detection_result)
-            current_state = agent.get_state_tensor(ego_obs, goal_red, goal_blue)
+            ego_obs = get_ego_obs_from_detection(agent, detection_result)
+            current_state = agent.get_state_tensor(ego_obs)
             
-            total_reward = 0
-            total_extrinsic = 0
+            total_reward = 0  # ONLY environment reward, NO intrinsic
             steps = 0
             episode_losses = []
 
             for step in range(max_steps):
+                # Select action
                 action = agent.select_action(ego_obs, agent.epsilon)
                 
+                # Step environment
                 obs, env_reward, done, truncated, info = env.step(action)
                 
                 # Process next observation
                 detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
-                next_ego_obs, next_goal_red, next_goal_blue = self._process_drqn_observation(agent, detection_result)
+                next_ego_obs = get_ego_obs_from_detection(agent, detection_result)
+                next_state = agent.get_state_tensor(next_ego_obs)
                 
-                # Check if timed out
-                timed_out = (step == max_steps - 1) and not done
+                # Store transition with ONLY environment reward
+                # NO intrinsic reward shaping - this is the key difference!
+                agent.store_transition(current_state, action, env_reward, next_state, done)
                 
-                # Compute shaped reward with timeout penalty
-                shaped_reward = agent.compute_intrinsic_reward(
-                    env_reward, next_goal_red, next_goal_blue, done, timed_out
-                )
-                
-                next_state = agent.get_state_tensor(next_ego_obs, next_goal_red, next_goal_blue)
-                
-                # Mark as done if timed out
-                effective_done = done or timed_out
-                
-                agent.store_transition(current_state, action, shaped_reward, next_state, effective_done)
-                
+                # Train periodically
                 global_step += 1
                 if global_step % train_frequency == 0 and len(agent.replay_buffer) >= agent.batch_size:
                     loss = agent.train()
                     episode_losses.append(loss)
 
-                total_reward += shaped_reward
-                total_extrinsic += env_reward
+                # Track ONLY environment reward
+                total_reward += env_reward
                 steps += 1
                 current_state = next_state
                 ego_obs = next_ego_obs
@@ -507,66 +501,28 @@ class ExperimentRunner3D:
                 if done:
                     break
 
+            # Decay epsilon (same schedule as DQN)
             agent.decay_epsilon()
             
+            # Store results - using 'rewards' key for consistency with other algorithms
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
-            extrinsic_rewards.append(total_extrinsic)
             drqn_losses.append(np.mean(episode_losses) if episode_losses else 0.0)
-
-            # Track best performance
-            if episode >= 100:
-                recent_success = np.mean(np.array(extrinsic_rewards[-100:]) > 0)
-                if recent_success > best_success_rate:
-                    best_success_rate = recent_success
-                    best_episode = episode
 
             # Visualizations
             if episode % 250 == 0:
-                self._visualize_drqn(episode, drqn_losses, episode_rewards,
-                                    extrinsic_rewards, episode_lengths, seed)
+                self._visualize_drqn(episode, drqn_losses, episode_rewards, episode_lengths, seed)
 
         return {
-            "rewards": episode_rewards,
-            "extrinsic_rewards": extrinsic_rewards,
+            "rewards": episode_rewards,  # ONLY extrinsic rewards (consistent key name)
             "lengths": episode_lengths,
             "drqn_losses": drqn_losses,
             "final_epsilon": agent.epsilon,
-            "algorithm": "DRQN (Stabilized)",
-            "best_success_rate": best_success_rate,
-            "best_episode": best_episode,
+            "algorithm": "DRQN (Fair)",
         }
 
-    def _process_drqn_observation(self, agent, detection_result):
-        """Process observation for DRQN agent"""
-        label = detection_result['label']
-        confidence = detection_result['confidence']
-        regression_values = detection_result['regression']
-        
-        goal_pos_red = None
-        goal_pos_blue = None
-        
-        if regression_values is not None and label in ['Red', 'Blue', 'Both'] and confidence >= 0.5:
-            regression_values = np.round(regression_values).astype(int)
-            rx, rz, bx, bz = regression_values
-            
-            if label == 'Red':
-                goal_pos_red = (-rz, rx)
-            elif label == 'Blue':
-                goal_pos_blue = (-bz, bx)
-            elif label == 'Both':
-                goal_pos_red = (-rz, rx)
-                goal_pos_blue = (-bz, bx)
 
-        ego_obs = agent.create_egocentric_observation(
-            goal_pos_red=goal_pos_red,
-            goal_pos_blue=goal_pos_blue,
-            matrix_size=13
-        )
-        
-        return ego_obs, goal_pos_red, goal_pos_blue
-
-    def _visualize_drqn(self, episode, losses, rewards, extrinsic_rewards, lengths, seed):
+    def _visualize_drqn(self, episode, losses, rewards, lengths, seed):
         """Generate DRQN-specific visualizations"""
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         
@@ -584,27 +540,27 @@ class ExperimentRunner3D:
         ax1.legend()
         ax1.grid(True, alpha=0.3)
 
-        # Extrinsic rewards
+        # Rewards (extrinsic only - same as other algorithms)
         ax2 = axes[0, 1]
-        ax2.plot(extrinsic_rewards, alpha=0.3, color='blue')
-        if len(extrinsic_rewards) >= 50:
-            smoothed = np.convolve(extrinsic_rewards, np.ones(50)/50, mode='valid')
-            ax2.plot(range(25, len(extrinsic_rewards) - 24), smoothed,
+        ax2.plot(rewards, alpha=0.3, color='blue')
+        if len(rewards) >= 50:
+            smoothed = np.convolve(rewards, np.ones(50)/50, mode='valid')
+            ax2.plot(range(25, len(rewards) - 24), smoothed,
                     color='red', linewidth=2, label='Smoothed')
         ax2.set_xlabel('Episode')
-        ax2.set_ylabel('Extrinsic Reward')
-        ax2.set_title('Environment Reward')
+        ax2.set_ylabel('Environment Reward')
+        ax2.set_title('Environment Reward (Extrinsic Only)')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
 
         # Success rate
         ax3 = axes[1, 0]
-        if len(extrinsic_rewards) >= 100:
+        if len(rewards) >= 100:
             success_rates = []
-            for i in range(100, len(extrinsic_rewards)):
-                rate = np.mean(np.array(extrinsic_rewards[i-100:i]) > 0)
+            for i in range(100, len(rewards)):
+                rate = np.mean(np.array(rewards[i-100:i]) > 0)
                 success_rates.append(rate)
-            ax3.plot(range(100, len(extrinsic_rewards)), success_rates, 
+            ax3.plot(range(100, len(rewards)), success_rates, 
                     linewidth=2, color='green')
             ax3.axhline(y=0.8, color='red', linestyle='--', label='80% target')
         ax3.set_xlabel('Episode')
@@ -621,16 +577,16 @@ class ExperimentRunner3D:
             smoothed = np.convolve(lengths, np.ones(50)/50, mode='valid')
             ax4.plot(range(25, len(lengths) - 24), smoothed,
                     color='red', linewidth=2, label='Smoothed')
-        ax4.axhline(y=50, color='green', linestyle='--', label='Target (50 steps)')
         ax4.set_xlabel('Episode')
         ax4.set_ylabel('Steps')
-        ax4.set_title('Episode Length (Lower is Better)')
+        ax4.set_title('Episode Length')
         ax4.legend()
         ax4.grid(True, alpha=0.3)
 
         plt.tight_layout()
         plt.savefig(self._get_algo_save_path(f'progress/progress_seed{seed}_ep{episode}.png'), dpi=150)
         plt.close()
+
 
     # ========================================================================
     # SUCCESSOR REPRESENTATION (Q-LEARNING) EXPERIMENT
@@ -1371,8 +1327,7 @@ class ExperimentRunner3D:
         # Plot 1: Learning curves (rewards)
         ax1 = axes[0, 0]
         for alg_name, runs in self.results.items():
-            # Use extrinsic_rewards for DRQN, rewards for others
-            reward_key = "extrinsic_rewards" if "extrinsic_rewards" in runs[0] else "rewards"
+            reward_key = "rewards"
             all_rewards = np.array([run[reward_key] for run in runs])
             mean_rewards = np.mean(all_rewards, axis=0)
             std_rewards = np.std(all_rewards, axis=0)
@@ -1646,10 +1601,10 @@ def main():
     print("="*60)
 
     # Initialize experiment runner
-    runner = ExperimentRunner3D(env_size=10, num_seeds=3)
+    runner = ExperimentRunner3D(env_size=10, num_seeds=2)
 
     # Run experiments (set include_drqn=False to skip DRQN)
-    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, include_drqn=True)
+    results = runner.run_comparison_experiment(episodes=4000, max_steps=200, include_drqn=True)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
