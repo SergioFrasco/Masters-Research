@@ -799,7 +799,7 @@ if __name__ == "__main__":
     results = run_compositional_wvf_agent(
         env,
         agent,
-        max_episodes=2000,
+        max_episodes=4000,
         max_steps_per_episode=200,
         simple_ratio=0.6,        # 60% simple, 40% compositional
         selective_training=True   # Only train relevant features
