@@ -1,3 +1,15 @@
+import os
+os.environ['DISPLAY'] = ':99'
+
+# Start virtual display
+import subprocess
+subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'])
+import time
+time.sleep(1)  # Give Xvfb time to start
+
+# Now import miniworld
+import miniworld
+
 from miniworld.envs.oneroom import OneRoom
 from miniworld.miniworld import MiniWorldEnv
 import numpy as np

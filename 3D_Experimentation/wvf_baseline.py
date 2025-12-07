@@ -14,8 +14,20 @@ them via min() to solve multi-feature tasks.
 """
 
 import os
-import gymnasium as gym
+os.environ['DISPLAY'] = ':99'
+
+# Start virtual display
+import subprocess
+subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'])
+import time
+time.sleep(1)  # Give Xvfb time to start
+
+# Now import miniworld
 import miniworld
+
+import os
+import gymnasium as gym
+# import miniworld
 from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 from agents import CompositionalWVFAgent
 from models import WVF_MLP
