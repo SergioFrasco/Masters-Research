@@ -136,6 +136,11 @@ class CompositionalWVFAgent:
         # Vision debug info
         self.last_detection = None
 
+        # Confidence parameters (like SR baseline)
+        self.confidence_boost = 0.4
+        self.decay_factor = 0.95
+        self.confidence_threshold = 0.5
+
     # ==================== State Features ====================
 
     def _get_state_features_for_feature(self, feature_name):
@@ -167,10 +172,14 @@ class CompositionalWVFAgent:
     def update_from_detection(self, detection_result):
         self.last_detection = detection_result
 
+        # FIRST: Decay existing confidence (objects not seen recently fade)
+        for f in self.feature_names:
+            self.feature_reward_maps[f] *= self.decay_factor
+
         positions = detection_result.get("positions", {})
         probabilities = detection_result.get("probabilities", {})
 
-        # Reset egocentric obs
+        # Reset egocentric obs (these are per-step, not accumulated)
         for f in self.feature_names:
             self.feature_ego_obs[f] = np.zeros((13, 13), dtype=np.float32)
 
@@ -189,15 +198,19 @@ class CompositionalWVFAgent:
             dx = int(round(dx))
             dz = int(round(dz))
 
-            # Update ego observations
+            # Update ego observations (per-step, binary)
             for feature in self.object_to_features.get(obj_name, []):
                 self._place_in_ego_obs(feature, dx, dz)
 
             # Convert to global coordinates
             gx, gz = self._ego_to_global(dx, dz, agent_x, agent_z, agent_dir)
             if 0 <= gx < self.grid_size and 0 <= gz < self.grid_size:
+                # ACCUMULATE confidence instead of setting to 1.0
                 for feature in self.object_to_features.get(obj_name, []):
-                    self.feature_reward_maps[feature][gz, gx] = 1.0
+                    self.feature_reward_maps[feature][gz, gx] = min(
+                        1.0,
+                        self.feature_reward_maps[feature][gz, gx] + self.confidence_boost
+                    )
 
     def _place_in_ego_obs(self, feature_name, dx, dz):
         ego_center_x = 6
@@ -229,13 +242,13 @@ class CompositionalWVFAgent:
         return int(round(gx)), int(round(gz))
 
     # ==================== Goal Extraction ====================
-
     def _get_goals_for_feature(self, feature_name):
         goals = []
         rm = self.feature_reward_maps[feature_name]
         for z in range(self.grid_size):
             for x in range(self.grid_size):
-                if rm[z, x] > 0.5:
+                # Only return goals above confidence threshold
+                if rm[z, x] > self.confidence_threshold:
                     goals.append((x, z))
         return goals
 
@@ -507,8 +520,8 @@ class CompositionalWVFAgent:
 
     def reset(self):
         for f in self.feature_names:
-            self.feature_reward_maps[f] = np.zeros((self.grid_size, self.grid_size))
-            self.feature_ego_obs[f] = np.zeros((13, 13))
+            self.feature_reward_maps[f] = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
+            self.feature_ego_obs[f] = np.zeros((13, 13), dtype=np.float32)
         self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
         self.current_q_values = None
         self.last_detection = None
