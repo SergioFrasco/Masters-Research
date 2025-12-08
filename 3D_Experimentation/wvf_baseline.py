@@ -44,10 +44,11 @@ def create_task_schedule(total_episodes, simple_ratio=0.6):
     Create SEQUENTIAL task schedule: all simple tasks first, then compositional.
     """
     simple_tasks = [
+        {"name": "sphere", "features": ["sphere"], "type": "simple"},
         {"name": "blue", "features": ["blue"], "type": "simple"},
         {"name": "red", "features": ["red"], "type": "simple"},
-        {"name": "box", "features": ["box"], "type": "simple"},
-        {"name": "sphere", "features": ["sphere"], "type": "simple"},
+        {"name": "box", "features": ["box"], "type": "simple"}
+        
     ]
     
     compositional_tasks = [
