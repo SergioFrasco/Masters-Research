@@ -1,12 +1,14 @@
 """
-Training script for Compositional WVF Agent - FIXED VERSION.
+Training script for Compositional WVF Agent - FIXED VERSION with Separate Evaluation.
 
-Key Fix: Uses shared state representation across all feature networks.
+Key Changes from Original:
+1. Training phase: Only simple tasks (red, blue, box, sphere) - networks ARE trained
+2. Evaluation phase: Only compositional tasks - networks NOT trained, just composed
 
 This ensures:
-- All networks learn identical navigation dynamics (G*)
-- Composition via min() correctly combines value functions
-- Transfer to compositional tasks works as intended
+- All networks learn identical navigation dynamics (G*) during training
+- Composition via min() is evaluated WITHOUT further training
+- Clean separation of learning vs composition testing
 
 Usage:
     python train_compositional_wvf_fixed.py
@@ -39,44 +41,37 @@ from utils import generate_save_path
 
 # ==================== Task System ====================
 
-def create_task_schedule(total_episodes, simple_ratio=0.6):
+def create_task_schedule(total_episodes):
     """
-    Create SEQUENTIAL task schedule: all simple tasks first, then compositional.
+    Create task schedule for TRAINING phase only (simple tasks).
+    Compositional tasks are handled separately in evaluation.
     """
     simple_tasks = [
         {"name": "sphere", "features": ["sphere"], "type": "simple"},
         {"name": "blue", "features": ["blue"], "type": "simple"},
         {"name": "red", "features": ["red"], "type": "simple"},
         {"name": "box", "features": ["box"], "type": "simple"}
-        
     ]
     
-    compositional_tasks = [
+    episodes_per_simple = total_episodes // len(simple_tasks)
+    
+    tasks = []
+    for task in simple_tasks:
+        task_copy = task.copy()
+        task_copy["duration"] = episodes_per_simple
+        tasks.append(task_copy)
+
+    return tasks, episodes_per_simple
+
+
+def get_compositional_tasks():
+    """Get list of compositional tasks for evaluation."""
+    return [
         {"name": "blue_sphere", "features": ["blue", "sphere"], "type": "compositional"},
         {"name": "red_sphere", "features": ["red", "sphere"], "type": "compositional"},
         {"name": "blue_box", "features": ["blue", "box"], "type": "compositional"},
         {"name": "red_box", "features": ["red", "box"], "type": "compositional"},
     ]
-
-    simple_episodes = int(total_episodes * simple_ratio)
-    comp_episodes = total_episodes - simple_episodes
-    
-    episodes_per_simple = simple_episodes // len(simple_tasks)
-    episodes_per_comp = comp_episodes // len(compositional_tasks)
-    
-    tasks = []
-    
-    for task in simple_tasks:
-        task_copy = task.copy()
-        task_copy["duration"] = episodes_per_simple
-        tasks.append(task_copy)
-    
-    for task in compositional_tasks:
-        task_copy = task.copy()
-        task_copy["duration"] = episodes_per_comp
-        tasks.append(task_copy)
-
-    return tasks, episodes_per_simple, episodes_per_comp
 
 
 def get_current_task(episode, tasks):
@@ -127,7 +122,6 @@ def check_task_satisfaction(info, task):
 
 def load_cube_detector(model_path='models/advanced_cube_detector.pth', force_cpu=False):
     """Load the trained 4-object cube detector model."""
-    # Import here to avoid circular imports
     from train_vision import CubeDetector
     
     if force_cpu:
@@ -202,76 +196,28 @@ def detect_cube(model, obs, device, transform, pos_mean=0.0, pos_std=1.0):
 
 # ==================== Visualization ====================
 
-def plot_task_rewards(task_rewards, tasks, max_episodes, save_path='task_rewards_fixed.png'):
-    """Plot rewards with task boundaries and labels."""
-    episodes = [r[0] for r in task_rewards]
-    task_rewards_values = [r[1] for r in task_rewards]
-    env_rewards_values = [r[2] for r in task_rewards]
-    
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10))
-    
-    # Plot 1: Task-specific rewards
-    ax1.plot(episodes, task_rewards_values, alpha=0.3, color='blue', label='Raw Task Reward')
-    
-    window = 50
-    if len(task_rewards_values) >= window:
-        smoothed = pd.Series(task_rewards_values).rolling(window).mean()
-        ax1.plot(episodes, smoothed, color='darkblue', linewidth=2, 
-                 label=f'Smoothed (window={window})')
-    
-    # Add vertical lines for task boundaries
-    cumulative = 0
-    for i, task in enumerate(tasks[:-1]):
-        cumulative += task["duration"]
-        ax1.axvline(x=cumulative, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
-        
-        if i == 3:  # After last simple task
-            ax1.axvline(x=cumulative, color='green', linestyle='-', alpha=0.9, linewidth=2.5)
-            ax1.text(cumulative, ax1.get_ylim()[1] * 0.9, ' COMPOSITIONAL→', 
-                    fontsize=10, color='green', fontweight='bold')
-    
-    ax1.set_ylabel('Task-Specific Reward', fontsize=12)
-    ax1.set_title('FIXED: Reward Over Episodes (Simple → Compositional)', fontsize=14, fontweight='bold')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    
-    # Plot 2: Environment rewards
-    ax2.plot(episodes, env_rewards_values, alpha=0.3, color='green', label='Raw Env Reward')
-    
-    if len(env_rewards_values) >= window:
-        smoothed_env = pd.Series(env_rewards_values).rolling(window).mean()
-        ax2.plot(episodes, smoothed_env, color='darkgreen', linewidth=2, 
-                 label=f'Smoothed (window={window})')
-    
-    cumulative = 0
-    for i, task in enumerate(tasks[:-1]):
-        cumulative += task["duration"]
-        ax2.axvline(x=cumulative, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
-    
-    ax2.set_xlabel('Episodes', fontsize=12)
-    ax2.set_ylabel('Environment Reward', fontsize=12)
-    ax2.set_title('Environment Reward (All Objects)', fontsize=14)
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"✓ Task reward plot saved: {save_path}")
-
-
-def plot_final_results(results, save_path='final_results_fixed.png', window=100):
-    """Plot final training results."""
+def plot_training_results(results, save_path='training_results.png', window=100):
+    """Plot training phase results (simple tasks only)."""
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
     
-    # Plot 1: Episode rewards
+    tasks = results["tasks"]
+    
+    # Plot 1: Episode rewards with task boundaries
     ax1 = axes[0, 0]
     mean_smooth = pd.Series(results["rewards"]).rolling(window).mean()
     ax1.plot(results["rewards"], alpha=0.3, label='Raw')
     ax1.plot(mean_smooth, linewidth=2, label='Smoothed')
+    
+    # Add task boundaries
+    cumulative = 0
+    colors = ['red', 'blue', 'brown', 'purple']
+    for i, task in enumerate(tasks[:-1]):
+        cumulative += task["duration"]
+        ax1.axvline(x=cumulative, color=colors[i], linestyle='--', alpha=0.7, linewidth=1.5)
+    
     ax1.set_xlabel("Episode")
     ax1.set_ylabel("Reward")
-    ax1.set_title("Episode Rewards (FIXED)")
+    ax1.set_title("Training: Episode Rewards (Simple Tasks)")
     ax1.legend()
     ax1.grid(True)
     
@@ -282,7 +228,7 @@ def plot_final_results(results, save_path='final_results_fixed.png', window=100)
     ax2.plot(mean_smooth, linewidth=2, label='Smoothed')
     ax2.set_xlabel("Episode")
     ax2.set_ylabel("Steps")
-    ax2.set_title("Episode Lengths")
+    ax2.set_title("Training: Episode Lengths")
     ax2.legend()
     ax2.grid(True)
     
@@ -293,7 +239,7 @@ def plot_final_results(results, save_path='final_results_fixed.png', window=100)
     ax3.plot(mean_smooth, linewidth=2, label='Smoothed')
     ax3.set_xlabel("Episode")
     ax3.set_ylabel("Task Reward")
-    ax3.set_title("Task-Specific Rewards")
+    ax3.set_title("Training: Task-Specific Rewards")
     ax3.legend()
     ax3.grid(True)
     
@@ -307,58 +253,195 @@ def plot_final_results(results, save_path='final_results_fixed.png', window=100)
             ax4.plot(smoothed, label=feature, color=colors[idx], linewidth=2)
     ax4.set_xlabel("Episode")
     ax4.set_ylabel("Loss")
-    ax4.set_title("Feature WVF Losses")
+    ax4.set_title("Training: Feature WVF Losses")
     ax4.legend()
     ax4.grid(True)
 
     plt.tight_layout()
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close()
-    print(f"✓ Final results plot saved: {save_path}")
+    print(f"✓ Training results plot saved: {save_path}")
 
 
-# ==================== Main Training Loop ====================
-
-def run_compositional_wvf_agent_fixed(env, agent, max_episodes=2000, max_steps_per_episode=200,
-                                       simple_ratio=0.6, selective_training=True):
-    """
-    Run FIXED Compositional WVF agent training.
+def plot_evaluation_results(eval_results, save_path='evaluation_results.png'):
+    """Plot evaluation phase results (compositional tasks only)."""
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
     
-    Key difference: Agent uses shared state representation, enabling proper composition.
+    task_names = list(eval_results["per_task_metrics"].keys())
+    
+    # Plot 1: Success rate per task
+    ax1 = axes[0, 0]
+    success_rates = [eval_results["per_task_metrics"][t]["success_rate"] * 100 
+                    for t in task_names]
+    colors = ['cyan', 'magenta', 'lightblue', 'lightcoral']
+    bars = ax1.bar(task_names, success_rates, color=colors, edgecolor='black')
+    ax1.set_ylabel("Success Rate (%)")
+    ax1.set_title("Evaluation: Compositional Task Success Rates")
+    ax1.set_ylim(0, 100)
+    for bar, rate in zip(bars, success_rates):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, 
+                f'{rate:.1f}%', ha='center', va='bottom', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Average reward per task
+    ax2 = axes[0, 1]
+    avg_rewards = [eval_results["per_task_metrics"][t]["avg_reward"] 
+                  for t in task_names]
+    bars = ax2.bar(task_names, avg_rewards, color=colors, edgecolor='black')
+    ax2.set_ylabel("Average Reward")
+    ax2.set_title("Evaluation: Average Reward per Compositional Task")
+    ax2.grid(True, alpha=0.3)
+    
+    # Plot 3: Average episode length per task
+    ax3 = axes[1, 0]
+    avg_lengths = [eval_results["per_task_metrics"][t]["avg_length"] 
+                  for t in task_names]
+    bars = ax3.bar(task_names, avg_lengths, color=colors, edgecolor='black')
+    ax3.set_ylabel("Average Episode Length")
+    ax3.set_title("Evaluation: Average Episode Length per Compositional Task")
+    ax3.grid(True, alpha=0.3)
+    
+    # Plot 4: Episode rewards over evaluation
+    ax4 = axes[1, 1]
+    for task_name in task_names:
+        rewards = eval_results["per_task_rewards"][task_name]
+        episodes = range(len(rewards))
+        ax4.plot(episodes, rewards, label=task_name, alpha=0.7, linewidth=2)
+    ax4.set_xlabel("Episode (within task)")
+    ax4.set_ylabel("Reward")
+    ax4.set_title("Evaluation: Rewards Over Episodes")
+    ax4.legend()
+    ax4.grid(True)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"✓ Evaluation results plot saved: {save_path}")
+
+
+def plot_combined_results(train_results, eval_results, save_path='combined_results.png', window=50):
+    """Plot combined training and evaluation results."""
+    fig, axes = plt.subplots(2, 1, figsize=(16, 12))
+    
+    train_episodes = len(train_results["rewards"])
+    
+    # Combine rewards for continuous plot
+    all_rewards = train_results["rewards"].copy()
+    all_task_rewards = train_results["task_rewards"].copy()
+    
+    # Add evaluation rewards
+    for task_name in eval_results["per_task_rewards"]:
+        all_rewards.extend(eval_results["per_task_rewards"][task_name])
+        all_task_rewards.extend(eval_results["per_task_rewards"][task_name])
+    
+    # Plot 1: All rewards
+    ax1 = axes[0]
+    episodes = range(len(all_rewards))
+    ax1.plot(episodes, all_rewards, alpha=0.3, color='blue', label='Raw Reward')
+    
+    if len(all_rewards) >= window:
+        smoothed = pd.Series(all_rewards).rolling(window).mean()
+        ax1.plot(episodes, smoothed, color='darkblue', linewidth=2, 
+                 label=f'Smoothed (window={window})')
+    
+    # Add task boundaries for training
+    tasks = train_results["tasks"]
+    cumulative = 0
+    for i, task in enumerate(tasks[:-1]):
+        cumulative += task["duration"]
+        ax1.axvline(x=cumulative, color='red', linestyle='--', alpha=0.5, linewidth=1)
+    
+    # Add EVALUATION boundary
+    ax1.axvline(x=train_episodes, color='green', linestyle='-', alpha=0.9, linewidth=3)
+    ax1.text(train_episodes + 5, ax1.get_ylim()[1] * 0.9, 'EVALUATION →', 
+            fontsize=12, color='green', fontweight='bold')
+    
+    # Add compositional task boundaries
+    eval_tasks = get_compositional_tasks()
+    eps_per_eval = eval_results.get("episodes_per_task", 100)
+    for i in range(len(eval_tasks) - 1):
+        boundary = train_episodes + (i + 1) * eps_per_eval
+        ax1.axvline(x=boundary, color='purple', linestyle='--', alpha=0.5, linewidth=1)
+    
+    ax1.axvspan(0, train_episodes, alpha=0.1, color='blue', label='Training Phase')
+    ax1.axvspan(train_episodes, len(all_rewards), alpha=0.1, color='green', label='Evaluation Phase')
+    
+    ax1.set_xlabel('Episodes', fontsize=12)
+    ax1.set_ylabel('Reward', fontsize=12)
+    ax1.set_title('Training (Simple Tasks) → Evaluation (Compositional Tasks)', fontsize=14, fontweight='bold')
+    ax1.legend(loc='upper left')
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot 2: Task success summary
+    ax2 = axes[1]
+    
+    # Training success (approximate from rewards)
+    train_task_names = [t["name"] for t in tasks]
+    train_success = []
+    cumulative = 0
+    for task in tasks:
+        task_rewards = train_results["task_rewards"][cumulative:cumulative + task["duration"]]
+        success_rate = sum(1 for r in task_rewards if r > 0) / len(task_rewards) * 100 if task_rewards else 0
+        train_success.append(success_rate)
+        cumulative += task["duration"]
+    
+    # Evaluation success
+    eval_task_names = list(eval_results["per_task_metrics"].keys())
+    eval_success = [eval_results["per_task_metrics"][t]["success_rate"] * 100 
+                   for t in eval_task_names]
+    
+    # Combined bar plot
+    all_names = train_task_names + eval_task_names
+    all_success = train_success + eval_success
+    colors = ['lightblue'] * len(train_task_names) + ['lightgreen'] * len(eval_task_names)
+    
+    x = range(len(all_names))
+    bars = ax2.bar(x, all_success, color=colors, edgecolor='black')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(all_names, rotation=45, ha='right')
+    ax2.set_ylabel("Success Rate (%)")
+    ax2.set_title("Success Rates: Training (Blue) vs Evaluation (Green)")
+    ax2.set_ylim(0, 100)
+    
+    # Add percentage labels
+    for bar, rate in zip(bars, all_success):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, 
+                f'{rate:.1f}%', ha='center', va='bottom', fontsize=9)
+    
+    ax2.axvline(x=len(train_task_names) - 0.5, color='black', linestyle='-', linewidth=2)
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"✓ Combined results plot saved: {save_path}")
+
+
+# ==================== Training Phase ====================
+
+def run_training_phase(env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
+                       max_episodes=1200, max_steps_per_episode=200):
+    """
+    Run TRAINING phase with simple tasks only.
+    Networks ARE updated during this phase.
     """
     print("\n" + "="*60)
-    print("COMPOSITIONAL WVF AGENT (FIXED - SHARED STATE)")
+    print("TRAINING PHASE (Simple Tasks Only)")
     print("="*60)
-    print("4 feature-specific value functions with SHARED world view")
+    print("Training 4 feature-specific value functions")
     print(f"Max episodes: {max_episodes}")
     print(f"Max steps per episode: {max_steps_per_episode}")
-    print(f"Simple task ratio: {simple_ratio*100:.0f}%")
-    print(f"Selective training: {selective_training}")
     print("="*60 + "\n")
 
-    tasks, eps_per_simple, eps_per_comp = create_task_schedule(max_episodes, simple_ratio)
+    tasks, eps_per_simple = create_task_schedule(max_episodes)
     
-    print(f"Task schedule (SEQUENTIAL):")
-    print(f"  Simple tasks: {eps_per_simple} episodes each")
-    print(f"  Compositional tasks: {eps_per_comp} episodes each")
-    print()
+    print(f"Training schedule:")
+    print(f"  Episodes per simple task: {eps_per_simple}")
     cumulative = 0
     for i, task in enumerate(tasks):
         cumulative += task["duration"]
-        print(f"  Task {i}: {task['name']:12} ({task['type']:13}) episodes {cumulative - task['duration']:4}-{cumulative:4}")
+        print(f"  Task {i}: {task['name']:12} episodes {cumulative - task['duration']:4}-{cumulative:4}")
     print()
-
-    # Load vision model
-    print("Loading cube detector model...")
-    cube_model, cube_device, pos_mean, pos_std = load_cube_detector(
-        'models/advanced_cube_detector.pth', force_cpu=False
-    )
-
-    transform = transforms.Compose([
-        transforms.Resize((128, 128)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
 
     obs, info = env.reset()
     agent.reset()
@@ -368,42 +451,29 @@ def run_compositional_wvf_agent_fixed(env, agent, max_episodes=2000, max_steps_p
     episode_task_rewards = []
     episode_lengths = []
     feature_losses = {f: [] for f in agent.feature_names}
-    task_rewards_log = []
     feature_update_counts = {f: 0 for f in agent.feature_names}
 
     # Exploration
     epsilon = 1.0
     epsilon_end = 0.05
-    epsilon_decay = 0.9995
+    epsilon_decay = 0.995
 
     total_steps = 0
-    total_detections = 0
 
-    for episode in tqdm(range(max_episodes), desc="Training Fixed WVF Agent"):
+    for episode in tqdm(range(max_episodes), desc="Training (Simple Tasks)"):
         step = 0
         episode_reward = 0
         episode_task_reward = 0
         episode_feature_losses = {f: [] for f in agent.feature_names}
         
         current_task, task_idx = get_current_task(episode, tasks)
-        
-        if selective_training:
-            features_to_train = current_task["features"]
-        else:
-            features_to_train = agent.feature_names
-        
-        if hasattr(env, 'set_task'):
-            env.set_task(current_task)
+        features_to_train = current_task["features"]
 
         agent.reset()
 
         detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
         agent.update_from_detection(detection_result)
 
-        if detection_result['detected_objects']:
-            total_detections += len(detection_result['detected_objects'])
-
-        # Get SHARED state for all features
         current_state_features = agent.get_all_state_features()
 
         while step < max_steps_per_episode:
@@ -424,11 +494,7 @@ def run_compositional_wvf_agent_fixed(env, agent, max_episodes=2000, max_steps_p
             
             detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
             agent.update_from_detection(detection_result)
-            
-            if detection_result['detected_objects']:
-                total_detections += len(detection_result['detected_objects'])
 
-            # Get SHARED next state
             next_state_features = agent.get_all_state_features()
 
             experience = [
@@ -439,6 +505,7 @@ def run_compositional_wvf_agent_fixed(env, agent, max_episodes=2000, max_steps_p
                 done
             ]
 
+            # TRAIN the networks
             losses = agent.update_selected_features(experience, features_to_train)
             
             for f, loss in losses.items():
@@ -455,7 +522,6 @@ def run_compositional_wvf_agent_fixed(env, agent, max_episodes=2000, max_steps_p
         episode_rewards.append(episode_reward)
         episode_task_rewards.append(episode_task_reward)
         episode_lengths.append(step)
-        task_rewards_log.append((episode, episode_task_reward, episode_reward, current_task['name']))
 
         for f in agent.feature_names:
             if len(episode_feature_losses[f]) > 0:
@@ -468,7 +534,6 @@ def run_compositional_wvf_agent_fixed(env, agent, max_episodes=2000, max_steps_p
 
     print(f"\n✓ Training complete!")
     print(f"✓ Total steps: {total_steps}")
-    print(f"✓ Total detections: {total_detections}")
     print(f"✓ Final epsilon: {epsilon:.4f}")
     
     print("\nTraining updates per feature:")
@@ -480,17 +545,135 @@ def run_compositional_wvf_agent_fixed(env, agent, max_episodes=2000, max_steps_p
         "task_rewards": episode_task_rewards,
         "lengths": episode_lengths,
         "feature_losses": feature_losses,
-        "task_rewards_log": task_rewards_log,
         "tasks": tasks,
         "final_epsilon": epsilon,
         "feature_update_counts": feature_update_counts,
     }
 
 
+# ==================== Evaluation Phase ====================
+
+def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
+                         episodes_per_task=100, max_steps_per_episode=200):
+    """
+    Run EVALUATION phase with compositional tasks.
+    Networks are NOT updated - only composed via min().
+    """
+    print("\n" + "="*60)
+    print("EVALUATION PHASE (Compositional Tasks - No Training)")
+    print("="*60)
+    print("Evaluating composition of learned value functions")
+    print(f"Episodes per task: {episodes_per_task}")
+    print(f"Max steps per episode: {max_steps_per_episode}")
+    print("="*60 + "\n")
+
+    compositional_tasks = get_compositional_tasks()
+    
+    print("Evaluation tasks:")
+    for task in compositional_tasks:
+        print(f"  {task['name']}: {task['features']}")
+    print()
+
+    # Fixed low epsilon for evaluation (minimal exploration)
+    epsilon = 0.05
+    
+    # Results tracking
+    per_task_metrics = {}
+    per_task_rewards = {}
+    all_rewards = []
+    all_lengths = []
+
+    obs, info = env.reset()
+    agent.reset()
+
+    for task in compositional_tasks:
+        task_name = task["name"]
+        print(f"\nEvaluating: {task_name}")
+        
+        task_rewards = []
+        task_lengths = []
+        task_successes = 0
+        
+        for episode in tqdm(range(episodes_per_task), desc=f"  {task_name}"):
+            step = 0
+            episode_reward = 0
+            episode_success = False
+            
+            agent.reset()
+            
+            detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
+            agent.update_from_detection(detection_result)
+
+            while step < max_steps_per_episode:
+                # Use composed Q-values (NO TRAINING)
+                action = agent.sample_action_with_wvf(obs, task, epsilon=epsilon)
+
+                obs, env_reward, terminated, truncated, info = env.step(action)
+                step += 1
+                done = terminated or truncated
+
+                # Check task satisfaction
+                if check_task_satisfaction(info, task):
+                    episode_success = True
+                    episode_reward += env_reward
+                
+                # Update detection (for next action selection)
+                detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
+                agent.update_from_detection(detection_result)
+
+                # NO TRAINING - just update state for action selection
+                # We don't call agent.update_selected_features()
+
+                if done:
+                    break
+
+            task_rewards.append(episode_reward)
+            task_lengths.append(step)
+            if episode_success:
+                task_successes += 1
+            
+            all_rewards.append(episode_reward)
+            all_lengths.append(step)
+
+            obs, info = env.reset()
+            agent.reset()
+
+        # Compute metrics for this task
+        per_task_metrics[task_name] = {
+            "success_rate": task_successes / episodes_per_task,
+            "avg_reward": np.mean(task_rewards),
+            "avg_length": np.mean(task_lengths),
+            "total_successes": task_successes,
+        }
+        per_task_rewards[task_name] = task_rewards
+        
+        print(f"  Success rate: {task_successes}/{episodes_per_task} = {task_successes/episodes_per_task*100:.1f}%")
+        print(f"  Avg reward: {np.mean(task_rewards):.3f}")
+        print(f"  Avg length: {np.mean(task_lengths):.1f}")
+
+    print("\n" + "="*60)
+    print("EVALUATION SUMMARY")
+    print("="*60)
+    for task_name, metrics in per_task_metrics.items():
+        print(f"  {task_name:12}: {metrics['success_rate']*100:5.1f}% success, "
+              f"avg reward {metrics['avg_reward']:.3f}")
+    
+    overall_success = sum(m["total_successes"] for m in per_task_metrics.values())
+    total_episodes = episodes_per_task * len(compositional_tasks)
+    print(f"\n  OVERALL: {overall_success}/{total_episodes} = {overall_success/total_episodes*100:.1f}%")
+
+    return {
+        "per_task_metrics": per_task_metrics,
+        "per_task_rewards": per_task_rewards,
+        "all_rewards": all_rewards,
+        "all_lengths": all_lengths,
+        "episodes_per_task": episodes_per_task,
+    }
+
+
 # ==================== Main ====================
 
 if __name__ == "__main__":
-    # Import environment (adjust path as needed)
     from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
     from utils import generate_save_path
     
@@ -500,14 +683,14 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # UPDATED model kwargs with new state dimension
+    # Model kwargs with shared state dimension
     model_kwargs = {
-        'state_dim': 682,    # 4*13*13 + 2 + 4 = 682 (was 175)
+        'state_dim': 682,    # 4*13*13 + 2 + 4 = 682
         'num_actions': 3,
         'hidden_dim': 128
     }
     
-    # Create FIXED agent
+    # Create agent
     agent = CompositionalWVFAgent(
         env=env,
         wvf_model_class=WVF_MLP,
@@ -520,36 +703,38 @@ if __name__ == "__main__":
         confidence_threshold=0.5
     )
     
-    print(f"\nFIXED Agent created with {len(agent.feature_names)} feature networks:")
+    print(f"\nAgent created with {len(agent.feature_names)} feature networks:")
     print(f"  State dimension: {model_kwargs['state_dim']} (shared across all features)")
     for f in agent.feature_names:
         print(f"  - {f}: {sum(p.numel() for p in agent.wvf_models[f].parameters())} parameters")
     print()
     
-    # Run training
-    results = run_compositional_wvf_agent_fixed(
-        env,
-        agent,
-        max_episodes=2000,
-        max_steps_per_episode=200,
-        simple_ratio=0.6,
-        selective_training=True
-    )
-    
-    # Plot results
-    plot_task_rewards(
-        results["task_rewards_log"], 
-        results["tasks"], 
-        4000,
-        save_path=generate_save_path('compositional_wvf_fixed/task_rewards.png')
+    # Load vision model
+    print("Loading cube detector model...")
+    cube_model, cube_device, pos_mean, pos_std = load_cube_detector(
+        'models/advanced_cube_detector.pth', force_cpu=False
     )
 
-    plot_final_results(
-        results,
-        save_path=generate_save_path('compositional_wvf_fixed/final_results.png')
+    transform = transforms.Compose([
+        transforms.Resize((128, 128)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    # ==================== TRAINING PHASE ====================
+    train_results = run_training_phase(
+        env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
+        max_episodes=8000,  # Simple tasks only
+        max_steps_per_episode=200,
     )
     
-    # Save checkpoints
+    # Plot training results
+    plot_training_results(
+        train_results,
+        save_path=generate_save_path('compositional_wvf_fixed/training_results.png')
+    )
+    
+    # Save model checkpoints AFTER training
     print("\nSaving model checkpoints...")
     for feature in agent.feature_names:
         checkpoint_path = generate_save_path(f"compositional_wvf_fixed/wvf_{feature}.pth")
@@ -559,9 +744,31 @@ if __name__ == "__main__":
             'update_count': agent.update_counts[feature],
         }, checkpoint_path)
         print(f"  ✓ Saved {feature} model: {checkpoint_path}")
+
+    # ==================== EVALUATION PHASE ====================
+    eval_results = run_evaluation_phase(
+        env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
+        episodes_per_task=500,  # 100 episodes per compositional task
+        max_steps_per_episode=200,
+    )
     
+    # Plot evaluation results
+    plot_evaluation_results(
+        eval_results,
+        save_path=generate_save_path('compositional_wvf_fixed/evaluation_results.png')
+    )
+    
+    # Plot combined results
+    plot_combined_results(
+        train_results, eval_results,
+        save_path=generate_save_path('compositional_wvf_fixed/combined_results.png')
+    )
+    
+    # Cleanup
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    print("\n✓ Training complete!")
+    print("\n" + "="*60)
+    print("✓ TRAINING AND EVALUATION COMPLETE!")
+    print("="*60)
