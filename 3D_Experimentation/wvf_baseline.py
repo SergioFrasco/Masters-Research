@@ -38,6 +38,8 @@ from env.discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
 from train_vision import CubeDetector
 from utils import generate_save_path
 
+from diagnose_wvf import diagnose_composition, check_q_value_scales, diagnose_value_maps
+
 
 # ==================== Task System ====================
 
@@ -469,6 +471,7 @@ def run_training_phase(env, agent, cube_model, cube_device, transform, pos_mean,
         current_task, task_idx = get_current_task(episode, tasks)
         features_to_train = current_task["features"]
 
+        env.set_task(current_task)
         agent.reset()
 
         detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
@@ -554,7 +557,8 @@ def run_training_phase(env, agent, cube_model, cube_device, transform, pos_mean,
 # ==================== Evaluation Phase ====================
 
 def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
-                         episodes_per_task=100, max_steps_per_episode=200):
+                         episodes_per_task=100, max_steps_per_episode=200, 
+                         run_diagnostics=True):
     """
     Run EVALUATION phase with compositional tasks.
     Networks are NOT updated - only composed via min().
@@ -583,6 +587,40 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
     all_rewards = []
     all_lengths = []
 
+    # =========================================================
+    # RUN DIAGNOSTICS ONCE BEFORE EVALUATION (if enabled)
+    # =========================================================
+    if run_diagnostics:
+        print("\n" + "="*60)
+        print("RUNNING DIAGNOSTICS")
+        print("="*60)
+        
+        # Check Q-value scales across all features
+        check_q_value_scales(agent)
+        
+        # Run detailed diagnostic for each compositional task
+        for task in compositional_tasks:
+            # Reset for fresh episode
+            obs, info = env.reset()
+            agent.reset()
+            
+            # Update agent's observation
+            detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
+            agent.update_from_detection(detection_result)
+            
+            # Run diagnostic for this task
+            diagnose_composition(agent, task, obs, info)
+            
+            # Visualize value maps (saves to file)
+            diagnose_value_maps(agent, task)
+        
+        print("\n" + "="*60)
+        print("DIAGNOSTICS COMPLETE - Starting Evaluation")
+        print("="*60 + "\n")
+
+    # =========================================================
+    # MAIN EVALUATION LOOP
+    # =========================================================
     obs, info = env.reset()
     agent.reset()
 
@@ -594,6 +632,9 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
         task_lengths = []
         task_successes = 0
         
+        # Track diagnostic info for first few episodes
+        no_goals_count = 0
+        
         for episode in tqdm(range(episodes_per_task), desc=f"  {task_name}"):
             step = 0
             episode_reward = 0
@@ -601,8 +642,15 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
             
             agent.reset()
             
+            # Initial detection
             detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
             agent.update_from_detection(detection_result)
+            
+            # Check if we have valid goals (diagnostic)
+            if episode < 5:  # Only check first 5 episodes
+                goals = agent._get_goals_for_task(task)
+                if len(goals) == 0:
+                    no_goals_count += 1
 
             while step < max_steps_per_episode:
                 # Use composed Q-values (NO TRAINING)
@@ -621,9 +669,6 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
                 detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
                 agent.update_from_detection(detection_result)
 
-                # NO TRAINING - just update state for action selection
-                # We don't call agent.update_selected_features()
-
                 if done:
                     break
 
@@ -636,7 +681,12 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
             all_lengths.append(step)
 
             obs, info = env.reset()
-            agent.reset()
+            # Note: agent.reset() happens at start of next episode
+
+        # Warn if goals were missing
+        if no_goals_count > 0:
+            print(f"  ⚠ WARNING: {no_goals_count}/5 initial episodes had NO valid goals!")
+            print(f"    This suggests vision/detection issues for {task_name}")
 
         # Compute metrics for this task
         per_task_metrics[task_name] = {
@@ -669,7 +719,6 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
         "all_lengths": all_lengths,
         "episodes_per_task": episodes_per_task,
     }
-
 
 # ==================== Main ====================
 
@@ -724,7 +773,7 @@ if __name__ == "__main__":
     # ==================== TRAINING PHASE ====================
     train_results = run_training_phase(
         env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
-        max_episodes=8000,  # Simple tasks only
+        max_episodes=1000,  # Simple tasks only
         max_steps_per_episode=200,
     )
     
@@ -748,7 +797,7 @@ if __name__ == "__main__":
     # ==================== EVALUATION PHASE ====================
     eval_results = run_evaluation_phase(
         env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
-        episodes_per_task=500,  # 100 episodes per compositional task
+        episodes_per_task=100,  # 100 episodes per compositional task
         max_steps_per_episode=200,
     )
     
