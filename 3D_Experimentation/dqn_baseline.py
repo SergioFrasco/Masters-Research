@@ -23,10 +23,9 @@ import time
 import gc
 import torch
 
-
+# Import your environment and agent
 from env import DiscreteMiniWorldWrapper
 from agents import DQNAgent3D
-from utils import generate_save_path
 
 
 # ============================================================================
@@ -111,6 +110,11 @@ def create_training_schedule(total_episodes, shuffle=True):
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+def generate_save_path(filename):
+    """Generate save path"""
+    os.makedirs("results_dqn", exist_ok=True)
+    return os.path.join("results_dqn", filename)
 
 
 def plot_training_and_evaluation(training_history, eval_results, save_path, window=100):
@@ -337,8 +341,19 @@ def plot_loss_detailed(episode_losses, save_path, window=100):
 # ============================================================================
 
 def train_dqn_simple_tasks(env, agent, total_episodes=5000, max_steps=200, 
-                           save_interval=1000, verbose=True):
-    """Train DQN agent on SIMPLE tasks ONLY."""
+                           save_interval=1000, verbose=True,
+                           step_penalty=-0.005, wrong_object_penalty=-0.1):
+    """
+    Train DQN agent on SIMPLE tasks ONLY.
+    
+    Uses reward shaping to help learning:
+    - step_penalty: Small negative reward each step (encourages efficiency)
+    - wrong_object_penalty: Penalty for contacting wrong object (encourages selectivity)
+    
+    Tracks two types of rewards:
+    - shaped_reward: What DQN learns from (includes shaping)
+    - true_reward: Task success only (for fair plotting/comparison)
+    """
     
     print("\n" + "="*60)
     print("TRAINING DQN ON SIMPLE TASKS ONLY")
@@ -346,13 +361,15 @@ def train_dqn_simple_tasks(env, agent, total_episodes=5000, max_steps=200,
     print(f"Total episodes: {total_episodes}")
     print(f"Max steps per episode: {max_steps}")
     print(f"Simple tasks: {[t['name'] for t in SIMPLE_TASKS]}")
+    print(f"Reward shaping: step_penalty={step_penalty}, wrong_object_penalty={wrong_object_penalty}")
     print("="*60 + "\n")
     
     # Create training schedule
     training_schedule = create_training_schedule(total_episodes, shuffle=True)
     
     # Tracking
-    episode_rewards = []
+    episode_rewards = []       # TRUE rewards (task success only) - for plotting
+    episode_shaped_rewards = [] # Shaped rewards (what DQN sees) - for debugging
     episode_lengths = []
     episode_losses = []
     task_performance = {task['name']: [] for task in SIMPLE_TASKS}
@@ -362,7 +379,8 @@ def train_dqn_simple_tasks(env, agent, total_episodes=5000, max_steps=200,
         env.set_task(current_task)
         
         obs, info = env.reset()
-        total_reward = 0
+        true_reward_total = 0      # For plotting (task success only)
+        shaped_reward_total = 0    # For debugging (what DQN learns from)
         episode_loss = []
         
         for step in range(max_steps):
@@ -370,17 +388,35 @@ def train_dqn_simple_tasks(env, agent, total_episodes=5000, max_steps=200,
             next_obs, env_reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             
-            # Task-based reward
-            task_satisfied = check_task_satisfaction(info, current_task)
-            reward = 1.0 if task_satisfied else 0.0
+            # Get contacted object (if any)
+            contacted_object = info.get('contacted_object', None)
             
-            # Store and train
-            agent.remember(obs, action, reward, next_obs, done)
+            # Check task satisfaction
+            task_satisfied = check_task_satisfaction(info, current_task)
+            
+            # === TRUE REWARD (for plotting) ===
+            true_reward = 1.0 if task_satisfied else 0.0
+            
+            # === SHAPED REWARD (for DQN learning) ===
+            if task_satisfied:
+                # Success! Big positive reward
+                shaped_reward = 1.0
+            elif contacted_object is not None:
+                # Contacted wrong object - penalty to learn selectivity
+                shaped_reward = wrong_object_penalty
+            else:
+                # Normal step - small penalty to encourage efficiency
+                shaped_reward = step_penalty
+            
+            # Store shaped reward for DQN training
+            agent.remember(obs, action, shaped_reward, next_obs, done)
             loss = agent.train_step()
             if loss > 0:
                 episode_loss.append(loss)
             
-            total_reward += reward
+            # Track both reward types
+            true_reward_total += true_reward
+            shaped_reward_total += shaped_reward
             obs = next_obs
             
             if done:
@@ -388,17 +424,20 @@ def train_dqn_simple_tasks(env, agent, total_episodes=5000, max_steps=200,
         
         agent.decay_epsilon()
         
-        episode_rewards.append(total_reward)
+        # Store metrics
+        episode_rewards.append(true_reward_total)  # Plot this (fair comparison)
+        episode_shaped_rewards.append(shaped_reward_total)  # Debug info
         episode_lengths.append(step + 1)
         episode_losses.append(np.mean(episode_loss) if episode_loss else 0.0)
-        task_performance[current_task['name']].append(total_reward)
+        task_performance[current_task['name']].append(true_reward_total)
         
         # Logging
         if verbose and (episode + 1) % 500 == 0:
-            recent_reward = np.mean(episode_rewards[-500:])
+            recent_true_reward = np.mean(episode_rewards[-500:])
             recent_success = np.mean([r > 0 for r in episode_rewards[-500:]])
-            print(f"Episode {episode+1}: Avg Reward={recent_reward:.3f}, "
-                  f"Success={recent_success:.1%}, Epsilon={agent.epsilon:.3f}")
+            recent_length = np.mean(episode_lengths[-500:])
+            print(f"Episode {episode+1}: Success={recent_success:.1%}, "
+                  f"Avg Length={recent_length:.1f}, Epsilon={agent.epsilon:.3f}")
         
         # Checkpoints
         if (episode + 1) % save_interval == 0:
@@ -415,7 +454,8 @@ def train_dqn_simple_tasks(env, agent, total_episodes=5000, max_steps=200,
         print(f"  {task_name}: {success_rate:.1%} success")
     
     return {
-        "episode_rewards": episode_rewards,
+        "episode_rewards": episode_rewards,           # TRUE rewards (for plotting)
+        "episode_shaped_rewards": episode_shaped_rewards,  # Shaped rewards (for debug)
         "episode_lengths": episode_lengths,
         "episode_losses": episode_losses,
         "task_performance": task_performance,
@@ -613,12 +653,15 @@ def run_dqn_experiment(
     return all_results
 
 
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
 
 if __name__ == "__main__":
     results = run_dqn_experiment(
         env_size=10,
         training_episodes=8000,
-        eval_episodes_per_task=500,
+        eval_episodes_per_task=100,
         max_steps=200,
         learning_rate=0.0001,
         gamma=0.99,
