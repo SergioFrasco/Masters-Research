@@ -603,6 +603,8 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
             # Reset for fresh episode
             obs, info = env.reset()
             agent.reset()
+
+            env.set_task(task)
             
             # Update agent's observation
             detection_result = detect_cube(cube_model, obs, cube_device, transform, pos_mean, pos_std)
