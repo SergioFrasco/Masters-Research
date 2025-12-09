@@ -617,7 +617,7 @@ def run_dqn_experiment(
 if __name__ == "__main__":
     results = run_dqn_experiment(
         env_size=10,
-        training_episodes=4000,
+        training_episodes=8000,
         eval_episodes_per_task=500,
         max_steps=200,
         learning_rate=0.0001,

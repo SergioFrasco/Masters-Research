@@ -202,7 +202,7 @@ class DQNAgent3D:
     def __init__(self, env, learning_rate=0.0001, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.9995,
                  memory_size=50000, batch_size=32, target_update_freq=1000,
-                 hidden_size=256, use_dueling=False):
+                 hidden_size=256, use_dueling=True):
         
         self.env = env
         self.action_dim = 3  # turn_left, turn_right, move_forward
