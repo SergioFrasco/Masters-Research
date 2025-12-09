@@ -642,6 +642,7 @@ def run_evaluation_phase(env, agent, cube_model, cube_device, transform, pos_mea
             episode_reward = 0
             episode_success = False
             
+            env.set_task(task)  
             agent.reset()
             
             # Initial detection
@@ -746,7 +747,7 @@ if __name__ == "__main__":
         env=env,
         wvf_model_class=WVF_MLP,
         model_kwargs=model_kwargs,
-        lr=0.0005,
+        lr=0.00005,
         gamma=0.99,
         device=device,
         grid_size=env.size,
@@ -775,7 +776,7 @@ if __name__ == "__main__":
     # ==================== TRAINING PHASE ====================
     train_results = run_training_phase(
         env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
-        max_episodes=1000,  # Simple tasks only
+        max_episodes=4000,  # Simple tasks only
         max_steps_per_episode=200,
     )
     
@@ -799,7 +800,7 @@ if __name__ == "__main__":
     # ==================== EVALUATION PHASE ====================
     eval_results = run_evaluation_phase(
         env, agent, cube_model, cube_device, transform, pos_mean, pos_std,
-        episodes_per_task=100,  # 100 episodes per compositional task
+        episodes_per_task=200,  # 100 episodes per compositional task
         max_steps_per_episode=200,
     )
     
