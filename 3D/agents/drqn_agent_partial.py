@@ -19,7 +19,7 @@ import random
 class DRQN(nn.Module):
     """Deep Recurrent Q-Network with LSTM"""
     
-    def __init__(self, input_size, hidden_size=128, lstm_hidden=128, 
+    def __init__(self, input_size, hidden_size=128, lstm_hidden=64, 
                  num_lstm_layers=1, output_size=3):
         super(DRQN, self).__init__()
         
@@ -169,11 +169,11 @@ class DRQNAgentPartial:
     The ONLY advantage DRQN should have is the LSTM memory.
     """
     
-    def __init__(self, env, learning_rate=0.001, gamma=0.99, epsilon_start=1.0,
+    def __init__(self, env, learning_rate=0.0005, gamma=0.99, epsilon_start=1.0,
                  epsilon_end=0.05, epsilon_decay=0.9995, memory_size=10000,
                  batch_size=32, target_update_freq=100, hidden_dim=128,
-                 lstm_hidden=128, num_lstm_layers=1, sequence_length=8,
-                 burn_in_length=2, use_double_dqn=True, 
+                 lstm_hidden=64, num_lstm_layers=1, sequence_length=8,
+                 burn_in_length=4, use_double_dqn=True, 
                  use_soft_update=False, tau=0.005):
         """
         Args:

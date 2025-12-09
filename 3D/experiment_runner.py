@@ -284,7 +284,7 @@ class ExperimentRunner3D:
         
         # Initialize DQN agent
         agent = DQNAgentPartial(env, 
-                               learning_rate=0.001,
+                               learning_rate=0.0005,
                                gamma=0.99,
                                epsilon_start=1.0,
                                epsilon_end=0.05,
@@ -430,10 +430,10 @@ class ExperimentRunner3D:
             batch_size=32,                # Same as DQN
             target_update_freq=100,       # Same as DQN
             hidden_dim=128,               # Same as DQN
-            lstm_hidden=128,              # DRQN-specific (LSTM is the only difference)
+            lstm_hidden=64,              # DRQN-specific (LSTM is the only difference)
             num_lstm_layers=1,
             sequence_length=8,            # DRQN-specific
-            burn_in_length=2,             # DRQN-specific
+            burn_in_length=4,             # DRQN-specific
             use_double_dqn=True,          # Can keep this (legitimate improvement)
             use_soft_update=False,        # Use HARD updates like DQN for fairness
         )
@@ -1282,14 +1282,18 @@ class ExperimentRunner3D:
             sr_qlearning_results = self.run_sr_qlearning_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
 
             # Run SR SARSA
-            sr_sarsa_results = self.run_sr_sarsa_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
+            # sr_sarsa_results = self.run_sr_sarsa_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
 
-            # Run WVF
-            wvf_results = self.run_wvf_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
+            # # Run WVF
+            # wvf_results = self.run_wvf_experiment(episodes=episodes, max_steps=max_steps, seed=seed)
 
             # Store results
-            algorithms = ['DQN', 'SR Q-Learning', 'SR SARSA', 'WVF']
-            results_list = [dqn_results, sr_qlearning_results, sr_sarsa_results, wvf_results]
+            # algorithms = ['DQN', 'SR Q-Learning', 'SR SARSA', 'WVF']
+            # results_list = [dqn_results, sr_qlearning_results, sr_sarsa_results, wvf_results]
+
+                        # Store results
+            algorithms = ['DQN', 'SR Q-Learning']
+            results_list = [dqn_results, sr_qlearning_results]
             
             # Optionally include DRQN
             if include_drqn:
@@ -1604,7 +1608,7 @@ def main():
     runner = ExperimentRunner3D(env_size=10, num_seeds=2)
 
     # Run experiments (set include_drqn=False to skip DRQN)
-    results = runner.run_comparison_experiment(episodes=4000, max_steps=200, include_drqn=True)
+    results = runner.run_comparison_experiment(episodes=3000, max_steps=200, include_drqn=True)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
