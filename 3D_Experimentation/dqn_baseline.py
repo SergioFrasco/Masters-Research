@@ -91,18 +91,22 @@ def check_task_satisfaction(info, task):
     return False
 
 
-
-
 # ============================================================================
 # TRAINING FUNCTION FOR SINGLE TASK
 # ============================================================================
 
 def train_single_task_dqn(env, task, episodes=2000, max_steps=200, 
                           learning_rate=0.0001, gamma=0.99,
+                          epsilon_start=1.0, epsilon_end=0.05,
                           epsilon_decay=0.9995, verbose=True,
                           step_penalty=-0.005, wrong_object_penalty=-0.1):
     """
     Train a fresh DQN agent on a SINGLE task.
+    
+    IMPORTANT: Each task gets a COMPLETELY FRESH agent with:
+    - Fresh neural network weights
+    - Fresh replay buffer (empty)
+    - Fresh epsilon starting at epsilon_start
     
     Returns:
         agent: Trained DQN agent
@@ -113,14 +117,18 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
     print(f"\n{'='*60}")
     print(f"TRAINING DQN FOR TASK: {task_name.upper()}")
     print(f"{'='*60}")
+    print(f"  Epsilon: {epsilon_start} -> {epsilon_end} (decay={epsilon_decay})")
+    print(f"  Episodes: {episodes}, Max steps: {max_steps}")
+    print(f"  Fresh agent with empty replay buffer")
+    print(f"{'='*60}")
     
-    # Create fresh agent for this task
+    # Create COMPLETELY FRESH agent for this task
     agent = DQNAgent3D(
         env,
         learning_rate=learning_rate,
         gamma=gamma,
-        epsilon_start=1.0,
-        epsilon_end=0.05,
+        epsilon_start=epsilon_start,
+        epsilon_end=epsilon_end,
         epsilon_decay=epsilon_decay,
         memory_size=50000,
         batch_size=32,
@@ -129,6 +137,10 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
         use_dueling=True
     )
     
+    # Verify agent is fresh
+    assert agent.epsilon == epsilon_start, f"Epsilon should be {epsilon_start}, got {agent.epsilon}"
+    assert len(agent.memory) == 0, f"Replay buffer should be empty, got {len(agent.memory)}"
+    
     # Set the task (stays constant for all episodes)
     env.set_task(task)
     
@@ -136,6 +148,7 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
     episode_rewards = []
     episode_lengths = []
     episode_losses = []
+    episode_epsilons = []  # Track epsilon over time
     
     for episode in tqdm(range(episodes), desc=f"Training '{task_name}'"):
         obs, info = env.reset()
@@ -172,6 +185,8 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
             if done:
                 break
         
+        # Track epsilon BEFORE decay
+        episode_epsilons.append(agent.epsilon)
         agent.decay_epsilon()
         
         episode_rewards.append(true_reward_total)
@@ -193,6 +208,8 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
     final_success = np.mean([r > 0 for r in episode_rewards[-100:]])
     print(f"\nTask '{task_name}' training complete!")
     print(f"  Final success rate (last 100 eps): {final_success:.1%}")
+    print(f"  Final epsilon: {agent.epsilon:.4f}")
+    print(f"  Replay buffer size: {len(agent.memory)}")
     print(f"  Model saved to: {model_path}")
     
     return agent, {
@@ -200,6 +217,7 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
         "episode_rewards": episode_rewards,
         "episode_lengths": episode_lengths,
         "episode_losses": episode_losses,
+        "episode_epsilons": episode_epsilons,
         "final_epsilon": agent.epsilon,
         "final_success_rate": final_success
     }
@@ -487,7 +505,7 @@ def plot_summary(all_histories, simple_results, comp_results, save_path):
     ax_simple.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5)
     ax_simple.grid(True, alpha=0.3, axis='y')
     
-
+    # Compositional results (using color model only)
     ax_comp = fig.add_subplot(gs[1, 2:])
     comp_task_names = list(comp_results.keys())
     comp_success = [comp_results[t]['success_rate'] for t in comp_task_names]
@@ -499,7 +517,7 @@ def plot_summary(all_histories, simple_results, comp_results, save_path):
                     f'{val:.0%}\n({model})', ha='center', va='bottom', fontsize=8)
     
     ax_comp.set_ylabel('Success Rate')
-    ax_comp.set_title('Compositional Tasks')
+    ax_comp.set_title('Compositional Tasks\n(Using color model only)')
     ax_comp.set_ylim([0, 1.15])
     ax_comp.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Expected (~50%)')
     ax_comp.tick_params(axis='x', rotation=45)
@@ -519,13 +537,13 @@ def plot_summary(all_histories, simple_results, comp_results, save_path):
     ╠══════════════════════════════════════════════════════════════════════════════════════╣
     ║                                                                                       ║
     ║  APPROACH: Train 4 independent DQN models, one per simple task                       ║
-    ║            For compositional tasks, use the COLOUR model (red/blue)                   ║
+    ║            For compositional tasks, use the COLOR model (red/blue)                   ║
     ║                                                                                       ║
     ║  SIMPLE TASKS (each model on its own task):                                          ║
     ║    • red:    {simple_results['red']['success_rate']:.1%}    • blue:   {simple_results['blue']['success_rate']:.1%}    • box:    {simple_results['box']['success_rate']:.1%}    • sphere: {simple_results['sphere']['success_rate']:.1%}     ║
     ║    • Average: {avg_simple:.1%}                                                                    ║
     ║                                                                                       ║
-    ║  COMPOSITIONAL TASKS (using colour model):                                            ║
+    ║  COMPOSITIONAL TASKS (using color model):                                            ║
     ║    • red_box:    {comp_results['red_box']['success_rate']:.1%} (red model)                                                  ║
     ║    • red_sphere: {comp_results['red_sphere']['success_rate']:.1%} (red model)                                                  ║
     ║    • blue_box:   {comp_results['blue_box']['success_rate']:.1%} (blue model)                                                  ║
@@ -534,7 +552,7 @@ def plot_summary(all_histories, simple_results, comp_results, save_path):
     ║                                                                                       ║
     ║  GENERALIZATION GAP: {avg_simple - avg_comp:.1%} drop from simple to compositional               ║
     ║                                                                                       ║
-    ║  KEY INSIGHT: The colour model finds ANY object of that colour. Since there's a        ║
+    ║  KEY INSIGHT: The color model finds ANY object of that color. Since there's a        ║
     ║               red_box and red_sphere, it has ~50% chance of finding the right one.   ║
     ║               This shows DQN cannot compose features - it only learned "go to red".  ║
     ╚══════════════════════════════════════════════════════════════════════════════════════╝
@@ -598,6 +616,8 @@ def run_separate_models_experiment(
             max_steps=max_steps,
             learning_rate=learning_rate,
             gamma=gamma,
+            epsilon_start=1.0,
+            epsilon_end=0.05,
             epsilon_decay=epsilon_decay,
             verbose=True
         )
@@ -692,11 +712,11 @@ def run_separate_models_experiment(
 if __name__ == "__main__":
     results = run_separate_models_experiment(
         env_size=10,
-        episodes_per_task=1000,  # 2000 episodes per task
+        episodes_per_task=3000,  # More episodes for better learning
         eval_episodes=100,
         max_steps=200,
         learning_rate=0.0001,
         gamma=0.99,
-        epsilon_decay=0.9995,
+        epsilon_decay=0.999,  # Slower decay: 0.999^3000 ≈ 0.05
         seed=42
     )
