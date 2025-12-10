@@ -1,15 +1,11 @@
 """
-DQN Agent for MiniWorld 3D Environment
+DQN Agent for MiniWorld 3D Environment - STABLE VERSION
 
-This agent learns from raw RGB observations and is trained ONLY on simple tasks.
-It will struggle with compositional tasks because it has no factored representation
-of object features (color vs shape).
-
-Key Design Decisions:
-1. Uses CNN to process raw RGB images from MiniWorld
-2. Trained ONLY on simple tasks (red, blue, box, sphere)
-3. Evaluated on compositional tasks (red_box, blue_box, etc.)
-4. No task encoding - the agent must learn purely from visual observations and rewards
+Key improvements for training stability:
+1. Soft target updates (Polyak averaging) instead of hard updates
+2. Gradient clipping
+3. Better weight initialization
+4. Optional double DQN to reduce overestimation
 """
 
 import numpy as np
@@ -24,13 +20,6 @@ import random
 class DQN3D(nn.Module):
     """
     Deep Q-Network for 3D MiniWorld environment using CNN on RGB images.
-    
-    Architecture:
-    - 3 convolutional layers for feature extraction
-    - 2 fully connected layers for Q-value estimation
-    
-    Input: RGB image (3, H, W)
-    Output: Q-values for each action (3 actions: turn_left, turn_right, move_forward)
     """
     
     def __init__(self, input_shape=(3, 60, 80), action_size=3, hidden_size=256):
@@ -83,16 +72,14 @@ class DQN3D(nn.Module):
     
     def forward(self, x):
         """Forward pass through the network"""
-        # x shape: (batch, channels, height, width)
         x = self.conv(x)
-        x = x.view(x.size(0), -1)  # Flatten
+        x = x.view(x.size(0), -1)
         return self.fc(x)
 
 
 class DuelingDQN3D(nn.Module):
     """
     Dueling DQN architecture - separates value and advantage streams.
-    Often performs better than vanilla DQN.
     """
     
     def __init__(self, input_shape=(3, 60, 80), action_size=3, hidden_size=256):
@@ -158,12 +145,9 @@ class DuelingDQN3D(nn.Module):
 
 
 class ReplayBuffer:
-    """
-    Experience replay buffer for DQN training.
-    Stores transitions and samples random batches for training.
-    """
+    """Experience replay buffer for DQN training."""
     
-    def __init__(self, capacity=50000):
+    def __init__(self, capacity=100000):
         self.buffer = deque(maxlen=capacity)
     
     def push(self, state, action, reward, next_state, done):
@@ -188,21 +172,22 @@ class ReplayBuffer:
 
 class DQNAgent3D:
     """
-    DQN Agent for MiniWorld 3D environment.
+    STABLE DQN Agent for MiniWorld 3D environment.
     
-    This agent:
-    1. Processes raw RGB observations through a CNN
-    2. Uses epsilon-greedy exploration
-    3. Learns via experience replay and target network
-    
-    Key limitation: It learns a single entangled representation,
-    so it cannot compose features for compositional tasks.
+    Key stability features:
+    1. Soft target updates (tau parameter) - gradual target network updates
+    2. Double DQN (optional) - reduces Q-value overestimation
+    3. Gradient clipping - prevents exploding gradients
+    4. Huber loss - more robust to outliers than MSE
     """
     
     def __init__(self, env, learning_rate=0.0001, gamma=0.99,
-                 epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.9995,
-                 memory_size=50000, batch_size=32, target_update_freq=1000,
-                 hidden_size=256, use_dueling=True):
+                 epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999,
+                 memory_size=100000, batch_size=64, target_update_freq=1,
+                 hidden_size=256, use_dueling=True,
+                 tau=0.005,           # Soft update coefficient (0.005 = slow, stable updates)
+                 use_double_dqn=True, # Use Double DQN to reduce overestimation
+                 grad_clip=10.0):     # Gradient clipping threshold
         
         self.env = env
         self.action_dim = 3  # turn_left, turn_right, move_forward
@@ -217,9 +202,15 @@ class DQNAgent3D:
         self.target_update_freq = target_update_freq
         self.learning_rate = learning_rate
         
+        # STABILITY PARAMETERS
+        self.tau = tau                      # Soft update coefficient
+        self.use_double_dqn = use_double_dqn
+        self.grad_clip = grad_clip
+        
         # Device setup
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"DQN Agent using device: {self.device}")
+        print(f"Stability settings: tau={tau}, double_dqn={use_double_dqn}, grad_clip={grad_clip}")
         
         # Get observation shape from environment
         sample_obs = env.reset()[0]
@@ -229,9 +220,9 @@ class DQNAgent3D:
             sample_img = sample_obs
         
         # Determine input shape (C, H, W)
-        if sample_img.shape[0] in [3, 4]:  # Already (C, H, W)
+        if sample_img.shape[0] in [3, 4]:
             self.obs_shape = (3, sample_img.shape[1], sample_img.shape[2])
-        else:  # (H, W, C)
+        else:
             self.obs_shape = (3, sample_img.shape[0], sample_img.shape[1])
         
         print(f"Observation shape: {self.obs_shape}")
@@ -254,7 +245,7 @@ class DQNAgent3D:
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()
         
-        # Optimizer
+        # Optimizer with slightly lower learning rate for stability
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
         
         # Replay buffer
@@ -268,32 +259,35 @@ class DQNAgent3D:
         total_params = sum(p.numel() for p in self.q_network.parameters())
         print(f"Total network parameters: {total_params:,}")
     
-    def preprocess_obs(self, obs):
+    def soft_update_target_network(self):
         """
-        Convert observation to tensor suitable for CNN.
+        Soft update target network using Polyak averaging:
+        θ_target = τ * θ_online + (1 - τ) * θ_target
         
-        Input: Raw observation from environment (dict with 'image' or raw array)
-        Output: Tensor of shape (C, H, W) normalized to [0, 1]
+        This is much more stable than hard updates!
         """
-        # Extract image from observation
+        for target_param, online_param in zip(self.target_network.parameters(), 
+                                               self.q_network.parameters()):
+            target_param.data.copy_(
+                self.tau * online_param.data + (1.0 - self.tau) * target_param.data
+            )
+    
+    def preprocess_obs(self, obs):
+        """Convert observation to tensor suitable for CNN."""
         if isinstance(obs, dict) and 'image' in obs:
             img = obs['image']
         else:
             img = obs
         
-        # Convert to numpy if needed
         if isinstance(img, torch.Tensor):
             img = img.numpy()
         
-        # Ensure correct format (H, W, C) -> (C, H, W)
         if isinstance(img, np.ndarray):
-            # Check if already (C, H, W)
             if img.shape[0] in [3, 4]:
-                pass  # Already correct
-            else:  # (H, W, C)
+                pass
+            else:
                 img = np.transpose(img, (2, 0, 1))
             
-            # Normalize to [0, 1]
             if img.dtype == np.uint8:
                 img = img.astype(np.float32) / 255.0
             elif img.max() > 1.0:
@@ -301,31 +295,19 @@ class DQNAgent3D:
             else:
                 img = img.astype(np.float32)
             
-            # Take only RGB if RGBA
             if img.shape[0] == 4:
                 img = img[:3]
         
         return torch.FloatTensor(img).to(self.device)
     
     def select_action(self, obs, epsilon=None):
-        """
-        Select action using epsilon-greedy policy.
-        
-        Args:
-            obs: Current observation
-            epsilon: Exploration rate (uses self.epsilon if None)
-        
-        Returns:
-            action: Integer action (0=turn_left, 1=turn_right, 2=move_forward)
-        """
+        """Select action using epsilon-greedy policy."""
         if epsilon is None:
             epsilon = self.epsilon
         
-        # Exploration
         if random.random() < epsilon:
             return random.randint(0, self.action_dim - 1)
         
-        # Exploitation
         state = self.preprocess_obs(obs)
         with torch.no_grad():
             q_values = self.q_network(state.unsqueeze(0))
@@ -339,10 +321,7 @@ class DQNAgent3D:
     
     def train_step(self):
         """
-        Perform one training step using experience replay.
-        
-        Returns:
-            loss: Training loss (0.0 if not enough samples)
+        Perform one training step with stability improvements.
         """
         if len(self.memory) < self.batch_size:
             return 0.0
@@ -360,26 +339,32 @@ class DQNAgent3D:
         # Current Q values: Q(s, a)
         current_q = self.q_network(states).gather(1, actions.unsqueeze(1))
         
-        # Target Q values: r + gamma * max_a' Q_target(s', a')
+        # Target Q values with Double DQN (optional)
         with torch.no_grad():
-            next_q = self.target_network(next_states).max(1)[0]
+            if self.use_double_dqn:
+                # Double DQN: use online network to SELECT action, target network to EVALUATE
+                next_actions = self.q_network(next_states).argmax(1, keepdim=True)
+                next_q = self.target_network(next_states).gather(1, next_actions).squeeze(1)
+            else:
+                # Standard DQN
+                next_q = self.target_network(next_states).max(1)[0]
+            
             target_q = rewards + (self.gamma * next_q * ~dones)
         
-        # Compute loss
-        loss = F.smooth_l1_loss(current_q.squeeze(), target_q)  # Huber loss
+        # Compute Huber loss (more robust than MSE)
+        loss = F.smooth_l1_loss(current_q.squeeze(), target_q)
         
-        # Optimize
+        # Optimize with gradient clipping
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.grad_clip)
         self.optimizer.step()
         
-        # Update target network periodically
+        # Soft update target network EVERY step (with small tau)
+        self.soft_update_target_network()
+        
         self.update_counter += 1
         self.training_steps += 1
-        
-        if self.update_counter % self.target_update_freq == 0:
-            self.target_network.load_state_dict(self.q_network.state_dict())
         
         return loss.item()
     
@@ -418,72 +403,3 @@ class DQNAgent3D:
         state = self.preprocess_obs(obs)
         with torch.no_grad():
             return self.q_network(state.unsqueeze(0)).squeeze().cpu().numpy()
-
-
-class DQNAgentWithFrameStack(DQNAgent3D):
-    """
-    DQN Agent with frame stacking for temporal information.
-    Stacks last N frames to give agent sense of motion/direction.
-    """
-    
-    def __init__(self, env, num_frames=4, **kwargs):
-        self.num_frames = num_frames
-        self.frame_buffer = deque(maxlen=num_frames)
-        
-        # Initialize parent
-        super().__init__(env, **kwargs)
-        
-        # Update observation shape for stacked frames
-        self.obs_shape = (3 * num_frames, self.obs_shape[1], self.obs_shape[2])
-        
-        # Reinitialize networks with new input shape
-        NetworkClass = DuelingDQN3D if kwargs.get('use_dueling', False) else DQN3D
-        self.q_network = NetworkClass(
-            input_shape=self.obs_shape,
-            action_size=self.action_dim,
-            hidden_size=kwargs.get('hidden_size', 256)
-        ).to(self.device)
-        
-        self.target_network = NetworkClass(
-            input_shape=self.obs_shape,
-            action_size=self.action_dim,
-            hidden_size=kwargs.get('hidden_size', 256)
-        ).to(self.device)
-        
-        self.target_network.load_state_dict(self.q_network.state_dict())
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.learning_rate)
-        
-        print(f"Frame stacking enabled: {num_frames} frames")
-        print(f"Stacked observation shape: {self.obs_shape}")
-    
-    def reset_frame_buffer(self, obs):
-        """Reset frame buffer with initial observation"""
-        frame = self._preprocess_single_frame(obs)
-        for _ in range(self.num_frames):
-            self.frame_buffer.append(frame)
-    
-    def _preprocess_single_frame(self, obs):
-        """Preprocess single frame (without stacking)"""
-        if isinstance(obs, dict) and 'image' in obs:
-            img = obs['image']
-        else:
-            img = obs
-        
-        if isinstance(img, np.ndarray):
-            if img.shape[0] not in [3, 4]:
-                img = np.transpose(img, (2, 0, 1))
-            if img.dtype == np.uint8:
-                img = img.astype(np.float32) / 255.0
-            if img.shape[0] == 4:
-                img = img[:3]
-        
-        return torch.FloatTensor(img)
-    
-    def preprocess_obs(self, obs):
-        """Preprocess observation with frame stacking"""
-        frame = self._preprocess_single_frame(obs)
-        self.frame_buffer.append(frame)
-        
-        # Stack frames along channel dimension
-        stacked = torch.cat(list(self.frame_buffer), dim=0)
-        return stacked.to(self.device)

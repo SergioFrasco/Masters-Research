@@ -169,10 +169,10 @@ class DiscreteMiniWorldWrapper(OneRoom):
     def _gen_world(self):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
     
-        self.sphere_red = self.place_entity(Ball(color="red", size=0.75))
+        self.sphere_red = self.place_entity(Ball(color="red", size=1))
         self.sphere_red.radius = 0  # No collision during placement
 
-        self.sphere_blue = self.place_entity(Ball(color="blue", size=0.75))
+        self.sphere_blue = self.place_entity(Ball(color="blue", size= 1))
         self.sphere_blue.radius = 0  # No collision during placement
 
         self.box_red = self.place_entity(Box(color="red"))

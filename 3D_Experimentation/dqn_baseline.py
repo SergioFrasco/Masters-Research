@@ -32,7 +32,7 @@ import torch
 
 # Import your environment and agent
 from env import DiscreteMiniWorldWrapper
-from agents import DQNAgent3D
+from agents import DQNAgent3D 
 from utils import generate_save_path
 
 
@@ -90,7 +90,6 @@ def check_task_satisfaction(info, task):
     
     return False
 
-
 # ============================================================================
 # TRAINING FUNCTION FOR SINGLE TASK
 # ============================================================================
@@ -123,6 +122,11 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
     print(f"{'='*60}")
     
     # Create COMPLETELY FRESH agent for this task
+    # STABILITY-FOCUSED HYPERPARAMETERS:
+    # - Larger replay buffer: keeps good experiences longer
+    # - Larger batch size: more stable gradients
+    # - Soft target updates (tau=0.005): gradual, stable target network updates
+    # - Double DQN: reduces Q-value overestimation
     agent = DQNAgent3D(
         env,
         learning_rate=learning_rate,
@@ -130,11 +134,14 @@ def train_single_task_dqn(env, task, episodes=2000, max_steps=200,
         epsilon_start=epsilon_start,
         epsilon_end=epsilon_end,
         epsilon_decay=epsilon_decay,
-        memory_size=50000,
-        batch_size=32,
-        target_update_freq=1000,
+        memory_size=100000,       # Large buffer - keeps good experiences
+        batch_size=64,            # Larger batch - stable gradients
+        target_update_freq=1,     # Update every step (but soft update with tau)
         hidden_size=256,
-        use_dueling=True
+        use_dueling=True,
+        tau=0.005,                # Soft update coefficient (slow, stable)
+        use_double_dqn=True,      # Reduces overestimation
+        grad_clip=10.0            # Gradient clipping
     )
     
     # Verify agent is fresh
@@ -718,5 +725,5 @@ if __name__ == "__main__":
         learning_rate=0.0001,
         gamma=0.99,
         epsilon_decay=0.999,  # Slower decay: 0.999^3000 ≈ 0.05
-        seed=42
+        seed=30
     )
