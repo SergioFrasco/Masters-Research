@@ -109,7 +109,7 @@ def train_single_task_lstm_dqn(env, task, episodes=2000, max_steps=200,
     print(f"  Fresh agent with frame stacking + LSTM")
     print(f"{'='*60}")
     
-    # Create LSTM-DQN agent
+    # Create LSTM-DQN agent with OPTIMIZED hyperparameters for speed
     agent = LSTMDQNAgent3D(
         env,
         k_frames=4,              # Stack 4 frames
@@ -118,11 +118,11 @@ def train_single_task_lstm_dqn(env, task, episodes=2000, max_steps=200,
         epsilon_start=epsilon_start,
         epsilon_end=epsilon_end,
         epsilon_decay=epsilon_decay,
-        memory_size=5000,        # Episode buffer (smaller for memory)
-        batch_size=32,           # Smaller batch for LSTM stability
-        seq_len=8,               # Sequence length for training
-        hidden_size=256,
-        lstm_size=128,           # Small LSTM
+        memory_size=2000,        # REDUCED: Smaller buffer = less memory
+        batch_size=16,           # REDUCED: Smaller batch = faster training
+        seq_len=4,               # REDUCED: Shorter sequences = faster
+        hidden_size=128,         # REDUCED: Smaller network = faster
+        lstm_size=64,            # REDUCED: Smaller LSTM = much faster
         use_dueling=True,
         tau=0.005,
         use_double_dqn=True,
@@ -174,10 +174,11 @@ def train_single_task_lstm_dqn(env, task, episodes=2000, max_steps=200,
             # Remember transition (stores in episode buffer)
             agent.remember(stacked_obs, action, shaped_reward, next_stacked_obs, done)
             
-            # Train (processes sequences from episode buffer)
-            loss = agent.train_step()
-            if loss > 0:
-                episode_loss.append(loss)
+            # Train less frequently (every 4 steps instead of every step)
+            if step % 4 == 0:
+                loss = agent.train_step()
+                if loss > 0:
+                    episode_loss.append(loss)
             
             true_reward_total += true_reward
             stacked_obs = next_stacked_obs

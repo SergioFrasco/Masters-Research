@@ -527,7 +527,12 @@ class LSTMDQNAgent3D:
     
     def train_step(self):
         """
-        Perform one training step with sequence sampling.
+        Perform one BATCHED training step with sequence sampling.
+        
+        This is MUCH faster than the nested loop version because:
+        1. Single backward pass instead of batch_size * seq_len passes
+        2. GPU parallelization across batch dimension
+        3. Efficient tensor operations
         """
         if len(self.memory) < self.batch_size:
             return 0.0
@@ -535,59 +540,124 @@ class LSTMDQNAgent3D:
         # Sample sequences from episodes
         sequences = self.memory.sample(self.batch_size, self.seq_len)
         
-        total_loss = 0.0
+        # Pad sequences to same length and convert to tensors
+        max_len = max(len(seq) for seq in sequences)
         
-        for sequence in sequences:
-            # Initialize hidden state for this sequence
-            hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
-            target_hidden = self.target_network.init_hidden(batch_size=1, device=self.device)
+        # Pre-allocate tensors
+        states_batch = []
+        actions_batch = []
+        rewards_batch = []
+        next_states_batch = []
+        dones_batch = []
+        lengths = []
+        
+        for seq in sequences:
+            seq_len = len(seq)
+            lengths.append(seq_len)
             
-            for (state, action, reward, next_state, done) in sequence:
-                # Convert to tensors
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-                next_state_tensor = torch.FloatTensor(next_state).unsqueeze(0).to(self.device)
-                action_tensor = torch.tensor([action], dtype=torch.long).to(self.device)
-                reward_tensor = torch.tensor([reward], dtype=torch.float32).to(self.device)
-                done_tensor = torch.tensor([done], dtype=torch.bool).to(self.device)
+            # Extract transitions
+            states = [s[0] for s in seq]
+            actions = [s[1] for s in seq]
+            rewards = [s[2] for s in seq]
+            next_states = [s[3] for s in seq]
+            dones = [s[4] for s in seq]
+            
+            # Pad if needed
+            if seq_len < max_len:
+                pad_len = max_len - seq_len
+                states.extend([states[-1]] * pad_len)
+                actions.extend([0] * pad_len)
+                rewards.extend([0.0] * pad_len)
+                next_states.extend([next_states[-1]] * pad_len)
+                dones.extend([True] * pad_len)
+            
+            states_batch.append(states)
+            actions_batch.append(actions)
+            rewards_batch.append(rewards)
+            next_states_batch.append(next_states)
+            dones_batch.append(dones)
+        
+        # Convert to tensors: (batch_size, seq_len, ...)
+        states_tensor = torch.FloatTensor(np.array(states_batch)).to(self.device)
+        actions_tensor = torch.LongTensor(actions_batch).to(self.device)
+        rewards_tensor = torch.FloatTensor(rewards_batch).to(self.device)
+        next_states_tensor = torch.FloatTensor(np.array(next_states_batch)).to(self.device)
+        dones_tensor = torch.BoolTensor(dones_batch).to(self.device)
+        
+        batch_size, seq_len = states_tensor.shape[:2]
+        
+        # Initialize hidden states for batch
+        hidden = self.q_network.init_hidden(batch_size=batch_size, device=self.device)
+        target_hidden = self.target_network.init_hidden(batch_size=batch_size, device=self.device)
+        
+        # Process entire sequences through LSTM
+        # Reshape: (batch, seq, C, H, W) -> (batch*seq, C, H, W)
+        states_flat = states_tensor.view(-1, *states_tensor.shape[2:])
+        next_states_flat = next_states_tensor.view(-1, *next_states_tensor.shape[2:])
+        
+        # Forward pass through Q-network (processes all timesteps at once)
+        # For LSTM, we need to process sequentially but in batch
+        q_values_list = []
+        for t in range(seq_len):
+            q_vals, hidden = self.q_network(states_tensor[:, t], hidden)
+            q_values_list.append(q_vals)
+            hidden = (hidden[0].detach(), hidden[1].detach())
+        
+        q_values = torch.stack(q_values_list, dim=1)  # (batch, seq, actions)
+        
+        # Get Q-values for taken actions
+        current_q = q_values.gather(2, actions_tensor.unsqueeze(2)).squeeze(2)
+        
+        # Target Q-values
+        with torch.no_grad():
+            if self.use_double_dqn:
+                # Use online network to select actions
+                next_q_list = []
+                hidden_copy = self.q_network.init_hidden(batch_size=batch_size, device=self.device)
+                for t in range(seq_len):
+                    nq, hidden_copy = self.q_network(next_states_tensor[:, t], hidden_copy)
+                    next_q_list.append(nq)
+                    hidden_copy = (hidden_copy[0].detach(), hidden_copy[1].detach())
                 
-                # Current Q value
-                q_values, hidden = self.q_network(state_tensor, hidden)
-                current_q = q_values.gather(1, action_tensor.unsqueeze(1)).squeeze()
+                next_q_values = torch.stack(next_q_list, dim=1)
+                next_actions = next_q_values.argmax(2, keepdim=True)
                 
-                # Target Q value
-                with torch.no_grad():
-                    if self.use_double_dqn:
-                        # Double DQN
-                        next_q_values, _ = self.q_network(next_state_tensor, 
-                                                         (hidden[0].detach(), hidden[1].detach()))
-                        next_action = next_q_values.argmax(1, keepdim=True)
-                        
-                        target_next_q_values, target_hidden = self.target_network(
-                            next_state_tensor, target_hidden
-                        )
-                        next_q = target_next_q_values.gather(1, next_action).squeeze()
-                    else:
-                        # Standard DQN
-                        target_next_q_values, target_hidden = self.target_network(
-                            next_state_tensor, target_hidden
-                        )
-                        next_q = target_next_q_values.max(1)[0]
-                    
-                    target_q = reward_tensor + (self.gamma * next_q * ~done_tensor)
+                # Use target network to evaluate
+                target_q_list = []
+                for t in range(seq_len):
+                    tq, target_hidden = self.target_network(next_states_tensor[:, t], target_hidden)
+                    target_q_list.append(tq)
+                    target_hidden = (target_hidden[0].detach(), target_hidden[1].detach())
                 
-                # Compute loss
-                loss = F.smooth_l1_loss(current_q, target_q)
-                total_loss += loss.item()
+                target_q_values = torch.stack(target_q_list, dim=1)
+                next_q = target_q_values.gather(2, next_actions).squeeze(2)
+            else:
+                # Standard DQN
+                target_q_list = []
+                for t in range(seq_len):
+                    tq, target_hidden = self.target_network(next_states_tensor[:, t], target_hidden)
+                    target_q_list.append(tq)
+                    target_hidden = (target_hidden[0].detach(), target_hidden[1].detach())
                 
-                # Optimize
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.grad_clip)
-                self.optimizer.step()
-                
-                # Detach hidden state for next step
-                hidden = (hidden[0].detach(), hidden[1].detach())
-                target_hidden = (target_hidden[0].detach(), target_hidden[1].detach())
+                target_q_values = torch.stack(target_q_list, dim=1)
+                next_q = target_q_values.max(2)[0]
+            
+            target_q = rewards_tensor + (self.gamma * next_q * ~dones_tensor)
+        
+        # Compute loss only on valid timesteps
+        loss_mask = torch.zeros(batch_size, seq_len, device=self.device)
+        for i, length in enumerate(lengths):
+            loss_mask[i, :length] = 1.0
+        
+        # Masked loss
+        loss = F.smooth_l1_loss(current_q * loss_mask, target_q * loss_mask, reduction='sum')
+        loss = loss / loss_mask.sum()
+        
+        # Single backward pass
+        self.optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.grad_clip)
+        self.optimizer.step()
         
         # Soft update target network
         self.soft_update_target_network()
@@ -595,7 +665,7 @@ class LSTMDQNAgent3D:
         self.update_counter += 1
         self.training_steps += 1
         
-        return total_loss / (len(sequences) * len(sequences[0]))
+        return loss.item()
     
     def decay_epsilon(self):
         """Decay exploration rate"""
