@@ -774,7 +774,7 @@ if __name__ == "__main__":
     successor_results = run_successor_agent(
         env, 
         agent, 
-        max_episodes=5000,        
+        max_episodes=10000,        
         max_steps_per_episode=200 
     )
 
