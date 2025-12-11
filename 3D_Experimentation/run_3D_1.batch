@@ -8,4 +8,9 @@
 
 source ~/.bashrc
 conda activate compneuro
+
+export MINIWORLD_HEADLESS=1
+export PYGLET_HEADLESS=1
+export SDL_VIDEODRIVER=dummy
+
 python dqn_lstm_baseline.py
