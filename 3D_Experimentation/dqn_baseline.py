@@ -719,7 +719,7 @@ def run_separate_models_experiment(
 if __name__ == "__main__":
     results = run_separate_models_experiment(
         env_size=10,
-        episodes_per_task=3000,  # More episodes for better learning
+        episodes_per_task=2000,  # More episodes for better learning
         eval_episodes=100,
         max_steps=200,
         learning_rate=0.0001,
