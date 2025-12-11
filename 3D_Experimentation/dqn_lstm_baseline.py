@@ -9,10 +9,19 @@ This should help the agent remember objects it saw before turning around.
 """
 
 import os
+import sys
+
+# Force headless mode BEFORE any other imports
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+os.environ["MUJOCO_GL"] = "osmesa"
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
+
+# Disable display entirely
+if "DISPLAY" in os.environ:
+    del os.environ["DISPLAY"]
 
 import numpy as np
 import matplotlib
