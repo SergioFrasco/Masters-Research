@@ -1,8 +1,14 @@
 """
-World Value Functions Training Script
+World Value Functions (WVF) Training Script
 
-Trains separate Q-networks for each primitive feature (red, blue, box, sphere)
-then evaluates compositional generalization using min composition.
+Implements Nangue Tasse et al.'s Boolean Task Algebra for zero-shot compositional generalization:
+
+1. Train goal-conditioned Q-networks with extended rewards on primitive tasks
+2. Each primitive network learns values for ALL goals (not just valid ones)
+3. Zero-shot compose via min operation at evaluation for conjunction tasks
+
+Key result: Agent can solve compositional tasks (red_box, blue_sphere, etc.)
+without ever having trained on them directly.
 """
 
 import os
@@ -27,14 +33,11 @@ import pandas as pd
 from collections import deque
 from tqdm import tqdm
 import json
-import time
 import gc
 import torch
 
-# Import environment and WVF agent
 from env import DiscreteMiniWorldWrapper
 from agents import WorldValueFunctionAgent
-
 from utils import generate_save_path
 
 
@@ -49,6 +52,7 @@ PRIMITIVE_TASKS = {
     "sphere": {"name": "sphere", "features": ["sphere"], "type": "primitive"},
 }
 
+# These are NEVER seen during training - only used for zero-shot evaluation
 COMPOSITIONAL_TASKS = {
     "red_box": {"name": "red_box", "features": ["red", "box"], "type": "compositional"},
     "red_sphere": {"name": "red_sphere", "features": ["red", "sphere"], "type": "compositional"},
@@ -57,92 +61,80 @@ COMPOSITIONAL_TASKS = {
 }
 
 
-def check_task_satisfaction(info, task):
-    """Check if contacted object satisfies task requirements."""
-    contacted_object = info.get('contacted_object', None)
-    
-    if contacted_object is None:
+def check_primitive_satisfaction(info, primitive):
+    """Check if contacted object satisfies primitive task."""
+    contacted = info.get('contacted_object', None)
+    if contacted is None:
         return False
     
-    features = task["features"]
-    
-    # Single feature (primitive)
-    if len(features) == 1:
-        feature = features[0]
-        if feature == "blue":
-            return contacted_object in ["blue_box", "blue_sphere"]
-        elif feature == "red":
-            return contacted_object in ["red_box", "red_sphere"]
-        elif feature == "box":
-            return contacted_object in ["blue_box", "red_box"]
-        elif feature == "sphere":
-            return contacted_object in ["blue_sphere", "red_sphere"]
-    
-    # Compositional (2 features)
-    elif len(features) == 2:
-        if set(features) == {"blue", "sphere"}:
-            return contacted_object == "blue_sphere"
-        elif set(features) == {"red", "sphere"}:
-            return contacted_object == "red_sphere"
-        elif set(features) == {"blue", "box"}:
-            return contacted_object == "blue_box"
-        elif set(features) == {"red", "box"}:
-            return contacted_object == "red_box"
-    
-    return False
+    valid_goals = WorldValueFunctionAgent.PRIMITIVE_GOALS[primitive]
+    return contacted in valid_goals
+
+
+def check_compositional_satisfaction(info, task_name):
+    """Check if contacted object satisfies compositional task."""
+    contacted = info.get('contacted_object', None)
+    return contacted == task_name
+
 
 # ============================================================================
 # TRAINING
 # ============================================================================
 
-def train_primitive(env, agent, primitive, episodes=2000, max_steps=200,
-                    step_penalty=-0.005, wrong_object_penalty=-0.1, verbose=True):
+def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
+                        step_penalty=-0.005, verbose=True):
     """
-    Train the agent on a single primitive task.
-    """
-    task = PRIMITIVE_TASKS[primitive]
+    Train WVF on a single primitive task.
     
+    Key difference from regular DQN training:
+    - Each episode samples a random TARGET GOAL to reach
+    - Extended rewards penalize reaching wrong goals
+    - Network learns Q(s, g, a) for all goals g
+    """
     print(f"\n{'='*60}")
-    print(f"TRAINING PRIMITIVE: {primitive.upper()}")
+    print(f"TRAINING WVF FOR PRIMITIVE: {primitive.upper()}")
     print(f"{'='*60}")
     
-    # Set primitive and task
     agent.set_training_primitive(primitive)
+    
+    task = PRIMITIVE_TASKS[primitive]
     env.set_task(task)
     
     # Tracking
     episode_rewards = []
     episode_lengths = []
     episode_losses = []
+    goal_reached_counts = {g: 0 for g in agent.GOALS}
     
     for episode in tqdm(range(episodes), desc=f"Training '{primitive}'"):
         obs, info = env.reset()
-        stacked_obs = agent.reset_episode(obs)
         
-        true_reward_total = 0
+        # Reset episode and sample a target goal
+        stacked_obs, target_goal_idx = agent.reset_episode(obs)
+        target_goal_name = agent.GOALS[target_goal_idx]
+        
+        episode_reward = 0
         episode_loss = []
         
         for step in range(max_steps):
-            action = agent.select_action(stacked_obs)
+            # Select action conditioned on target goal
+            action = agent.select_action(stacked_obs, target_goal_idx)
+            
+            # Step environment
             next_obs, _, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
+            
+            # Compute extended reward
+            reward, goal_reached = agent.compute_extended_reward(
+                info, target_goal_idx, step_penalty
+            )
+            
+            done = goal_reached or terminated or truncated
             
             next_stacked_obs = agent.step_episode(next_obs)
             
-            # Compute rewards
-            contacted = info.get('contacted_object', None)
-            task_satisfied = check_task_satisfaction(info, task)
-            
-            true_reward = 1.0 if task_satisfied else 0.0
-            
-            if task_satisfied:
-                shaped_reward = 1.0
-            elif contacted is not None:
-                shaped_reward = wrong_object_penalty
-            else:
-                shaped_reward = step_penalty
-            
-            agent.remember(stacked_obs, action, shaped_reward, next_stacked_obs, done)
+            # Store transition
+            agent.remember(stacked_obs, target_goal_idx, action, reward,
+                          next_stacked_obs, done)
             
             # Train every 4 steps
             if step % 4 == 0:
@@ -150,54 +142,53 @@ def train_primitive(env, agent, primitive, episodes=2000, max_steps=200,
                 if loss > 0:
                     episode_loss.append(loss)
             
-            true_reward_total += true_reward
+            episode_reward += reward
             stacked_obs = next_stacked_obs
             
             if done:
+                contacted = info.get('contacted_object', None)
+                if contacted in goal_reached_counts:
+                    goal_reached_counts[contacted] += 1
                 break
         
         agent.decay_epsilon()
         
-        episode_rewards.append(true_reward_total)
+        episode_rewards.append(episode_reward)
         episode_lengths.append(step + 1)
         episode_losses.append(np.mean(episode_loss) if episode_loss else 0.0)
         
         if verbose and (episode + 1) % 500 == 0:
-            recent_success = np.mean([r > 0 for r in episode_rewards[-500:]])
+            recent_reward = np.mean(episode_rewards[-500:])
             recent_length = np.mean(episode_lengths[-500:])
-            print(f"  Episode {episode+1}: Success={recent_success:.1%}, "
+            print(f"  Episode {episode+1}: Avg Reward={recent_reward:.2f}, "
                   f"Avg Length={recent_length:.1f}, Epsilon={agent.epsilon:.3f}")
+            print(f"    Goals reached: {goal_reached_counts}")
     
-    final_success = np.mean([r > 0 for r in episode_rewards[-100:]])
     print(f"\nPrimitive '{primitive}' training complete!")
-    print(f"  Final success rate: {final_success:.1%}")
-    print(f"  Q-value range: [{agent.q_stats[primitive]['min']:.2f}, "
-          f"{agent.q_stats[primitive]['max']:.2f}]")
+    print(f"  Final avg reward (last 100): {np.mean(episode_rewards[-100:]):.2f}")
+    print(f"  Goal distribution: {goal_reached_counts}")
     
     return {
         "primitive": primitive,
         "episode_rewards": episode_rewards,
         "episode_lengths": episode_lengths,
         "episode_losses": episode_losses,
-        "final_success_rate": final_success,
-        "q_stats": agent.q_stats[primitive].copy()
+        "goal_reached_counts": goal_reached_counts,
     }
 
 
-def train_all_primitives(env, agent, episodes_per_primitive=2000, max_steps=200):
-    """Train all 4 primitives sequentially."""
-    
+def train_all_primitives_wvf(env, agent, episodes_per_primitive=2000, max_steps=200):
+    """Train all primitives sequentially."""
     all_histories = {}
     
     for primitive in agent.PRIMITIVES:
-        history = train_primitive(
+        history = train_primitive_wvf(
             env, agent, primitive,
             episodes=episodes_per_primitive,
             max_steps=max_steps
         )
         all_histories[primitive] = history
         
-        # Clear memory between primitives
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -209,9 +200,12 @@ def train_all_primitives(env, agent, episodes_per_primitive=2000, max_steps=200)
 # EVALUATION
 # ============================================================================
 
-def evaluate_primitive(env, agent, primitive, episodes=100, max_steps=200):
-    """Evaluate agent on a primitive task using that primitive's network."""
+def evaluate_primitive_wvf(env, agent, primitive, episodes=100, max_steps=200):
+    """
+    Evaluate WVF on primitive task.
     
+    For primitive evaluation: argmax_a max_g Q(s, g, a)
+    """
     task = PRIMITIVE_TASKS[primitive]
     env.set_task(task)
     
@@ -220,19 +214,16 @@ def evaluate_primitive(env, agent, primitive, episodes=100, max_steps=200):
     
     for _ in range(episodes):
         obs, info = env.reset()
-        stacked_obs = agent.reset_episode(obs)
-        
-        # Reset hidden for this primitive
-        agent.current_hidden = agent.q_networks[primitive].init_hidden(
-            batch_size=1, device=agent.device
-        )
+        stacked_obs, _ = agent.reset_episode(obs)
         
         for step in range(max_steps):
-            action = agent.select_action(stacked_obs, epsilon=0.0, primitive=primitive)
+            # Use composed action selection with single feature
+            action = agent.select_action_composed(stacked_obs, [primitive])
+            
             obs, _, terminated, truncated, info = env.step(action)
             stacked_obs = agent.step_episode(obs)
             
-            if check_task_satisfaction(info, task):
+            if check_primitive_satisfaction(info, primitive):
                 successes.append(1)
                 lengths.append(step + 1)
                 break
@@ -252,14 +243,16 @@ def evaluate_primitive(env, agent, primitive, episodes=100, max_steps=200):
     }
 
 
-def evaluate_compositional(env, agent, task_name, episodes=100, max_steps=200, 
-                           normalize=True):
+def evaluate_compositional_wvf(env, agent, task_name, episodes=100, max_steps=200):
     """
-    Evaluate agent on a compositional task using Q-value composition.
+    Zero-shot evaluation on compositional task using Boolean composition.
     
-    Uses min(Q_feature1, Q_feature2) to select actions.
+    For conjunction (AND):
+        Q_composed(s, g, a) = min(Q_red(s, g, a), Q_box(s, g, a))
+        action = argmax_a max_g Q_composed(s, g, a)
+    
+    The agent has NEVER trained on this task - this is zero-shot generalization.
     """
-    
     task = COMPOSITIONAL_TASKS[task_name]
     features = task["features"]
     
@@ -270,18 +263,16 @@ def evaluate_compositional(env, agent, task_name, episodes=100, max_steps=200,
     
     for _ in range(episodes):
         obs, info = env.reset()
-        stacked_obs = agent.reset_episode(obs)
+        stacked_obs, _ = agent.reset_episode(obs)
         
         for step in range(max_steps):
-            # Use composed Q-values for action selection
-            action = agent.select_action_composed(
-                stacked_obs, features, normalize=normalize
-            )
+            # Zero-shot composed action selection
+            action = agent.select_action_composed(stacked_obs, features)
             
             obs, _, terminated, truncated, info = env.step(action)
             stacked_obs = agent.step_episode(obs)
             
-            if check_task_satisfaction(info, task):
+            if check_compositional_satisfaction(info, task_name):
                 successes.append(1)
                 lengths.append(step + 1)
                 break
@@ -302,8 +293,8 @@ def evaluate_compositional(env, agent, task_name, episodes=100, max_steps=200,
     }
 
 
-def evaluate_all(env, agent, episodes=100, max_steps=200):
-    """Evaluate on all primitives and compositional tasks."""
+def evaluate_all_wvf(env, agent, episodes=100, max_steps=200):
+    """Evaluate on all tasks."""
     
     print("\n" + "="*60)
     print("EVALUATING PRIMITIVES")
@@ -311,20 +302,21 @@ def evaluate_all(env, agent, episodes=100, max_steps=200):
     
     primitive_results = {}
     for primitive in agent.PRIMITIVES:
-        results = evaluate_primitive(env, agent, primitive, episodes, max_steps)
+        results = evaluate_primitive_wvf(env, agent, primitive, episodes, max_steps)
         primitive_results[primitive] = results
         print(f"  {primitive}: {results['success_rate']:.1%}")
     
     print("\n" + "="*60)
-    print("EVALUATING COMPOSITIONAL (with min composition)")
+    print("ZERO-SHOT COMPOSITIONAL EVALUATION")
+    print("(These tasks were NEVER seen during training)")
     print("="*60)
     
     compositional_results = {}
     for task_name in COMPOSITIONAL_TASKS:
-        results = evaluate_compositional(env, agent, task_name, episodes, max_steps)
+        results = evaluate_compositional_wvf(env, agent, task_name, episodes, max_steps)
         compositional_results[task_name] = results
         print(f"  {task_name}: {results['success_rate']:.1%} "
-              f"(composed: {results['features_used']})")
+              f"(min of {results['features_used']})")
     
     return primitive_results, compositional_results
 
@@ -333,9 +325,8 @@ def evaluate_all(env, agent, episodes=100, max_steps=200):
 # PLOTTING
 # ============================================================================
 
-def plot_training_curves(all_histories, save_path, window=100):
-    """Plot training curves for all primitives."""
-    
+def plot_training_curves_wvf(all_histories, save_path, window=100):
+    """Plot training curves."""
     fig, axes = plt.subplots(2, 4, figsize=(16, 8))
     colors = {'red': 'red', 'blue': 'blue', 'box': 'orange', 'sphere': 'green'}
     
@@ -344,7 +335,6 @@ def plot_training_curves(all_histories, save_path, window=100):
         rewards = history['episode_rewards']
         losses = history['episode_losses']
         
-        # Rewards
         ax1 = axes[0, i]
         ax1.plot(rewards, alpha=0.3, color=color)
         if len(rewards) >= window:
@@ -352,10 +342,9 @@ def plot_training_curves(all_histories, save_path, window=100):
             ax1.plot(smoothed, color=color, linewidth=2)
         ax1.set_xlabel('Episode')
         ax1.set_ylabel('Reward')
-        ax1.set_title(f"'{primitive}' - Success: {history['final_success_rate']:.0%}")
+        ax1.set_title(f"'{primitive}' - Rewards")
         ax1.grid(True, alpha=0.3)
         
-        # Loss
         ax2 = axes[1, i]
         if losses and any(l > 0 for l in losses):
             ax2.plot(losses, alpha=0.3, color=color)
@@ -367,16 +356,16 @@ def plot_training_curves(all_histories, save_path, window=100):
         ax2.set_title(f"'{primitive}' - Loss")
         ax2.grid(True, alpha=0.3)
     
-    plt.suptitle('WVF Agent - Primitive Training Curves', fontsize=14, fontweight='bold')
+    plt.suptitle('World Value Functions - Training on Primitive Tasks', 
+                 fontsize=14, fontweight='bold')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"Training curves saved to: {save_path}")
 
 
-def plot_evaluation_summary(primitive_results, compositional_results, save_path):
-    """Plot evaluation results comparing primitives vs compositional."""
-    
+def plot_evaluation_summary_wvf(primitive_results, compositional_results, save_path):
+    """Plot evaluation comparison."""
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
     # Primitives
@@ -391,12 +380,12 @@ def plot_evaluation_summary(primitive_results, compositional_results, save_path)
                 f'{val:.0%}', ha='center', va='bottom', fontsize=11, fontweight='bold')
     
     ax1.set_ylabel('Success Rate')
-    ax1.set_title('Primitive Tasks\n(Each network on its own task)')
+    ax1.set_title('Primitive Tasks\n(Trained)')
     ax1.set_ylim([0, 1.15])
     ax1.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5)
     ax1.grid(True, alpha=0.3, axis='y')
     
-    # Compositional
+    # Compositional (zero-shot)
     ax2 = axes[1]
     comp_tasks = list(compositional_results.keys())
     comp_success = [compositional_results[t]['success_rate'] for t in comp_tasks]
@@ -405,34 +394,32 @@ def plot_evaluation_summary(primitive_results, compositional_results, save_path)
     for bar, val, task in zip(bars, comp_success, comp_tasks):
         features = compositional_results[task]['features_used']
         ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
-                f'{val:.0%}\nmin({features[0]},{features[1]})', 
+                f'{val:.0%}\nmin({features[0]},{features[1]})',
                 ha='center', va='bottom', fontsize=8)
     
     ax2.set_ylabel('Success Rate')
-    ax2.set_title('Compositional Tasks\n(Using min(Q₁, Q₂) composition)')
+    ax2.set_title('Compositional Tasks\n(Zero-Shot - Never Trained)')
     ax2.set_ylim([0, 1.15])
-    ax2.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Random baseline')
+    ax2.axhline(y=0.5, color='gray', linestyle='--', alpha=0.5, label='Random')
     ax2.tick_params(axis='x', rotation=45)
     ax2.legend(loc='upper right')
     ax2.grid(True, alpha=0.3, axis='y')
     
-    # Stats
     avg_prim = np.mean(prim_success)
     avg_comp = np.mean(comp_success)
     
     plt.suptitle(f'WVF Evaluation | Primitives: {avg_prim:.0%} | '
-                 f'Compositional: {avg_comp:.0%} | Gap: {avg_prim - avg_comp:.0%}',
+                 f'Zero-Shot Compositional: {avg_comp:.0%} | Gap: {avg_prim - avg_comp:.0%}',
                  fontsize=12, fontweight='bold')
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Evaluation summary saved to: {save_path}")
+    print(f"Evaluation saved to: {save_path}")
 
 
-def plot_full_summary(all_histories, primitive_results, compositional_results, save_path):
-    """Create comprehensive summary plot."""
-    
+def plot_full_summary_wvf(all_histories, primitive_results, compositional_results, save_path):
+    """Comprehensive summary plot."""
     fig = plt.figure(figsize=(18, 12))
     gs = fig.add_gridspec(3, 4, hspace=0.35, wspace=0.3)
     
@@ -449,12 +436,12 @@ def plot_full_summary(all_histories, primitive_results, compositional_results, s
             smoothed = pd.Series(rewards).rolling(50).mean()
             ax.plot(smoothed, color=color, linewidth=2)
         
-        ax.set_title(f"'{primitive}'\nFinal: {history['final_success_rate']:.0%}", fontsize=10)
+        ax.set_title(f"'{primitive}'", fontsize=10)
         ax.set_xlabel('Episode', fontsize=8)
         ax.set_ylabel('Reward', fontsize=8)
         ax.grid(True, alpha=0.3)
     
-    # Row 2: Evaluation bars
+    # Row 2: Evaluation
     ax_prim = fig.add_subplot(gs[1, :2])
     primitives = list(primitive_results.keys())
     prim_success = [primitive_results[p]['success_rate'] for p in primitives]
@@ -465,7 +452,7 @@ def plot_full_summary(all_histories, primitive_results, compositional_results, s
         ax_prim.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
                     f'{val:.0%}', ha='center', fontsize=10, fontweight='bold')
     ax_prim.set_ylabel('Success Rate')
-    ax_prim.set_title('Primitive Tasks Evaluation')
+    ax_prim.set_title('Primitive Tasks (Trained)')
     ax_prim.set_ylim([0, 1.15])
     ax_prim.grid(True, alpha=0.3, axis='y')
     
@@ -478,12 +465,12 @@ def plot_full_summary(all_histories, primitive_results, compositional_results, s
         ax_comp.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
                     f'{val:.0%}', ha='center', fontsize=10, fontweight='bold')
     ax_comp.set_ylabel('Success Rate')
-    ax_comp.set_title('Compositional Tasks (min composition)')
+    ax_comp.set_title('Compositional Tasks (Zero-Shot)')
     ax_comp.set_ylim([0, 1.15])
     ax_comp.tick_params(axis='x', rotation=45)
     ax_comp.grid(True, alpha=0.3, axis='y')
     
-    # Row 3: Summary text
+    # Row 3: Summary
     ax_summary = fig.add_subplot(gs[2, :])
     ax_summary.axis('off')
     
@@ -491,41 +478,48 @@ def plot_full_summary(all_histories, primitive_results, compositional_results, s
     avg_comp = np.mean(comp_success)
     
     summary_text = f"""
-    ╔════════════════════════════════════════════════════════════════════════════════════════════╗
-    ║                          WORLD VALUE FUNCTIONS EXPERIMENT                                   ║
-    ╠════════════════════════════════════════════════════════════════════════════════════════════╣
-    ║                                                                                             ║
-    ║  APPROACH: Train separate Q-networks for each primitive, compose at evaluation              ║
-    ║                                                                                             ║
-    ║  ARCHITECTURE (per primitive):                                                              ║
-    ║    Frame Stacking (k=4) → CNN → LSTM (64) → Dueling FC → Q-values                          ║
-    ║                                                                                             ║
-    ║  COMPOSITION METHOD:                                                                        ║
-    ║    Q_composed(s,a) = min(Q_feature1(s,a), Q_feature2(s,a))                                  ║
-    ║    With normalization to handle different Q-value scales                                    ║
-    ║                                                                                             ║
-    ║  PRIMITIVE RESULTS:                                                                         ║
-    ║    • red:    {primitive_results['red']['success_rate']:.1%}    • blue:   {primitive_results['blue']['success_rate']:.1%}                                                     ║
-    ║    • box:    {primitive_results['box']['success_rate']:.1%}    • sphere: {primitive_results['sphere']['success_rate']:.1%}                                                     ║
-    ║    • Average: {avg_prim:.1%}                                                                         ║
-    ║                                                                                             ║
-    ║  COMPOSITIONAL RESULTS (using min composition):                                             ║
-    ║    • red_box:     {compositional_results['red_box']['success_rate']:.1%}  (min of red, box)                                            ║
-    ║    • red_sphere:  {compositional_results['red_sphere']['success_rate']:.1%}  (min of red, sphere)                                         ║
-    ║    • blue_box:    {compositional_results['blue_box']['success_rate']:.1%}  (min of blue, box)                                           ║
-    ║    • blue_sphere: {compositional_results['blue_sphere']['success_rate']:.1%}  (min of blue, sphere)                                        ║
-    ║    • Average: {avg_comp:.1%}                                                                         ║
-    ║                                                                                             ║
-    ║  GENERALIZATION GAP: {avg_prim - avg_comp:.1%}                                                                   ║
-    ║                                                                                             ║
-    ╚════════════════════════════════════════════════════════════════════════════════════════════╝
+    ╔════════════════════════════════════════════════════════════════════════════════════════════════════╗
+    ║                    WORLD VALUE FUNCTIONS (WVF) EXPERIMENT                                           ║
+    ║                    Zero-Shot Compositional Generalization                                           ║
+    ╠════════════════════════════════════════════════════════════════════════════════════════════════════╣
+    ║                                                                                                     ║
+    ║  APPROACH: Boolean Task Algebra (Nangue Tasse et al.)                                               ║
+    ║                                                                                                     ║
+    ║  ARCHITECTURE:                                                                                      ║
+    ║    Goal-Conditioned Q-Network: Q(s, g, a)                                                           ║
+    ║    • State s: visual observation (frame-stacked)                                                    ║
+    ║    • Goal g: one-hot encoding of target object                                                      ║
+    ║    • Action a: turn_left, turn_right, move_forward                                                  ║
+    ║                                                                                                     ║
+    ║  TRAINING (on primitives only):                                                                     ║
+    ║    • Each episode samples random target goal from all 4 objects                                     ║
+    ║    • Extended reward: +1 if reach correct goal, r_min penalty otherwise                             ║
+    ║    • Network learns value of reaching ANY goal under each primitive task                            ║
+    ║                                                                                                     ║
+    ║  ZERO-SHOT COMPOSITION (never trained on these):                                                    ║
+    ║    Q_red_box(s, g, a) = min(Q_red(s, g, a), Q_box(s, g, a))                                         ║
+    ║    action = argmax_a max_g Q_red_box(s, g, a)                                                       ║
+    ║                                                                                                     ║
+    ║  PRIMITIVE RESULTS:                                                                                 ║
+    ║    • red:    {primitive_results['red']['success_rate']:.1%}    • blue:   {primitive_results['blue']['success_rate']:.1%}                                                           ║
+    ║    • box:    {primitive_results['box']['success_rate']:.1%}    • sphere: {primitive_results['sphere']['success_rate']:.1%}                                                           ║
+    ║    • Average: {avg_prim:.1%}                                                                               ║
+    ║                                                                                                     ║
+    ║  ZERO-SHOT COMPOSITIONAL RESULTS:                                                                   ║
+    ║    • red_box:     {compositional_results['red_box']['success_rate']:.1%}    • red_sphere:  {compositional_results['red_sphere']['success_rate']:.1%}                                                     ║
+    ║    • blue_box:    {compositional_results['blue_box']['success_rate']:.1%}    • blue_sphere: {compositional_results['blue_sphere']['success_rate']:.1%}                                                     ║
+    ║    • Average: {avg_comp:.1%}                                                                               ║
+    ║                                                                                                     ║
+    ║  GENERALIZATION GAP: {avg_prim - avg_comp:.1%}                                                                         ║
+    ║                                                                                                     ║
+    ╚════════════════════════════════════════════════════════════════════════════════════════════════════╝
     """
     
     ax_summary.text(0.5, 0.5, summary_text, transform=ax_summary.transAxes,
                    fontsize=9, fontfamily='monospace', ha='center', va='center',
-                   bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8))
+                   bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8))
     
-    plt.suptitle('World Value Functions - Compositional RL Experiment',
+    plt.suptitle('World Value Functions - Zero-Shot Compositional Generalization',
                  fontsize=14, fontweight='bold', y=0.98)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
@@ -544,28 +538,29 @@ def run_wvf_experiment(
     learning_rate=0.0001,
     gamma=0.99,
     epsilon_decay=0.9995,
+    r_min=-10.0,
     seed=42
 ):
-    """Run the complete WVF experiment."""
+    """Run the World Value Functions experiment."""
     
     print("\n" + "="*70)
-    print("WORLD VALUE FUNCTIONS EXPERIMENT")
+    print("WORLD VALUE FUNCTIONS (WVF) EXPERIMENT")
     print("="*70)
-    print("Training separate Q-networks for each primitive feature")
-    print("Composing Q-values using min operation at evaluation")
+    print("Zero-Shot Compositional Generalization via Boolean Task Algebra")
+    print("Based on Nangue Tasse et al.")
     print("="*70 + "\n")
     
-    # Set seeds
+    # Seeds
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     
-    # Create environment
+    # Environment
     print("Creating environment...")
     env = DiscreteMiniWorldWrapper(size=env_size, render_mode="rgb_array")
     
-    # Create WVF agent
+    # WVF Agent
     print("Creating WVF agent...")
     agent = WorldValueFunctionAgent(
         env,
@@ -581,15 +576,16 @@ def run_wvf_experiment(
         hidden_size=128,
         lstm_size=64,
         tau=0.005,
-        grad_clip=10.0
+        grad_clip=10.0,
+        r_min=r_min
     )
     
-    # ===== TRAINING =====
+    # Training
     print("\n" + "="*60)
-    print("PHASE 1: TRAINING PRIMITIVES SEQUENTIALLY")
+    print("PHASE 1: TRAINING ON PRIMITIVE TASKS")
     print("="*60)
     
-    all_histories = train_all_primitives(
+    all_histories = train_all_primitives_wvf(
         env, agent,
         episodes_per_primitive=episodes_per_primitive,
         max_steps=max_steps
@@ -599,43 +595,44 @@ def run_wvf_experiment(
     model_path = generate_save_path("wvf_model.pt")
     agent.save_model(model_path)
     
-    # ===== EVALUATION =====
+    # Evaluation
     print("\n" + "="*60)
-    print("PHASE 2: EVALUATION")
+    print("PHASE 2: EVALUATION (including zero-shot compositional)")
     print("="*60)
     
-    primitive_results, compositional_results = evaluate_all(
+    primitive_results, compositional_results = evaluate_all_wvf(
         env, agent, episodes=eval_episodes, max_steps=max_steps
     )
     
-    # ===== PLOTS =====
+    # Plots
     print("\n" + "="*60)
     print("GENERATING PLOTS")
     print("="*60)
     
-    plot_training_curves(all_histories, generate_save_path("wvf_training_curves.png"))
-    plot_evaluation_summary(primitive_results, compositional_results, 
-                           generate_save_path("wvf_evaluation.png"))
-    plot_full_summary(all_histories, primitive_results, compositional_results,
-                     generate_save_path("wvf_summary.png"))
+    plot_training_curves_wvf(all_histories, generate_save_path("wvf_training_curves.png"))
+    plot_evaluation_summary_wvf(primitive_results, compositional_results,
+                                generate_save_path("wvf_evaluation.png"))
+    plot_full_summary_wvf(all_histories, primitive_results, compositional_results,
+                         generate_save_path("wvf_summary.png"))
     
-    # ===== SAVE RESULTS =====
+    # Save results
     results = {
-        "method": "World Value Functions",
-        "composition": "min(Q_f1, Q_f2) with normalization",
+        "method": "World Value Functions (Boolean Task Algebra)",
+        "zero_shot": True,
+        "composition": "min(Q_f1(s,g,a), Q_f2(s,g,a)), then max_g",
+        "r_min": r_min,
         "training": {
             primitive: {
                 "episodes": episodes_per_primitive,
-                "final_success_rate": h["final_success_rate"],
-                "q_range": [h["q_stats"]["min"], h["q_stats"]["max"]]
+                "goal_distribution": history["goal_reached_counts"]
             }
-            for primitive, h in all_histories.items()
+            for primitive, history in all_histories.items()
         },
         "evaluation_primitives": {
             p: {"success_rate": r["success_rate"], "mean_length": r["mean_length"]}
             for p, r in primitive_results.items()
         },
-        "evaluation_compositional": {
+        "evaluation_compositional_zero_shot": {
             t: {
                 "success_rate": r["success_rate"],
                 "mean_length": r["mean_length"],
@@ -650,7 +647,7 @@ def run_wvf_experiment(
     }
     
     results["summary"]["generalization_gap"] = (
-        results["summary"]["avg_primitive_success"] - 
+        results["summary"]["avg_primitive_success"] -
         results["summary"]["avg_compositional_success"]
     )
     
@@ -659,13 +656,13 @@ def run_wvf_experiment(
         json.dump(results, f, indent=2)
     print(f"Results saved to: {results_path}")
     
-    # ===== FINAL SUMMARY =====
+    # Final summary
     print("\n" + "="*70)
     print("WVF EXPERIMENT COMPLETE")
     print("="*70)
-    print(f"Primitive Tasks Average:       {results['summary']['avg_primitive_success']:.1%}")
-    print(f"Compositional Tasks Average:   {results['summary']['avg_compositional_success']:.1%}")
-    print(f"Generalization Gap:            {results['summary']['generalization_gap']:.1%}")
+    print(f"Primitive Tasks Average:              {results['summary']['avg_primitive_success']:.1%}")
+    print(f"Zero-Shot Compositional Average:      {results['summary']['avg_compositional_success']:.1%}")
+    print(f"Generalization Gap:                   {results['summary']['generalization_gap']:.1%}")
     print("="*70)
     
     return results, agent
@@ -680,5 +677,6 @@ if __name__ == "__main__":
         learning_rate=0.0001,
         gamma=0.99,
         epsilon_decay=0.999,
+        r_min=-10.0,
         seed=42
     )
