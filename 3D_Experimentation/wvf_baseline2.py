@@ -35,6 +35,8 @@ import torch
 from env import DiscreteMiniWorldWrapper
 from agents import WorldValueFunctionAgent
 
+from utils import generate_save_path
+
 
 # ============================================================================
 # TASK DEFINITIONS
@@ -88,14 +90,6 @@ def check_task_satisfaction(info, task):
             return contacted_object == "red_box"
     
     return False
-
-
-def generate_save_path(filename):
-    """Generate save path in outputs directory."""
-    output_dir = "/mnt/user-data/outputs"
-    os.makedirs(output_dir, exist_ok=True)
-    return os.path.join(output_dir, filename)
-
 
 # ============================================================================
 # TRAINING
