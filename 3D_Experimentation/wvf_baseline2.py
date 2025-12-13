@@ -196,6 +196,8 @@ def train_all_primitives_wvf(env, agent, episodes_per_primitive=2000, max_steps=
             max_steps=max_steps
         )
         all_histories[primitive] = history
+
+        agent.memories[primitive].clear()
         
         gc.collect()
         if torch.cuda.is_available():
@@ -578,7 +580,7 @@ def run_wvf_experiment(
         epsilon_start=1.0,
         epsilon_end=0.05,
         epsilon_decay=epsilon_decay,
-        memory_size=2000,
+        memory_size=1500,
         batch_size=16,
         seq_len=4,
         hidden_size=128,
