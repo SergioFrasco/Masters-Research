@@ -87,8 +87,9 @@ def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
     Train WVF on a single primitive task.
     
     Key difference from regular DQN training:
-    - Each episode samples a random TARGET GOAL to reach
-    - Extended rewards penalize reaching wrong goals
+    - Each episode samples a target goal from VALID goals for this primitive
+    - Extended rewards penalize reaching wrong goals (for learning)
+    - We track TRUE env rewards separately (for plotting)
     - Network learns Q(s, g, a) for all goals g
     """
     print(f"\n{'='*60}")
@@ -100,8 +101,8 @@ def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
     task = PRIMITIVE_TASKS[primitive]
     env.set_task(task)
     
-    # Tracking
-    episode_rewards = []
+    # Tracking - TRUE env rewards (did we complete the primitive task?)
+    episode_rewards = []  # True task success: 1 if primitive satisfied, 0 otherwise
     episode_lengths = []
     episode_losses = []
     goal_reached_counts = {g: 0 for g in agent.GOALS}
@@ -109,11 +110,11 @@ def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
     for episode in tqdm(range(episodes), desc=f"Training '{primitive}'"):
         obs, info = env.reset()
         
-        # Reset episode and sample a target goal
+        # Reset episode and sample a target goal (only from valid goals)
         stacked_obs, target_goal_idx = agent.reset_episode(obs)
         target_goal_name = agent.GOALS[target_goal_idx]
         
-        episode_reward = 0
+        true_reward = 0  # Track actual task completion
         episode_loss = []
         
         for step in range(max_steps):
@@ -123,17 +124,23 @@ def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
             # Step environment
             next_obs, _, terminated, truncated, info = env.step(action)
             
-            # Compute extended reward
-            reward, goal_reached = agent.compute_extended_reward(
+            # Compute extended reward for LEARNING (can use r_min, shaping, etc.)
+            shaped_reward, goal_reached = agent.compute_extended_reward(
                 info, target_goal_idx, step_penalty
             )
+            
+            # Check TRUE task completion (for plotting)
+            contacted = info.get('contacted_object', None)
+            if contacted is not None:
+                if check_primitive_satisfaction(info, primitive):
+                    true_reward = 1.0
             
             done = goal_reached or terminated or truncated
             
             next_stacked_obs = agent.step_episode(next_obs)
             
-            # Store transition
-            agent.remember(stacked_obs, target_goal_idx, action, reward,
+            # Store transition with SHAPED reward (for learning)
+            agent.remember(stacked_obs, target_goal_idx, action, shaped_reward,
                           next_stacked_obs, done)
             
             # Train every 4 steps
@@ -142,30 +149,30 @@ def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
                 if loss > 0:
                     episode_loss.append(loss)
             
-            episode_reward += reward
             stacked_obs = next_stacked_obs
             
             if done:
-                contacted = info.get('contacted_object', None)
                 if contacted in goal_reached_counts:
                     goal_reached_counts[contacted] += 1
                 break
         
         agent.decay_epsilon()
         
-        episode_rewards.append(episode_reward)
+        # Track TRUE rewards (task completion), not shaped rewards
+        episode_rewards.append(true_reward)
         episode_lengths.append(step + 1)
         episode_losses.append(np.mean(episode_loss) if episode_loss else 0.0)
         
         if verbose and (episode + 1) % 500 == 0:
-            recent_reward = np.mean(episode_rewards[-500:])
+            recent_success = np.mean(episode_rewards[-500:])
             recent_length = np.mean(episode_lengths[-500:])
-            print(f"  Episode {episode+1}: Avg Reward={recent_reward:.2f}, "
+            print(f"  Episode {episode+1}: Success Rate={recent_success:.1%}, "
                   f"Avg Length={recent_length:.1f}, Epsilon={agent.epsilon:.3f}")
             print(f"    Goals reached: {goal_reached_counts}")
     
+    final_success = np.mean(episode_rewards[-100:])
     print(f"\nPrimitive '{primitive}' training complete!")
-    print(f"  Final avg reward (last 100): {np.mean(episode_rewards[-100:]):.2f}")
+    print(f"  Final success rate (last 100): {final_success:.1%}")
     print(f"  Goal distribution: {goal_reached_counts}")
     
     return {
@@ -174,6 +181,7 @@ def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
         "episode_lengths": episode_lengths,
         "episode_losses": episode_losses,
         "goal_reached_counts": goal_reached_counts,
+        "final_success_rate": final_success,
     }
 
 
@@ -188,8 +196,6 @@ def train_all_primitives_wvf(env, agent, episodes_per_primitive=2000, max_steps=
             max_steps=max_steps
         )
         all_histories[primitive] = history
-
-        agent.memories[primitive].clear()
         
         gc.collect()
         if torch.cuda.is_available():
@@ -572,7 +578,7 @@ def run_wvf_experiment(
         epsilon_start=1.0,
         epsilon_end=0.05,
         epsilon_decay=epsilon_decay,
-        memory_size=1000,
+        memory_size=2000,
         batch_size=16,
         seq_len=4,
         hidden_size=128,

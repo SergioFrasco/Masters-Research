@@ -370,10 +370,14 @@ class WorldValueFunctionAgent:
         """
         Sample a target goal for this episode.
         
-        We sample uniformly from ALL goals, not just valid ones for current task.
-        This ensures the network learns Q(s, g, a) for ALL goals g.
+        We sample from VALID goals for the current primitive task.
+        This gives clear reward signal: reach target = +1, reach other = r_min.
+        
+        The agent still learns about ALL goals because when it accidentally
+        reaches an invalid goal, it gets r_min penalty.
         """
-        goal_name = random.choice(self.GOALS)
+        valid_goals = self.PRIMITIVE_GOALS[self.current_primitive]
+        goal_name = random.choice(valid_goals)
         self.current_target_goal = goal_name
         return self.GOAL_TO_IDX[goal_name]
     
@@ -387,10 +391,9 @@ class WorldValueFunctionAgent:
         """
         Compute extended reward based on Nangue Tasse's formulation.
         
-        Extended reward structure:
-        - Reach target goal AND it satisfies primitive: +1
-        - Reach target goal but doesn't satisfy primitive: r_min
-        - Reach different goal than target: r_min
+        Since we only sample valid goals as targets:
+        - Reach target goal: +1 (good!)
+        - Reach any other goal: r_min (bad - teaches which goals to avoid)
         - No goal reached: step_penalty
         """
         contacted = info.get('contacted_object', None)
@@ -403,21 +406,11 @@ class WorldValueFunctionAgent:
         if contacted_goal_idx is None:
             return step_penalty, False
         
-        # Check if this goal satisfies the current primitive task
-        primitive = self.current_primitive
-        valid_goals = self.PRIMITIVE_GOALS[primitive]
-        goal_satisfies_task = contacted in valid_goals
-        
-        # Extended reward logic
+        # Did we reach the target goal?
         if contacted_goal_idx == target_goal_idx:
-            # Reached the target goal
-            if goal_satisfies_task:
-                reward = 1.0
-            else:
-                reward = self.r_min
+            reward = 1.0  # Reached our target!
         else:
-            # Reached a different goal
-            reward = self.r_min
+            reward = self.r_min  # Reached wrong goal - learn to avoid
         
         return reward, True  # True = episode done
     
