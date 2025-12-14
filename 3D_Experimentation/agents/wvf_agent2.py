@@ -1,19 +1,19 @@
 """
-Corrected World Value Functions (WVF) Agent for Compositional RL
+World Value Functions (WVF) Agent for Compositional RL
 
 Based on Nangue Tasse et al.'s Boolean Task Algebra (NeurIPS 2020)
 
-KEY CORRECTIONS from the original implementation:
-1. Sample goals from ENTIRE goal space (not just valid goals for current task)
-2. Extended reward applies when reaching a DIFFERENT goal than conditioned on
-3. Network learns value of each goal g under each task (not just how to reach valid goals)
-4. Separate tracking of TRUE env rewards (for plotting) vs SHAPED rewards (for training)
+GOAL CONDITIONING: Option 3 - Goal Tiling
+- Goal one-hot is tiled across spatial dimensions and concatenated with image
+- This makes the goal a prominent part of the CNN input (not just appended later)
+- Combined with LSTM for temporal reasoning
 
-CLUSTER-FRIENDLY:
-- Episode-based replay buffer (memory efficient)
-- Small LSTM (64 units)
-- Smaller batch size (16)
-- Networks cleared between primitive training
+KEY DESIGN:
+1. Goal tiled as extra image channels -> CNN sees goal at every pixel
+2. LSTM for temporal memory
+3. Train separately for each primitive task
+4. Extended rewards teach which goals are good/bad for each task
+5. Zero-shot composition via min operation
 """
 
 import numpy as np
@@ -46,26 +46,37 @@ class FrameStack:
         return np.concatenate(list(self.frames), axis=0)
 
 
-class GoalConditionedLSTMNetwork(nn.Module):
+class GoalTiledLSTMNetwork(nn.Module):
     """
-    Goal-Conditioned Q-Network with LSTM: Q(s, g, a)
+    Goal-Conditioned Q-Network with Goal Tiling + LSTM.
     
-    The goal g is provided as a one-hot vector and concatenated
-    with the CNN features before the LSTM layer.
+    Goal Conditioning Strategy:
+        - The goal one-hot vector is tiled across the spatial dimensions
+        - Concatenated with the image as extra channels BEFORE the CNN
+        - This forces the CNN to see the goal at every pixel location
+        - Much stronger conditioning than concatenating after CNN
+    
+    Architecture:
+        [Image (12 ch) | Goal Tiled (4 ch)] -> CNN -> LSTM -> Dueling Q
+        
+    Input: (batch, 12 + 4, H, W) = (batch, 16, 60, 80)
     """
     
     def __init__(self, input_shape=(12, 60, 80), num_goals=4, action_size=3,
                  hidden_size=128, lstm_size=64):
-        super(GoalConditionedLSTMNetwork, self).__init__()
+        super(GoalTiledLSTMNetwork, self).__init__()
         
         self.input_shape = input_shape
         self.num_goals = num_goals
         self.action_size = action_size
         self.lstm_size = lstm_size
         
-        # CNN backbone for visual features
+        # CNN input channels = image channels + goal channels
+        cnn_input_channels = input_shape[0] + num_goals  # 12 + 4 = 16
+        
+        # CNN backbone
         self.conv = nn.Sequential(
-            nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
+            nn.Conv2d(cnn_input_channels, 32, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
             nn.ReLU(),
@@ -73,14 +84,14 @@ class GoalConditionedLSTMNetwork(nn.Module):
             nn.ReLU(),
         )
         
-        self._conv_output_size = self._get_conv_output_size(input_shape)
-        
-        # LSTM input: CNN features + goal one-hot
-        lstm_input_size = self._conv_output_size + num_goals
+        # Calculate CNN output size
+        self._conv_output_size = self._get_conv_output_size(cnn_input_channels, 
+                                                             input_shape[1], 
+                                                             input_shape[2])
         
         # LSTM for temporal reasoning
         self.lstm = nn.LSTM(
-            input_size=lstm_input_size,
+            input_size=self._conv_output_size,
             hidden_size=lstm_size,
             num_layers=1,
             batch_first=True
@@ -101,9 +112,9 @@ class GoalConditionedLSTMNetwork(nn.Module):
         
         self._initialize_weights()
     
-    def _get_conv_output_size(self, shape):
+    def _get_conv_output_size(self, channels, height, width):
         with torch.no_grad():
-            dummy = torch.zeros(1, *shape)
+            dummy = torch.zeros(1, channels, height, width)
             output = self.conv(dummy)
             return int(np.prod(output.shape[1:]))
     
@@ -125,14 +136,39 @@ class GoalConditionedLSTMNetwork(nn.Module):
                     elif 'bias' in name:
                         nn.init.constant_(param.data, 0)
     
-    def forward(self, state, goal, hidden=None):
+    def tile_goal(self, state, goal):
         """
-        Forward pass.
+        Tile goal across spatial dimensions and concatenate with state.
         
         Args:
-            state: (batch, channels, height, width)
-            goal: (batch, num_goals) one-hot encoding of target goal
-            hidden: Optional LSTM hidden state
+            state: (batch, C, H, W) image tensor
+            goal: (batch, num_goals) one-hot goal vector
+        
+        Returns:
+            combined: (batch, C + num_goals, H, W)
+        """
+        batch_size = state.size(0)
+        H, W = state.size(2), state.size(3)
+        
+        # Reshape goal: (batch, num_goals) -> (batch, num_goals, 1, 1)
+        goal_expanded = goal.view(batch_size, self.num_goals, 1, 1)
+        
+        # Tile across spatial dimensions: (batch, num_goals, H, W)
+        goal_tiled = goal_expanded.expand(batch_size, self.num_goals, H, W)
+        
+        # Concatenate with state along channel dimension
+        combined = torch.cat([state, goal_tiled], dim=1)
+        
+        return combined
+    
+    def forward(self, state, goal, hidden=None):
+        """
+        Forward pass with goal tiling.
+        
+        Args:
+            state: (batch, C, H, W) image tensor
+            goal: (batch, num_goals) one-hot goal vector
+            hidden: Optional LSTM hidden state (h, c)
         
         Returns:
             q_values: (batch, action_size)
@@ -140,23 +176,24 @@ class GoalConditionedLSTMNetwork(nn.Module):
         """
         batch_size = state.size(0)
         
+        # Tile goal and concatenate with state
+        combined = self.tile_goal(state, goal)  # (batch, C+4, H, W)
+        
         # CNN features
-        conv_features = self.conv(state)
-        conv_features = conv_features.view(batch_size, -1)
+        conv_features = self.conv(combined)
+        conv_features = conv_features.view(batch_size, -1)  # (batch, conv_output)
         
-        # Concatenate with goal
-        combined = torch.cat([conv_features, goal], dim=1)
-        combined = combined.unsqueeze(1)  # (batch, 1, features+goals)
+        # LSTM expects (batch, seq_len, features)
+        conv_features = conv_features.unsqueeze(1)  # (batch, 1, conv_output)
         
-        # LSTM
         if hidden is not None:
-            lstm_out, hidden = self.lstm(combined, hidden)
+            lstm_out, hidden = self.lstm(conv_features, hidden)
         else:
-            lstm_out, hidden = self.lstm(combined)
+            lstm_out, hidden = self.lstm(conv_features)
         
         lstm_out = lstm_out[:, -1, :]  # (batch, lstm_size)
         
-        # Dueling
+        # Dueling Q-values
         value = self.value_stream(lstm_out)
         advantage = self.advantage_stream(lstm_out)
         q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
@@ -169,7 +206,7 @@ class GoalConditionedLSTMNetwork(nn.Module):
         
         Returns:
             q_values: (batch, num_goals, action_size)
-            hidden: Updated LSTM hidden state (from last goal, for consistency)
+            hidden: Updated LSTM hidden state
         """
         batch_size = state.size(0)
         device = state.device
@@ -183,7 +220,8 @@ class GoalConditionedLSTMNetwork(nn.Module):
             
             q_vals, hidden = self.forward(state, goal, hidden)
             all_q_values.append(q_vals)
-            # Detach hidden to prevent memory buildup
+            
+            # Detach hidden to prevent memory buildup across goals
             if hidden is not None:
                 hidden = (hidden[0].detach(), hidden[1].detach())
         
@@ -191,6 +229,7 @@ class GoalConditionedLSTMNetwork(nn.Module):
         return torch.stack(all_q_values, dim=1), hidden
     
     def init_hidden(self, batch_size=1, device='cpu'):
+        """Initialize LSTM hidden state."""
         h = torch.zeros(1, batch_size, self.lstm_size, device=device)
         c = torch.zeros(1, batch_size, self.lstm_size, device=device)
         return (h, c)
@@ -199,7 +238,7 @@ class GoalConditionedLSTMNetwork(nn.Module):
 class EpisodeReplayBuffer:
     """
     Episode-based replay buffer for LSTM training.
-    Memory efficient: stores episodes, samples sequences.
+    Stores complete episodes and samples sequences for training.
     """
     
     def __init__(self, capacity=2000):
@@ -213,9 +252,9 @@ class EpisodeReplayBuffer:
             self.end_episode()
     
     def end_episode(self):
-        """Finalize the current episode and store it."""
+        """Finalize and store the current episode."""
         if len(self.current_episode) > 0:
-            self.episodes.append(self.current_episode)
+            self.episodes.append(list(self.current_episode))
             self.current_episode = []
     
     def sample(self, batch_size, seq_len=4):
@@ -229,7 +268,7 @@ class EpisodeReplayBuffer:
                 start = random.randint(0, len(episode) - seq_len)
                 sequence = episode[start:start + seq_len]
             else:
-                sequence = episode
+                sequence = list(episode)
             
             batch.append(sequence)
         
@@ -245,13 +284,13 @@ class EpisodeReplayBuffer:
 
 class WorldValueFunctionAgent:
     """
-    Corrected World Value Function (WVF) Agent
+    World Value Function (WVF) Agent with Goal Tiling + LSTM
     
     KEY DESIGN:
-    1. ONE Q-network architecture that we train separately for each primitive task
-    2. Each training produces a different set of weights (stored in trained_networks)
-    3. Goals are sampled from the ENTIRE goal space during training
-    4. Extended rewards teach the network about ALL goals, not just valid ones
+    1. Goal tiled as extra image channels - CNN sees goal at every pixel
+    2. LSTM for temporal memory across steps
+    3. Train separately for each primitive task
+    4. Extended rewards teach which goals are good/bad for each task
     5. Zero-shot composition via min operation over primitive Q-values
     
     Goals: [red_box, blue_box, red_sphere, blue_sphere]
@@ -286,9 +325,9 @@ class WorldValueFunctionAgent:
         self.seq_len = seq_len
         
         # Extended reward parameters
-        self.r_min = r_min              # Penalty when reaching DIFFERENT goal than conditioned
-        self.r_correct = r_correct      # Reward for reaching correct goal that's task-valid
-        self.r_wrong = r_wrong          # Reward for reaching correct goal that's task-invalid
+        self.r_min = r_min
+        self.r_correct = r_correct
+        self.r_wrong = r_wrong
         self.step_penalty = step_penalty
         
         # Hyperparameters
@@ -321,16 +360,16 @@ class WorldValueFunctionAgent:
             self.single_frame_shape = (3, sample_img.shape[0], sample_img.shape[1])
         
         self.obs_shape = (k_frames * 3, self.single_frame_shape[1], self.single_frame_shape[2])
+        
         print(f"Observation shape: {self.obs_shape}")
-        print(f"Goal space: {self.GOALS}")
+        print(f"Goal conditioning: Tiled as {self.num_goals} extra channels")
+        print(f"CNN input shape: ({self.obs_shape[0] + self.num_goals}, {self.obs_shape[1]}, {self.obs_shape[2]})")
         print(f"Extended rewards: r_min={r_min}, r_correct={r_correct}, r_wrong={r_wrong}")
-        print(f"LSTM size: {lstm_size}, Hidden size: {hidden_size}")
-        print(f"Memory: {memory_size} episodes, Batch: {batch_size}, Seq len: {seq_len}")
         
         # Frame stacker
         self.frame_stack = FrameStack(k=k_frames)
         
-        # Networks will be initialized when training starts
+        # Networks (initialized when training starts)
         self.q_network = None
         self.target_network = None
         self.optimizer = None
@@ -344,10 +383,10 @@ class WorldValueFunctionAgent:
         self.current_valid_goals = None
         self.epsilon = epsilon_start
         self.current_hidden = None
-        
+    
     def _create_networks(self):
         """Create fresh networks for training."""
-        self.q_network = GoalConditionedLSTMNetwork(
+        self.q_network = GoalTiledLSTMNetwork(
             input_shape=self.obs_shape,
             num_goals=self.num_goals,
             action_size=self.action_dim,
@@ -355,7 +394,7 @@ class WorldValueFunctionAgent:
             lstm_size=self.lstm_size
         ).to(self.device)
         
-        self.target_network = GoalConditionedLSTMNetwork(
+        self.target_network = GoalTiledLSTMNetwork(
             input_shape=self.obs_shape,
             num_goals=self.num_goals,
             action_size=self.action_dim,
@@ -382,28 +421,28 @@ class WorldValueFunctionAgent:
         self._create_networks()
         
         print(f"\nTraining primitive: {primitive}")
-        print(f"  Valid goals for this task: {self.current_valid_goals}")
+        print(f"  Valid goals: {self.current_valid_goals}")
     
     def save_trained_network(self, primitive):
         """Save the trained network for a primitive."""
         self.trained_networks[primitive] = copy.deepcopy(self.q_network.state_dict())
         print(f"  Saved trained network for '{primitive}'")
         
-        # Clear networks to free memory
+        # Clear to free memory
         self.q_network = None
         self.target_network = None
         self.optimizer = None
         self.memory = None
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     
     def load_trained_network(self, primitive):
         """Load a previously trained network for evaluation."""
         if primitive not in self.trained_networks:
             raise ValueError(f"No trained network for primitive '{primitive}'")
         
-        # Create network if needed
         if self.q_network is None:
-            self.q_network = GoalConditionedLSTMNetwork(
+            self.q_network = GoalTiledLSTMNetwork(
                 input_shape=self.obs_shape,
                 num_goals=self.num_goals,
                 action_size=self.action_dim,
@@ -421,23 +460,14 @@ class WorldValueFunctionAgent:
     
     def sample_target_goal(self, valid_bias=0.8):
         """
-        Sample a target goal with BIAS toward valid goals.
+        Sample a target goal with bias toward valid goals.
         
-        This balances two needs:
-        1. Strong learning signal: mostly sample valid goals so agent learns to reach them
-        2. Discrimination: occasionally sample invalid goals so agent learns they're bad
-        
-        Args:
-            valid_bias: probability of sampling from valid goals (default 0.8)
-        
-        Returns:
-            goal_idx: index of the sampled goal
+        80% valid goals (strong learning signal)
+        20% invalid goals (learn they're bad)
         """
         if random.random() < valid_bias:
-            # 80% of time: sample from valid goals for this task
             goal_name = random.choice(self.current_valid_goals)
         else:
-            # 20% of time: sample from invalid goals to learn they're bad
             invalid_goals = [g for g in self.GOALS if g not in self.current_valid_goals]
             goal_name = random.choice(invalid_goals)
         
@@ -456,33 +486,28 @@ class WorldValueFunctionAgent:
     
     def compute_rewards(self, info, target_goal_idx):
         """
-        Compute both TRUE reward (for plotting) and EXTENDED reward (for training).
+        Compute TRUE reward (for plotting) and EXTENDED reward (for training).
         
         Returns:
-            true_reward: 0 or 1 based on whether primitive task was satisfied
-            extended_reward: shaped reward for Q-learning with goal conditioning
+            true_reward: 0 or 1 (did we satisfy the primitive task?)
+            extended_reward: shaped reward for goal-conditioned learning
             done: whether episode should end
         """
         contacted = info.get('contacted_object', None)
         
         if contacted is None:
-            # No goal reached yet
             return 0.0, self.step_penalty, False
         
         target_goal_name = self.IDX_TO_GOAL[target_goal_idx]
         contacted_goal_idx = self.GOAL_TO_IDX.get(contacted, None)
         
         if contacted_goal_idx is None:
-            # Contacted something that's not a goal
             return 0.0, self.step_penalty, False
         
         # TRUE reward: did we satisfy the current primitive task?
-        if contacted in self.current_valid_goals:
-            true_reward = 1.0  # Task satisfied!
-        else:
-            true_reward = 0.0  # Task not satisfied
+        true_reward = 1.0 if contacted in self.current_valid_goals else 0.0
         
-        # EXTENDED reward: for training the goal-conditioned Q-network
+        # EXTENDED reward for goal-conditioned learning
         if contacted == target_goal_name:
             # Reached the goal we conditioned on
             if contacted in self.current_valid_goals:
@@ -490,15 +515,13 @@ class WorldValueFunctionAgent:
             else:
                 extended_reward = self.r_wrong    # Bad goal for this task
         else:
-            # Reached a DIFFERENT goal than we conditioned on
-            # This teaches the network: "if you wanted to reach target_goal, 
-            # but you reached something else, that's very bad"
+            # Reached a DIFFERENT goal than conditioned on
             extended_reward = self.r_min
         
-        return true_reward, extended_reward, True  # Episode done when any goal reached
+        return true_reward, extended_reward, True
     
     def preprocess_frame(self, obs):
-        """Convert observation to single frame tensor."""
+        """Convert observation to single frame."""
         if isinstance(obs, dict) and 'image' in obs:
             img = obs['image']
         else:
@@ -507,9 +530,7 @@ class WorldValueFunctionAgent:
         if isinstance(img, torch.Tensor):
             img = img.numpy()
         
-        if img.shape[0] in [3, 4]:
-            pass
-        else:
+        if img.shape[0] not in [3, 4]:
             img = np.transpose(img, (2, 0, 1))
         
         if img.dtype == np.uint8:
@@ -529,7 +550,6 @@ class WorldValueFunctionAgent:
         frame = self.preprocess_frame(obs)
         stacked = self.frame_stack.reset(frame)
         
-        # Reset LSTM hidden state
         if self.q_network is not None:
             self.current_hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
         
@@ -553,9 +573,8 @@ class WorldValueFunctionAgent:
         
         with torch.no_grad():
             q_values, self.current_hidden = self.q_network(state, goal, self.current_hidden)
-            # Detach hidden state
             if self.current_hidden is not None:
-                self.current_hidden = (self.current_hidden[0].detach(), 
+                self.current_hidden = (self.current_hidden[0].detach(),
                                        self.current_hidden[1].detach())
             return q_values.argmax().item()
     
@@ -563,105 +582,71 @@ class WorldValueFunctionAgent:
         """
         Select action by: argmax_a max_g Q(s, g, a)
         
-        If valid_goal_indices is provided, only consider those goals.
-        This helps during evaluation to focus on task-relevant goals.
-        
-        Args:
-            stacked_obs: frame-stacked observation
-            valid_goal_indices: optional list of goal indices to consider
+        If valid_goal_indices provided, only consider those goals.
         """
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            # Get Q-values for all goals: (1, num_goals, action_size)
             all_q, self.current_hidden = self.q_network.forward_all_goals(state, self.current_hidden)
             
             if valid_goal_indices is not None:
-                # Only consider valid goals
-                valid_q = all_q[:, valid_goal_indices, :]  # (1, num_valid, action_size)
-                max_over_goals = valid_q.max(dim=1)[0]  # (1, action_size)
+                valid_q = all_q[:, valid_goal_indices, :]
+                max_over_goals = valid_q.max(dim=1)[0]
             else:
-                # Max over all goals
-                max_over_goals = all_q.max(dim=1)[0]  # (1, action_size)
+                max_over_goals = all_q.max(dim=1)[0]
             
             return max_over_goals.argmax().item()
     
     def select_action_composed(self, stacked_obs, features):
         """
-        Select action using composed Q-values for zero-shot evaluation.
+        Select action using composed Q-values.
         
-        Boolean composition for conjunction (AND):
-            Q_composed(s, g, a) = min over features of Q_feature(s, g, a)
-        
-        Then: action = argmax_a max_g Q_composed(s, g, a)
+        Q_composed = min over features of Q_feature
+        action = argmax_a max_g Q_composed(s, g, a)
         """
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
-        # Get Q-values for all goals from each feature network
         q_all_features = []
         
         with torch.no_grad():
             for feature in features:
-                # Load the trained network for this feature
                 self.load_trained_network(feature)
-                
-                # Get Q-values for all goals: (1, num_goals, action_size)
                 hidden = self.q_network.init_hidden(1, self.device)
                 all_q, _ = self.q_network.forward_all_goals(state, hidden)
                 q_all_features.append(all_q)
             
-            # Stack: (num_features, 1, num_goals, action_size)
             q_stacked = torch.stack(q_all_features, dim=0)
-            
-            # Conjunction: min over features
-            q_composed = q_stacked.min(dim=0)[0]  # (1, num_goals, action_size)
-            
-            # Max over goals, then argmax over actions
-            q_max_goal = q_composed.max(dim=1)[0]  # (1, action_size)
+            q_composed = q_stacked.min(dim=0)[0]
+            q_max_goal = q_composed.max(dim=1)[0]
             
             return q_max_goal.argmax().item()
     
     def select_action_composed_for_goal(self, stacked_obs, features, target_goal_idx):
         """
-        Select action using composed Q-values for a SPECIFIC target goal.
+        Select action for a SPECIFIC target goal using composition.
         
-        For compositional tasks like "red_box", there's exactly one correct goal.
-        So instead of max over goals, we directly use the target goal.
-        
-        Q_composed(s, g, a) = min over features of Q_feature(s, g, a)
-        action = argmax_a Q_composed(s, target_goal, a)
-        
-        Args:
-            stacked_obs: frame-stacked observation
-            features: list of primitive features to compose (e.g., ['red', 'box'])
-            target_goal_idx: index of the specific goal to pursue
+        Q_composed = min over features of Q_feature(s, target_goal, a)
+        action = argmax_a Q_composed
         """
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         goal_one_hot = self.get_goal_one_hot(target_goal_idx)
         
-        # Get Q-values for target goal from each feature network
         q_values_per_feature = []
         
         with torch.no_grad():
             for feature in features:
-                # Load the trained network for this feature
                 self.load_trained_network(feature)
-                
-                # Get Q-values for the target goal
                 hidden = self.q_network.init_hidden(1, self.device)
                 q_vals, _ = self.q_network(state, goal_one_hot, hidden)
-                q_values_per_feature.append(q_vals)  # (1, action_size)
+                q_values_per_feature.append(q_vals)
             
-            # Stack: (num_features, 1, action_size)
             q_stacked = torch.stack(q_values_per_feature, dim=0)
-            
-            # Conjunction: min over features
-            q_composed = q_stacked.min(dim=0)[0]  # (1, action_size)
+            q_composed = q_stacked.min(dim=0)[0]
             
             return q_composed.argmax().item()
     
     def remember(self, state, goal_idx, action, reward, next_state, done):
-        """Store transition in episode replay buffer."""
+        """Store transition."""
         self.memory.push(state, goal_idx, action, reward, next_state, done)
     
     def soft_update_target(self):
@@ -675,14 +660,11 @@ class WorldValueFunctionAgent:
             )
     
     def train_step(self):
-        """Perform one training step with sequence sampling."""
+        """Perform one training step."""
         if len(self.memory) < self.batch_size:
             return 0.0
         
-        # Sample sequences from episodes
         sequences = self.memory.sample(self.batch_size, self.seq_len)
-        
-        # Pad sequences to same length
         max_len = max(len(seq) for seq in sequences)
         
         states_batch, goals_batch, actions_batch = [], [], []
@@ -699,7 +681,6 @@ class WorldValueFunctionAgent:
             next_states = [s[4] for s in seq]
             dones = [s[5] for s in seq]
             
-            # Pad if needed
             if seq_len_actual < max_len:
                 pad_len = max_len - seq_len_actual
                 states.extend([states[-1]] * pad_len)
@@ -716,7 +697,6 @@ class WorldValueFunctionAgent:
             next_states_batch.append(next_states)
             dones_batch.append(dones)
         
-        # Convert to tensors
         states_t = torch.FloatTensor(np.array(states_batch)).to(self.device)
         goals_t = torch.LongTensor(goals_batch).to(self.device)
         actions_t = torch.LongTensor(actions_batch).to(self.device)
@@ -726,14 +706,11 @@ class WorldValueFunctionAgent:
         
         batch_size, seq_len = states_t.shape[:2]
         
-        # Initialize hidden states
         hidden = self.q_network.init_hidden(batch_size, self.device)
         target_hidden = self.target_network.init_hidden(batch_size, self.device)
         
-        # Forward pass through sequence
         q_values_list = []
         for t in range(seq_len):
-            # Convert goal indices to one-hot
             goal_one_hot = torch.zeros(batch_size, self.num_goals, device=self.device)
             for b in range(batch_size):
                 goal_one_hot[b, goals_t[b, t]] = 1.0
@@ -742,12 +719,10 @@ class WorldValueFunctionAgent:
             q_values_list.append(q_vals)
             hidden = (hidden[0].detach(), hidden[1].detach())
         
-        q_values = torch.stack(q_values_list, dim=1)  # (batch, seq, actions)
+        q_values = torch.stack(q_values_list, dim=1)
         current_q = q_values.gather(2, actions_t.unsqueeze(2)).squeeze(2)
         
-        # Double DQN target
         with torch.no_grad():
-            # Online network selects actions
             next_q_list = []
             hidden_copy = self.q_network.init_hidden(batch_size, self.device)
             for t in range(seq_len):
@@ -762,7 +737,6 @@ class WorldValueFunctionAgent:
             next_q_values = torch.stack(next_q_list, dim=1)
             next_actions = next_q_values.argmax(2, keepdim=True)
             
-            # Target network evaluates
             target_q_list = []
             for t in range(seq_len):
                 goal_one_hot = torch.zeros(batch_size, self.num_goals, device=self.device)
@@ -778,7 +752,6 @@ class WorldValueFunctionAgent:
             
             target_q = rewards_t + (self.gamma * next_q * ~dones_t)
         
-        # Masked loss (only on valid timesteps)
         loss_mask = torch.zeros(batch_size, seq_len, device=self.device)
         for i, length in enumerate(lengths):
             loss_mask[i, :length] = 1.0
@@ -786,13 +759,11 @@ class WorldValueFunctionAgent:
         loss = F.smooth_l1_loss(current_q * loss_mask, target_q * loss_mask, reduction='sum')
         loss = loss / loss_mask.sum()
         
-        # Backward
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.grad_clip)
         self.optimizer.step()
         
-        # Soft update
         self.soft_update_target()
         
         return loss.item()
