@@ -414,15 +414,34 @@ class WorldValueFunctionAgent:
         self.q_network.load_state_dict(self.trained_networks[primitive])
         self.q_network.eval()
     
-    def sample_target_goal(self):
+    def get_valid_goal_indices(self, primitive):
+        """Get indices of valid goals for a primitive task."""
+        valid_goals = self.VALID_GOALS[primitive]
+        return [self.GOAL_TO_IDX[g] for g in valid_goals]
+    
+    def sample_target_goal(self, valid_bias=0.8):
         """
-        Sample a target goal from the ENTIRE goal space.
+        Sample a target goal with BIAS toward valid goals.
         
-        This is CRITICAL: we must sample ALL goals, not just valid ones,
-        so the network learns the value of reaching each goal under this task.
+        This balances two needs:
+        1. Strong learning signal: mostly sample valid goals so agent learns to reach them
+        2. Discrimination: occasionally sample invalid goals so agent learns they're bad
+        
+        Args:
+            valid_bias: probability of sampling from valid goals (default 0.8)
+        
+        Returns:
+            goal_idx: index of the sampled goal
         """
-        goal_idx = random.randint(0, self.num_goals - 1)
-        return goal_idx
+        if random.random() < valid_bias:
+            # 80% of time: sample from valid goals for this task
+            goal_name = random.choice(self.current_valid_goals)
+        else:
+            # 20% of time: sample from invalid goals to learn they're bad
+            invalid_goals = [g for g in self.GOALS if g not in self.current_valid_goals]
+            goal_name = random.choice(invalid_goals)
+        
+        return self.GOAL_TO_IDX[goal_name]
     
     def get_goal_one_hot(self, goal_idx, batch_size=1):
         """Convert goal index to one-hot tensor."""
@@ -540,11 +559,16 @@ class WorldValueFunctionAgent:
                                        self.current_hidden[1].detach())
             return q_values.argmax().item()
     
-    def select_action_greedy_over_goals(self, stacked_obs):
+    def select_action_greedy_over_goals(self, stacked_obs, valid_goal_indices=None):
         """
         Select action by: argmax_a max_g Q(s, g, a)
         
-        Used during evaluation on primitive tasks.
+        If valid_goal_indices is provided, only consider those goals.
+        This helps during evaluation to focus on task-relevant goals.
+        
+        Args:
+            stacked_obs: frame-stacked observation
+            valid_goal_indices: optional list of goal indices to consider
         """
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
@@ -552,8 +576,14 @@ class WorldValueFunctionAgent:
             # Get Q-values for all goals: (1, num_goals, action_size)
             all_q, self.current_hidden = self.q_network.forward_all_goals(state, self.current_hidden)
             
-            # Max over goals, then argmax over actions
-            max_over_goals = all_q.max(dim=1)[0]  # (1, action_size)
+            if valid_goal_indices is not None:
+                # Only consider valid goals
+                valid_q = all_q[:, valid_goal_indices, :]  # (1, num_valid, action_size)
+                max_over_goals = valid_q.max(dim=1)[0]  # (1, action_size)
+            else:
+                # Max over all goals
+                max_over_goals = all_q.max(dim=1)[0]  # (1, action_size)
+            
             return max_over_goals.argmax().item()
     
     def select_action_composed(self, stacked_obs, features):
@@ -590,6 +620,45 @@ class WorldValueFunctionAgent:
             q_max_goal = q_composed.max(dim=1)[0]  # (1, action_size)
             
             return q_max_goal.argmax().item()
+    
+    def select_action_composed_for_goal(self, stacked_obs, features, target_goal_idx):
+        """
+        Select action using composed Q-values for a SPECIFIC target goal.
+        
+        For compositional tasks like "red_box", there's exactly one correct goal.
+        So instead of max over goals, we directly use the target goal.
+        
+        Q_composed(s, g, a) = min over features of Q_feature(s, g, a)
+        action = argmax_a Q_composed(s, target_goal, a)
+        
+        Args:
+            stacked_obs: frame-stacked observation
+            features: list of primitive features to compose (e.g., ['red', 'box'])
+            target_goal_idx: index of the specific goal to pursue
+        """
+        state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
+        goal_one_hot = self.get_goal_one_hot(target_goal_idx)
+        
+        # Get Q-values for target goal from each feature network
+        q_values_per_feature = []
+        
+        with torch.no_grad():
+            for feature in features:
+                # Load the trained network for this feature
+                self.load_trained_network(feature)
+                
+                # Get Q-values for the target goal
+                hidden = self.q_network.init_hidden(1, self.device)
+                q_vals, _ = self.q_network(state, goal_one_hot, hidden)
+                q_values_per_feature.append(q_vals)  # (1, action_size)
+            
+            # Stack: (num_features, 1, action_size)
+            q_stacked = torch.stack(q_values_per_feature, dim=0)
+            
+            # Conjunction: min over features
+            q_composed = q_stacked.min(dim=0)[0]  # (1, action_size)
+            
+            return q_composed.argmax().item()
     
     def remember(self, state, goal_idx, action, reward, next_state, done):
         """Store transition in episode replay buffer."""

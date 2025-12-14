@@ -226,13 +226,19 @@ def evaluate_primitive_wvf(env, agent, primitive, episodes=100, max_steps=200):
     """
     Evaluate WVF on primitive task.
     
-    Policy: argmax_a max_g Q(s, g, a)
+    Policy: argmax_a max_{g in valid_goals} Q(s, g, a)
+    
+    We only consider valid goals for this primitive, which makes sense
+    because the agent was trained to value those goals highly.
     """
     task = PRIMITIVE_TASKS[primitive]
     env.set_task(task)
     
     # Load the trained network for this primitive
     agent.load_trained_network(primitive)
+    
+    # Get valid goal indices for this primitive
+    valid_goal_indices = agent.get_valid_goal_indices(primitive)
     
     successes = []
     lengths = []
@@ -245,8 +251,8 @@ def evaluate_primitive_wvf(env, agent, primitive, episodes=100, max_steps=200):
         ep_reward = 0.0
         
         for step in range(max_steps):
-            # Use greedy policy: argmax_a max_g Q(s, g, a)
-            action = agent.select_action_greedy_over_goals(stacked_obs)
+            # Use greedy policy over VALID goals only
+            action = agent.select_action_greedy_over_goals(stacked_obs, valid_goal_indices)
             
             obs, _, terminated, truncated, info = env.step(action)
             stacked_obs = agent.step_episode(obs)
@@ -283,7 +289,10 @@ def evaluate_compositional_wvf(env, agent, task_name, episodes=100, max_steps=20
     
     For conjunction (AND):
         Q_composed(s, g, a) = min(Q_feature1(s, g, a), Q_feature2(s, g, a))
-        action = argmax_a max_g Q_composed(s, g, a)
+        action = argmax_a Q_composed(s, target_goal, a)
+    
+    Since compositional task has exactly ONE valid goal (e.g., red_box),
+    we directly use that goal instead of max over goals.
     
     The agent has NEVER trained on this task - this is zero-shot generalization.
     """
@@ -291,6 +300,9 @@ def evaluate_compositional_wvf(env, agent, task_name, episodes=100, max_steps=20
     features = task["features"]
     
     env.set_task(task)
+    
+    # The target goal IS the task name (e.g., "red_box")
+    target_goal_idx = agent.GOAL_TO_IDX[task_name]
     
     successes = []
     lengths = []
@@ -303,8 +315,8 @@ def evaluate_compositional_wvf(env, agent, task_name, episodes=100, max_steps=20
         ep_reward = 0.0
         
         for step in range(max_steps):
-            # Zero-shot composed action selection
-            action = agent.select_action_composed(stacked_obs, features)
+            # Zero-shot composed action selection for specific target goal
+            action = agent.select_action_composed_for_goal(stacked_obs, features, target_goal_idx)
             
             obs, _, terminated, truncated, info = env.step(action)
             stacked_obs = agent.step_episode(obs)
