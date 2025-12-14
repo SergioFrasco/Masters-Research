@@ -277,7 +277,7 @@ class WorldValueFunctionAgent:
                  memory_size=2000, batch_size=16, seq_len=4,
                  hidden_size=128, lstm_size=64,
                  tau=0.005, grad_clip=10.0,
-                 r_min=-10.0, r_correct=1.0, r_wrong=-1.0, step_penalty=-0.01):
+                 r_min=-1.0, r_correct=1.0, r_wrong=-1.0, step_penalty=-0.01):
         
         self.env = env
         self.action_dim = 3
