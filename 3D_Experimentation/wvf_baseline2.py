@@ -698,7 +698,7 @@ def run_corrected_wvf_experiment(
         epsilon_end=0.05,
         epsilon_decay=epsilon_decay,
         memory_size=2000,       # Episode-based, cluster-friendly
-        batch_size=16,          # Small batch
+        batch_size=32,          # Small batch
         seq_len=4,              # Short sequences
         hidden_size=128,
         lstm_size=64,           # Small LSTM
@@ -808,12 +808,12 @@ def run_corrected_wvf_experiment(
 if __name__ == "__main__":
     results, agent = run_corrected_wvf_experiment(
         env_size=10,
-        episodes_per_primitive=2000,
-        eval_episodes=100,
+        episodes_per_primitive=4000,
+        eval_episodes=200,
         max_steps=200,
-        learning_rate=0.0001,
+        learning_rate=0.0003,
         gamma=0.99,
-        epsilon_decay=0.999,
+        epsilon_decay=0.9995,
         r_min=-10.0,
         seed=42
     )
