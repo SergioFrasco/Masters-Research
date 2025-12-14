@@ -1107,7 +1107,7 @@ def run_all_experiments(num_seeds=3, episodes_per_task=2000, eval_episodes=500, 
 if __name__ == "__main__":
     all_results, summary = run_all_experiments(
         num_seeds=3,
-        episodes_per_task=2500,
+        episodes_per_task=2000,
         eval_episodes=500,
         max_steps=200
     )
