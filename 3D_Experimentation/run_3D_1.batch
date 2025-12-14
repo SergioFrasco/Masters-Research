@@ -8,10 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-
-export DISPLAY=""
-export PYGLET_HEADLESS=True
-export PYOPENGL_PLATFORM=osmesa
-export MUJOCO_GL=osmesa
-
-python dqn_lstm_baseline.py
+python experiment_runner.py
