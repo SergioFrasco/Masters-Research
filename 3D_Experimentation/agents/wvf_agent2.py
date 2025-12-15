@@ -14,6 +14,11 @@ KEY DESIGN:
 3. Train separately for each primitive task
 4. Extended rewards teach which goals are good/bad for each task
 5. Zero-shot composition via min operation
+
+CRITICAL FIX:
+- Extended reward now gives +1 for ANY valid goal that satisfies the task
+- This allows Q(s, red_box, a) and Q(s, red_sphere, a) to both be learned as good for "red"
+- Enables proper generalization and composition
 """
 
 import numpy as np
@@ -364,7 +369,7 @@ class WorldValueFunctionAgent:
         print(f"Observation shape: {self.obs_shape}")
         print(f"Goal conditioning: Tiled as {self.num_goals} extra channels")
         print(f"CNN input shape: ({self.obs_shape[0] + self.num_goals}, {self.obs_shape[1]}, {self.obs_shape[2]})")
-        print(f"Extended rewards: r_min={r_min}, r_correct={r_correct}, r_wrong={r_wrong}")
+        print(f"Extended rewards: r_correct={r_correct}, r_wrong={r_wrong}")
         
         # Frame stacker
         self.frame_stack = FrameStack(k=k_frames)
@@ -488,6 +493,12 @@ class WorldValueFunctionAgent:
         """
         Compute TRUE reward (for plotting) and EXTENDED reward (for training).
         
+        CRITICAL FIX: Extended reward is +1 for ANY valid goal that satisfies the task,
+        not just the specific goal we conditioned on. This allows the network to
+        learn that Q(s, red_box, a) and Q(s, red_sphere, a) are both good for "red".
+        
+        This aligns the training signal with the environment's implicit task goal.
+        
         Returns:
             true_reward: 0 or 1 (did we satisfy the primitive task?)
             extended_reward: shaped reward for goal-conditioned learning
@@ -505,18 +516,18 @@ class WorldValueFunctionAgent:
             return 0.0, self.step_penalty, False
         
         # TRUE reward: did we satisfy the current primitive task?
-        true_reward = 1.0 if contacted in self.current_valid_goals else 0.0
+        task_satisfied = contacted in self.current_valid_goals
+        true_reward = 1.0 if task_satisfied else 0.0
         
         # EXTENDED reward for goal-conditioned learning
-        if contacted == target_goal_name:
-            # Reached the goal we conditioned on
-            if contacted in self.current_valid_goals:
-                extended_reward = self.r_correct  # Good goal for this task
-            else:
-                extended_reward = self.r_wrong    # Bad goal for this task
+        # KEY FIX: Give +1 for ANY object that satisfies the task, regardless of
+        # which specific goal we conditioned on. This teaches proper generalization.
+        if task_satisfied:
+            # Task complete - give full reward regardless of exact goal
+            extended_reward = self.r_correct  # +1.0
         else:
-            # Reached a DIFFERENT goal than conditioned on
-            extended_reward = self.r_min
+            # Contacted wrong object entirely
+            extended_reward = self.r_wrong  # -1.0
         
         return true_reward, extended_reward, True
     

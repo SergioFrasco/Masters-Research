@@ -3,9 +3,17 @@ Corrected World Value Functions (WVF) Training Script
 
 KEY FIXES:
 1. Sample goals from ENTIRE goal space during training
-2. Track TRUE environment rewards (0/1) separately from extended rewards
-3. Proper plotting showing real success rates
-4. Correct composition at evaluation time
+2. Give +1 extended reward for ANY valid goal that satisfies the task
+   (not just the specific goal we conditioned on)
+3. Track TRUE environment rewards (0/1) separately from extended rewards
+4. Proper plotting showing real success rates
+5. Correct composition at evaluation time
+
+CRITICAL FIX:
+The extended reward now aligns with the environment's implicit task goal.
+When training "red", both red_box and red_sphere get +1 reward, allowing
+Q(s, red_box, a) and Q(s, red_sphere, a) to both learn high values.
+This enables proper zero-shot composition via min operation.
 
 CLUSTER-FRIENDLY:
 - Episode-based replay buffer (2000 episodes)
@@ -89,10 +97,11 @@ def train_primitive_wvf(env, agent, primitive, episodes=2000, max_steps=200,
     """
     Train WVF on a single primitive task.
     
-    KEY DIFFERENCES from original:
-    1. Sample goals from ENTIRE goal space (all 4 objects)
-    2. Extended reward depends on: did we reach the goal we conditioned on?
-    3. Track TRUE task completion (0/1) separately for plotting
+    KEY FIX:
+    - Sample goals from ENTIRE goal space (all 4 objects)
+    - Extended reward gives +1 for ANY valid goal (not just exact match)
+    - This allows Q(s, red_box, a) and Q(s, red_sphere, a) to both be high for "red"
+    - Track TRUE task completion (0/1) separately for plotting
     """
     print(f"\n{'='*60}")
     print(f"TRAINING WVF FOR PRIMITIVE: {primitive.upper()}")
@@ -416,7 +425,7 @@ def plot_training_curves(all_histories, save_path, window=100):
         ax2.set_title(f"'{primitive}' - Training Loss")
         ax2.grid(True, alpha=0.3)
     
-    plt.suptitle('Corrected WVF - Training on Primitive Tasks\n(Showing TRUE environment rewards)', 
+    plt.suptitle('Fixed WVF - Training on Primitive Tasks\n(Extended reward: +1 for ANY valid goal)', 
                  fontsize=14, fontweight='bold')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -469,7 +478,7 @@ def plot_evaluation_comparison(primitive_results, compositional_results, save_pa
     avg_prim = np.mean(prim_success)
     avg_comp = np.mean(comp_success)
     
-    plt.suptitle(f'Corrected WVF Evaluation\nPrimitives: {avg_prim:.0%} | '
+    plt.suptitle(f'Fixed WVF Evaluation\nPrimitives: {avg_prim:.0%} | '
                  f'Zero-Shot Compositional: {avg_comp:.0%} | Gap: {avg_prim - avg_comp:.0%}',
                  fontsize=12, fontweight='bold')
     
@@ -607,15 +616,15 @@ def plot_full_summary(all_histories, primitive_results, compositional_results, s
     
     summary_text = f"""
     ╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
-    ║                         CORRECTED WORLD VALUE FUNCTIONS (WVF) EXPERIMENT                                       ║
+    ║                           FIXED WORLD VALUE FUNCTIONS (WVF) EXPERIMENT                                         ║
     ║                              Zero-Shot Compositional Generalization                                            ║
     ╠═══════════════════════════════════════════════════════════════════════════════════════════════════════════════╣
     ║                                                                                                                ║
-    ║  KEY CORRECTIONS FROM ORIGINAL:                                                                                ║
-    ║    1. Sample goals from ENTIRE goal space (not just valid goals for current task)                             ║
-    ║    2. Extended reward r_min applied when reaching DIFFERENT goal than conditioned on                          ║
-    ║    3. Track TRUE environment rewards (0/1) separately for plotting                                            ║
-    ║    4. Network learns Q(s,g,a) = "value of reaching goal g when solving task T"                                ║
+    ║  CRITICAL FIX:                                                                                                 ║
+    ║    Extended reward now gives +1 for ANY valid goal that satisfies the task                                    ║
+    ║    Training "red" → red_box gets +1, red_sphere gets +1 (both satisfy task)                                   ║
+    ║    This allows Q(s, red_box, a) and Q(s, red_sphere, a) to both learn high values                             ║
+    ║    Enables proper zero-shot composition via min operation                                                     ║
     ║                                                                                                                ║
     ║  PRIMITIVE RESULTS (each trained separately):                                                                  ║
     ║    • red:    {primitive_results['red']['success_rate']:.1%}    • blue:   {primitive_results['blue']['success_rate']:.1%}    • box:    {primitive_results['box']['success_rate']:.1%}    • sphere: {primitive_results['sphere']['success_rate']:.1%}              ║
@@ -637,7 +646,7 @@ def plot_full_summary(all_histories, primitive_results, compositional_results, s
                    fontsize=9, fontfamily='monospace', ha='center', va='center',
                    bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8))
     
-    plt.suptitle('Corrected World Value Functions - Full Summary',
+    plt.suptitle('Fixed World Value Functions - Full Summary',
                  fontsize=14, fontweight='bold', y=0.98)
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
@@ -656,21 +665,20 @@ def run_corrected_wvf_experiment(
     learning_rate=0.0001,
     gamma=0.99,
     epsilon_decay=0.9995,
-    r_min=-10.0,
     seed=42
 ):
-    """Run the corrected World Value Functions experiment."""
+    """Run the FIXED World Value Functions experiment."""
     
     print("\n" + "="*70)
-    print("WORLD VALUE FUNCTIONS (WVF) EXPERIMENT")
+    print("FIXED WORLD VALUE FUNCTIONS (WVF) EXPERIMENT")
     print("="*70)
     print("Zero-Shot Compositional Generalization via Boolean Task Algebra")
     print("Based on Nangue Tasse et al. (NeurIPS 2020)")
     print("="*70)
-    print("\nKEY CORRECTIONS:")
-    print("  1. Sample goals from ENTIRE goal space during training")
-    print("  2. Extended reward r_min when reaching different goal than conditioned")
-    print("  3. TRUE env rewards tracked separately for plotting")
+    print("\nCRITICAL FIX:")
+    print("  Extended reward: +1 for ANY valid goal (not just exact match)")
+    print("  This aligns training with environment's implicit task goal")
+    print("  Allows proper generalization and zero-shot composition")
     print("\nCLUSTER-FRIENDLY SETTINGS:")
     print("  - Episode-based replay (2000 episodes)")
     print("  - Small LSTM (64 units), Small batch (16)")
@@ -687,7 +695,7 @@ def run_corrected_wvf_experiment(
     print("Creating environment...")
     env = DiscreteMiniWorldWrapper(size=env_size, render_mode="rgb_array")
     
-    # Corrected WVF Agent (cluster-friendly settings)
+    # Fixed WVF Agent (cluster-friendly settings)
     print("Creating WorldValueFunctionAgent...")
     agent = WorldValueFunctionAgent(
         env,
@@ -704,9 +712,8 @@ def run_corrected_wvf_experiment(
         lstm_size=64,           # Small LSTM
         tau=0.005,
         grad_clip=10.0,
-        r_min=r_min,
-        r_correct=1.0,
-        r_wrong=-1.0,
+        r_correct=1.0,          # +1 for any valid goal
+        r_wrong=-1.0,           # -1 for invalid goal
         step_penalty=-0.01
     )
     
@@ -722,7 +729,7 @@ def run_corrected_wvf_experiment(
     )
     
     # Save model
-    model_path = generate_save_path("corrected_wvf_model.pt")
+    model_path = generate_save_path("fixed_wvf_model.pt")
     agent.save_model(model_path)
     
     # Evaluation
@@ -739,23 +746,18 @@ def run_corrected_wvf_experiment(
     print("GENERATING PLOTS")
     print("="*60)
     
-    plot_training_curves(all_histories, generate_save_path("corrected_wvf_training.png"))
+    plot_training_curves(all_histories, generate_save_path("fixed_wvf_training.png"))
     plot_evaluation_comparison(primitive_results, compositional_results,
-                               generate_save_path("corrected_wvf_evaluation.png"))
+                               generate_save_path("fixed_wvf_evaluation.png"))
     plot_evaluation_episode_rewards(primitive_results, compositional_results,
-                                    generate_save_path("corrected_wvf_eval_episodes.png"))
+                                    generate_save_path("fixed_wvf_eval_episodes.png"))
     plot_full_summary(all_histories, primitive_results, compositional_results,
-                     generate_save_path("corrected_wvf_summary.png"))
+                     generate_save_path("fixed_wvf_summary.png"))
     
     # Save results
     results = {
-        "method": "Corrected World Value Functions",
-        "corrections": [
-            "Sample goals from entire goal space",
-            "Extended reward when reaching different goal than conditioned",
-            "TRUE env rewards tracked separately"
-        ],
-        "r_min": r_min,
+        "method": "Fixed World Value Functions",
+        "fix": "Extended reward: +1 for ANY valid goal (not just exact match)",
         "training": {
             primitive: {
                 "episodes": episodes_per_primitive,
@@ -788,14 +790,14 @@ def run_corrected_wvf_experiment(
         results["summary"]["avg_compositional_success"]
     )
     
-    results_path = generate_save_path("corrected_wvf_results.json")
+    results_path = generate_save_path("fixed_wvf_results.json")
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to: {results_path}")
     
     # Final summary
     print("\n" + "="*70)
-    print("CORRECTED WVF EXPERIMENT COMPLETE")
+    print("FIXED WVF EXPERIMENT COMPLETE")
     print("="*70)
     print(f"Primitive Tasks Average:              {results['summary']['avg_primitive_success']:.1%}")
     print(f"Zero-Shot Compositional Average:      {results['summary']['avg_compositional_success']:.1%}")
@@ -808,12 +810,11 @@ def run_corrected_wvf_experiment(
 if __name__ == "__main__":
     results, agent = run_corrected_wvf_experiment(
         env_size=10,
-        episodes_per_primitive=3000,
-        eval_episodes=100,
+        episodes_per_primitive=2000,
+        eval_episodes=200,
         max_steps=200,
         learning_rate=0.0001,
         gamma=0.99,
         epsilon_decay=0.999,
-        r_min=-10.0,
         seed=42
     )
