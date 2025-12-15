@@ -1,12 +1,11 @@
 """
-LSTM-DQN Agent for MiniWorld 3D Environment - HYBRID APPROACH
+Unified LSTM-DQN Agent with Goal Tiling for Task Conditioning
 
-Combines:
-1. Frame stacking (k=4) for short-term spatial memory
-2. Small LSTM (128 units) for medium-term temporal reasoning
-3. All the stability features from the base DQN
-
-This helps the agent remember objects it saw before turning around.
+Key Changes from Original:
+1. Task information encoded as additional channels (goal tiling)
+2. Single model trains on all 4 primitive tasks
+3. Uniform task sampling per episode to prevent catastrophic forgetting
+4. Task-aware replay buffer with balanced sampling
 """
 
 import numpy as np
@@ -21,56 +20,65 @@ import random
 class FrameStack:
     """
     Stack the last k frames to give the agent short-term memory.
-    
-    For a 3-channel RGB image, stacking k=4 frames gives (12, H, W).
-    This allows the agent to perceive motion and recent history.
+    Now also handles task channel appending.
     """
     
     def __init__(self, k=4):
         self.k = k
         self.frames = deque(maxlen=k)
+        self.current_task_channels = None
     
-    def reset(self, frame):
-        """Reset with a new frame, filling the stack with copies"""
+    def reset(self, frame, task_channels):
+        """Reset with a new frame and task, filling the stack with copies"""
+        self.current_task_channels = task_channels
         for _ in range(self.k):
             self.frames.append(frame.copy())
         return self._get_stacked()
     
     def step(self, frame):
-        """Add a new frame and return stacked observation"""
+        """Add a new frame and return stacked observation with task"""
         self.frames.append(frame.copy())
         return self._get_stacked()
     
     def _get_stacked(self):
-        """Stack frames along channel dimension: (k*C, H, W)"""
-        return np.concatenate(list(self.frames), axis=0)
+        """
+        Stack frames along channel dimension: (k*C, H, W)
+        Then append task channels: (k*C + num_tasks, H, W)
+        """
+        stacked_frames = np.concatenate(list(self.frames), axis=0)
+        
+        if self.current_task_channels is not None:
+            # Append task channels
+            return np.concatenate([stacked_frames, self.current_task_channels], axis=0)
+        
+        return stacked_frames
     
     def __len__(self):
         return len(self.frames)
 
 
-class HybridLSTM_DQN3D(nn.Module):
+class UnifiedHybridLSTM_DQN3D(nn.Module):
     """
-    Hybrid architecture: Frame Stacking + CNN + Small LSTM + FC
+    Unified Hybrid architecture with Goal Tiling
     
     Flow:
-    1. Stacked frames (12, 60, 80) → CNN → features (flattened)
+    1. Stacked frames + task channels (12+4, 60, 80) → CNN → features
     2. Features → LSTM (128 hidden) → temporal embedding
     3. Temporal embedding → FC layers → Q-values
     
-    The LSTM is kept SMALL (128 units) to avoid instability.
+    The task is encoded as 4 additional binary channels (one-hot).
     """
     
-    def __init__(self, input_shape=(12, 60, 80), action_size=3, 
+    def __init__(self, input_shape=(16, 60, 80), action_size=3, 
                  hidden_size=256, lstm_size=128):
-        super(HybridLSTM_DQN3D, self).__init__()
+        super(UnifiedHybridLSTM_DQN3D, self).__init__()
         
         self.input_shape = input_shape
         self.action_size = action_size
         self.lstm_size = lstm_size
         
-        # CNN processes stacked frames
-        # Input: (12, 60, 80) if k=4 stacking
+        # CNN processes stacked frames + task channels
+        # Input: (16, 60, 80) if k=4 stacking + 4 task channels
         self.conv = nn.Sequential(
             nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4, padding=0),
             nn.ReLU(),
@@ -84,7 +92,6 @@ class HybridLSTM_DQN3D(nn.Module):
         self._conv_output_size = self._get_conv_output_size(input_shape)
         
         # Small LSTM for temporal memory
-        # Single layer, small hidden size for stability
         self.lstm = nn.LSTM(
             input_size=self._conv_output_size,
             hidden_size=lstm_size,
@@ -121,7 +128,6 @@ class HybridLSTM_DQN3D(nn.Module):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.LSTM):
-                # Orthogonal initialization for LSTM weights (more stable)
                 for name, param in m.named_parameters():
                     if 'weight_ih' in name:
                         nn.init.xavier_uniform_(param.data)
@@ -135,7 +141,7 @@ class HybridLSTM_DQN3D(nn.Module):
         Forward pass with optional hidden state.
         
         Args:
-            x: Input tensor (batch, channels, height, width)
+            x: Input tensor (batch, channels+task, height, width)
             hidden: Optional LSTM hidden state (h, c)
         
         Returns:
@@ -146,7 +152,7 @@ class HybridLSTM_DQN3D(nn.Module):
         
         # CNN feature extraction
         features = self.conv(x)
-        features = features.view(batch_size, -1)  # Flatten
+        features = features.view(batch_size, -1)
         
         # Reshape for LSTM: (batch, seq_len=1, features)
         features = features.unsqueeze(1)
@@ -158,7 +164,7 @@ class HybridLSTM_DQN3D(nn.Module):
             lstm_out, hidden = self.lstm(features)
         
         # Take the last output from the sequence
-        lstm_out = lstm_out[:, -1, :]  # (batch, lstm_size)
+        lstm_out = lstm_out[:, -1, :]
         
         # Fully connected layers
         q_values = self.fc(lstm_out)
@@ -172,15 +178,14 @@ class HybridLSTM_DQN3D(nn.Module):
         return (h, c)
 
 
-class DuelingHybridLSTM_DQN3D(nn.Module):
+class DuelingUnifiedHybridLSTM_DQN3D(nn.Module):
     """
-    Dueling version of the Hybrid LSTM-DQN.
-    Separates value and advantage streams after the LSTM.
+    Dueling version of the Unified Hybrid LSTM-DQN with goal tiling.
     """
     
-    def __init__(self, input_shape=(12, 60, 80), action_size=3, 
+    def __init__(self, input_shape=(16, 60, 80), action_size=3, 
                  hidden_size=256, lstm_size=128):
-        super(DuelingHybridLSTM_DQN3D, self).__init__()
+        super(DuelingUnifiedHybridLSTM_DQN3D, self).__init__()
         
         self.input_shape = input_shape
         self.action_size = action_size
@@ -277,17 +282,29 @@ class DuelingHybridLSTM_DQN3D(nn.Module):
         return (h, c)
 
 
-class EpisodeReplayBuffer:
+class TaskAwareEpisodeReplayBuffer:
     """
-    Episode-based replay buffer for LSTM training.
+    Episode-based replay buffer that tracks tasks and ensures balanced sampling.
     
-    Stores complete episodes rather than individual transitions.
-    This allows us to sample sequences with proper temporal ordering.
+    Each episode is stored with its task label, allowing us to:
+    1. Track task distribution in the buffer
+    2. Sample balanced batches across tasks
+    3. Monitor per-task replay frequency
     """
     
     def __init__(self, capacity=5000):
+        self.capacity = capacity
         self.episodes = deque(maxlen=capacity)
         self.current_episode = []
+        self.current_task = None
+        
+        # Track task distribution
+        self.task_counts = {'red': 0, 'blue': 0, 'box': 0, 'sphere': 0}
+    
+    def start_episode(self, task_name):
+        """Start a new episode with the given task"""
+        self.current_episode = []
+        self.current_task = task_name
     
     def push_transition(self, state, action, reward, next_state, done):
         """Add a transition to the current episode"""
@@ -297,55 +314,103 @@ class EpisodeReplayBuffer:
             self.end_episode()
     
     def end_episode(self):
-        """Finalize the current episode and store it"""
-        if len(self.current_episode) > 0:
-            self.episodes.append(self.current_episode)
+        """Finalize the current episode and store it with task label"""
+        if len(self.current_episode) > 0 and self.current_task is not None:
+            self.episodes.append({
+                'task': self.current_task,
+                'transitions': self.current_episode
+            })
+            self.task_counts[self.current_task] += 1
             self.current_episode = []
+            self.current_task = None
     
     def sample(self, batch_size, seq_len=8):
         """
-        Sample a batch of sequences from stored episodes.
+        Sample a batch of sequences with balanced task representation.
         
-        Args:
-            batch_size: Number of sequences to sample
-            seq_len: Length of each sequence
-        
-        Returns:
-            List of sequences, each a list of (s, a, r, s', done) tuples
+        Strategy: Sample roughly equal number of sequences from each task.
         """
-        batch = []
+        if len(self.episodes) < batch_size:
+            return []
         
-        for _ in range(batch_size):
-            # Sample a random episode
-            episode = random.choice(self.episodes)
+        # Group episodes by task
+        task_episodes = {'red': [], 'blue': [], 'box': [], 'sphere': []}
+        for ep_data in self.episodes:
+            task_episodes[ep_data['task']].append(ep_data['transitions'])
+        
+        # Calculate samples per task (roughly equal)
+        sequences_per_task = batch_size // 4
+        remainder = batch_size % 4
+        
+        batch = []
+        tasks_with_episodes = [t for t in task_episodes if len(task_episodes[t]) > 0]
+        
+        if len(tasks_with_episodes) == 0:
+            return []
+        
+        # Sample from each task
+        for task in tasks_with_episodes:
+            n_samples = sequences_per_task
+            if remainder > 0:
+                n_samples += 1
+                remainder -= 1
+            
+            episodes_for_task = task_episodes[task]
+            for _ in range(min(n_samples, len(episodes_for_task))):
+                episode = random.choice(episodes_for_task)
+                
+                if len(episode) > seq_len:
+                    start = random.randint(0, len(episode) - seq_len)
+                    sequence = episode[start:start + seq_len]
+                else:
+                    sequence = episode
+                
+                batch.append(sequence)
+        
+        # If we didn't get enough sequences, fill from any available task
+        while len(batch) < batch_size and len(self.episodes) > 0:
+            ep_data = random.choice(self.episodes)
+            episode = ep_data['transitions']
             
             if len(episode) > seq_len:
-                # Sample a random starting point
                 start = random.randint(0, len(episode) - seq_len)
                 sequence = episode[start:start + seq_len]
             else:
-                # Use entire episode if shorter than seq_len
                 sequence = episode
             
             batch.append(sequence)
         
         return batch
     
+    def get_task_distribution(self):
+        """Return the distribution of tasks in the buffer"""
+        total = sum(self.task_counts.values())
+        if total == 0:
+            return {t: 0.0 for t in self.task_counts}
+        return {t: count / total for t, count in self.task_counts.items()}
+    
     def __len__(self):
         return len(self.episodes)
 
 
-class LSTMDQNAgent3D:
+class UnifiedLSTMDQNAgent3D:
     """
-    Hybrid LSTM-DQN Agent with frame stacking.
+    Unified LSTM-DQN Agent that handles all 4 primitive tasks.
     
     Key features:
-    1. Frame stacking (k=4) for short-term memory
-    2. Small LSTM (128 units) for temporal reasoning
-    3. Episode-based replay buffer
-    4. Hidden state management during episodes
-    5. All stability features (soft updates, double DQN, grad clipping)
+    1. Goal tiling: Task encoded as 4 additional channels
+    2. Single model trained on all tasks with uniform sampling
+    3. Task-aware replay buffer with balanced sampling
+    4. Per-task performance tracking
     """
+    
+    # Task encoding: one-hot over [red, blue, box, sphere]
+    TASK_ENCODING = {
+        'red': 0,
+        'blue': 1,
+        'box': 2,
+        'sphere': 3
+    }
     
     def __init__(self, env, k_frames=4, learning_rate=0.0001, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999,
@@ -354,9 +419,10 @@ class LSTMDQNAgent3D:
                  tau=0.005, use_double_dqn=True, grad_clip=10.0):
         
         self.env = env
-        self.action_dim = 3  # turn_left, turn_right, move_forward
+        self.action_dim = 3
         self.k_frames = k_frames
         self.seq_len = seq_len
+        self.num_tasks = 4
         
         # Hyperparameters
         self.gamma = gamma
@@ -374,9 +440,9 @@ class LSTMDQNAgent3D:
         
         # Device setup
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"LSTM-DQN Agent using device: {self.device}")
+        print(f"Unified LSTM-DQN Agent using device: {self.device}")
         print(f"Frame stacking: k={k_frames}, LSTM size: {lstm_size}")
-        print(f"Stability settings: tau={tau}, double_dqn={use_double_dqn}, grad_clip={grad_clip}")
+        print(f"Task encoding: Goal tiling with {self.num_tasks} additional channels")
         
         # Get observation shape
         sample_obs = env.reset()[0]
@@ -391,17 +457,26 @@ class LSTMDQNAgent3D:
         else:
             self.single_frame_shape = (3, sample_img.shape[0], sample_img.shape[1])
         
-        # Stacked observation shape
-        self.obs_shape = (k_frames * 3, self.single_frame_shape[1], self.single_frame_shape[2])
+        # Stacked observation shape WITH task channels
+        # k frames * 3 channels + 4 task channels
+        self.obs_shape = (
+            k_frames * 3 + self.num_tasks,
+            self.single_frame_shape[1],
+            self.single_frame_shape[2]
+        )
         
         print(f"Single frame shape: {self.single_frame_shape}")
-        print(f"Stacked observation shape: {self.obs_shape}")
+        print(f"Stacked observation shape (with task): {self.obs_shape}")
         
         # Frame stacker
         self.frame_stack = FrameStack(k=k_frames)
         
+        # Current task tracking
+        self.current_task = None
+        self.current_task_channels = None
+        
         # Initialize networks
-        NetworkClass = DuelingHybridLSTM_DQN3D if use_dueling else HybridLSTM_DQN3D
+        NetworkClass = DuelingUnifiedHybridLSTM_DQN3D if use_dueling else UnifiedHybridLSTM_DQN3D
         self.q_network = NetworkClass(
             input_shape=self.obs_shape,
             action_size=self.action_dim,
@@ -423,19 +498,43 @@ class LSTMDQNAgent3D:
         # Optimizer
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
         
-        # Episode-based replay buffer
-        self.memory = EpisodeReplayBuffer(capacity=memory_size)
+        # Task-aware replay buffer
+        self.memory = TaskAwareEpisodeReplayBuffer(capacity=memory_size)
         
-        # Hidden state tracking during episodes
+        # Hidden state tracking
         self.current_hidden = None
         
         # Training tracking
         self.update_counter = 0
         self.training_steps = 0
         
+        # Per-task performance tracking
+        self.task_success_rates = {t: deque(maxlen=100) for t in self.TASK_ENCODING}
+        
         # Calculate total parameters
         total_params = sum(p.numel() for p in self.q_network.parameters())
         print(f"Total network parameters: {total_params:,}")
+    
+    def create_task_channels(self, task_name):
+        """
+        Create task encoding channels (one-hot) to append to frames.
+        
+        Returns: (num_tasks, H, W) array of task channels
+        """
+        H, W = self.single_frame_shape[1], self.single_frame_shape[2]
+        task_channels = np.zeros((self.num_tasks, H, W), dtype=np.float32)
+        
+        if task_name in self.TASK_ENCODING:
+            task_idx = self.TASK_ENCODING[task_name]
+            task_channels[task_idx, :, :] = 1.0
+        
+        return task_channels
+    
+    def set_task(self, task_name):
+        """Set the current task for the episode"""
+        self.current_task = task_name
+        self.current_task_channels = self.create_task_channels(task_name)
+        self.memory.start_episode(task_name)
     
     def soft_update_target_network(self):
         """Soft update target network using Polyak averaging"""
@@ -473,16 +572,19 @@ class LSTMDQNAgent3D:
         
         return img
     
-    def reset_episode(self, obs):
+    def reset_episode(self, obs, task_name):
         """
-        Reset for a new episode.
+        Reset for a new episode with specified task.
         
         Returns:
-            stacked_obs: Frame-stacked observation
+            stacked_obs: Frame-stacked observation with task channels
         """
+        # Set task
+        self.set_task(task_name)
+        
         # Preprocess and stack frames
         frame = self.preprocess_frame(obs)
-        stacked = self.frame_stack.reset(frame)
+        stacked = self.frame_stack.reset(frame, self.current_task_channels)
         
         # Reset LSTM hidden state
         self.current_hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
@@ -492,9 +594,10 @@ class LSTMDQNAgent3D:
     def step_episode(self, obs):
         """
         Process a new observation during an episode.
+        Task channels are maintained from reset_episode.
         
         Returns:
-            stacked_obs: Frame-stacked observation
+            stacked_obs: Frame-stacked observation with task channels
         """
         frame = self.preprocess_frame(obs)
         stacked = self.frame_stack.step(frame)
@@ -511,12 +614,10 @@ class LSTMDQNAgent3D:
         if random.random() < epsilon:
             return random.randint(0, self.action_dim - 1)
         
-        # Convert stacked observation to tensor
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
             q_values, self.current_hidden = self.q_network(state, self.current_hidden)
-            # Detach hidden state to prevent backprop through time during action selection
             self.current_hidden = (self.current_hidden[0].detach(), 
                                   self.current_hidden[1].detach())
             return q_values.argmax().item()
@@ -528,22 +629,20 @@ class LSTMDQNAgent3D:
     def train_step(self):
         """
         Perform one BATCHED training step with sequence sampling.
-        
-        This is MUCH faster than the nested loop version because:
-        1. Single backward pass instead of batch_size * seq_len passes
-        2. GPU parallelization across batch dimension
-        3. Efficient tensor operations
+        Samples balanced across tasks.
         """
         if len(self.memory) < self.batch_size:
             return 0.0
         
-        # Sample sequences from episodes
+        # Sample sequences from episodes (balanced across tasks)
         sequences = self.memory.sample(self.batch_size, self.seq_len)
         
-        # Pad sequences to same length and convert to tensors
+        if len(sequences) == 0:
+            return 0.0
+        
+        # Pad sequences to same length
         max_len = max(len(seq) for seq in sequences)
         
-        # Pre-allocate tensors
         states_batch = []
         actions_batch = []
         rewards_batch = []
@@ -555,7 +654,6 @@ class LSTMDQNAgent3D:
             seq_len = len(seq)
             lengths.append(seq_len)
             
-            # Extract transitions
             states = [s[0] for s in seq]
             actions = [s[1] for s in seq]
             rewards = [s[2] for s in seq]
@@ -577,7 +675,7 @@ class LSTMDQNAgent3D:
             next_states_batch.append(next_states)
             dones_batch.append(dones)
         
-        # Convert to tensors: (batch_size, seq_len, ...)
+        # Convert to tensors
         states_tensor = torch.FloatTensor(np.array(states_batch)).to(self.device)
         actions_tensor = torch.LongTensor(actions_batch).to(self.device)
         rewards_tensor = torch.FloatTensor(rewards_batch).to(self.device)
@@ -586,32 +684,23 @@ class LSTMDQNAgent3D:
         
         batch_size, seq_len = states_tensor.shape[:2]
         
-        # Initialize hidden states for batch
+        # Initialize hidden states
         hidden = self.q_network.init_hidden(batch_size=batch_size, device=self.device)
         target_hidden = self.target_network.init_hidden(batch_size=batch_size, device=self.device)
         
-        # Process entire sequences through LSTM
-        # Reshape: (batch, seq, C, H, W) -> (batch*seq, C, H, W)
-        states_flat = states_tensor.view(-1, *states_tensor.shape[2:])
-        next_states_flat = next_states_tensor.view(-1, *next_states_tensor.shape[2:])
-        
-        # Forward pass through Q-network (processes all timesteps at once)
-        # For LSTM, we need to process sequentially but in batch
+        # Process sequences through LSTM
         q_values_list = []
         for t in range(seq_len):
             q_vals, hidden = self.q_network(states_tensor[:, t], hidden)
             q_values_list.append(q_vals)
             hidden = (hidden[0].detach(), hidden[1].detach())
         
-        q_values = torch.stack(q_values_list, dim=1)  # (batch, seq, actions)
-        
-        # Get Q-values for taken actions
+        q_values = torch.stack(q_values_list, dim=1)
         current_q = q_values.gather(2, actions_tensor.unsqueeze(2)).squeeze(2)
         
         # Target Q-values
         with torch.no_grad():
             if self.use_double_dqn:
-                # Use online network to select actions
                 next_q_list = []
                 hidden_copy = self.q_network.init_hidden(batch_size=batch_size, device=self.device)
                 for t in range(seq_len):
@@ -622,7 +711,6 @@ class LSTMDQNAgent3D:
                 next_q_values = torch.stack(next_q_list, dim=1)
                 next_actions = next_q_values.argmax(2, keepdim=True)
                 
-                # Use target network to evaluate
                 target_q_list = []
                 for t in range(seq_len):
                     tq, target_hidden = self.target_network(next_states_tensor[:, t], target_hidden)
@@ -632,7 +720,6 @@ class LSTMDQNAgent3D:
                 target_q_values = torch.stack(target_q_list, dim=1)
                 next_q = target_q_values.gather(2, next_actions).squeeze(2)
             else:
-                # Standard DQN
                 target_q_list = []
                 for t in range(seq_len):
                     tq, target_hidden = self.target_network(next_states_tensor[:, t], target_hidden)
@@ -653,7 +740,7 @@ class LSTMDQNAgent3D:
         loss = F.smooth_l1_loss(current_q * loss_mask, target_q * loss_mask, reduction='sum')
         loss = loss / loss_mask.sum()
         
-        # Single backward pass
+        # Backward pass
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.grad_clip)
@@ -675,6 +762,21 @@ class LSTMDQNAgent3D:
         """Reset epsilon to starting value"""
         self.epsilon = self.epsilon_start
     
+    def update_task_success(self, task_name, success):
+        """Track per-task success rates"""
+        if task_name in self.task_success_rates:
+            self.task_success_rates[task_name].append(1 if success else 0)
+    
+    def get_task_success_rates(self):
+        """Get current success rates for each task"""
+        rates = {}
+        for task, successes in self.task_success_rates.items():
+            if len(successes) > 0:
+                rates[task] = np.mean(successes)
+            else:
+                rates[task] = 0.0
+        return rates
+    
     def save_model(self, filepath):
         """Save model checkpoint"""
         torch.save({
@@ -685,6 +787,7 @@ class LSTMDQNAgent3D:
             'training_steps': self.training_steps,
             'obs_shape': self.obs_shape,
             'k_frames': self.k_frames,
+            'task_success_rates': dict(self.task_success_rates),
         }, filepath)
         print(f"Model saved to {filepath}")
     
@@ -697,10 +800,3 @@ class LSTMDQNAgent3D:
         self.epsilon = checkpoint['epsilon']
         self.training_steps = checkpoint.get('training_steps', 0)
         print(f"Model loaded from {filepath}")
-    
-    def get_q_values(self, stacked_obs):
-        """Get Q-values for debugging/visualization"""
-        state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            q_values, _ = self.q_network(state, self.current_hidden)
-            return q_values.squeeze().cpu().numpy()
