@@ -237,6 +237,12 @@ def train_unified_dqn(env, episodes=8000, max_steps=200,
             print(f"  Episode {episode+1}: Overall Success={recent_success:.1%}, "
                   f"Avg Length={recent_length:.1f}, Epsilon={agent.epsilon:.3f}")
             print(f"    Per-task: {', '.join(task_stats)}")
+            
+            # Clear GPU cache periodically to prevent fragmentation
+            clear_gpu_memory()
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated() / 1024**3
+                print(f"    GPU Memory: {allocated:.2f}GB allocated")
     
     # Save model
     model_path = generate_save_path("unified_dqn_model.pt")
@@ -329,20 +335,17 @@ def evaluate_agent_on_task(env, agent, task, episodes=100, max_steps=200):
 
 def evaluate_compositional_tasks(env, agent, episodes=100, max_steps=200):
     """
-    Evaluate on compositional tasks.
-    For unified model, we use the color feature as task conditioning.
+    Evaluate on compositional tasks using feature superposition.
+    Tests true compositional generalization by encoding BOTH features.
     """
     
     results = {}
     
     for comp_task in COMPOSITIONAL_TASKS:
         task_name = comp_task['name']
-        features = comp_task['features']
+        features = comp_task['features']  # e.g., ['red', 'box']
         
-        # Use the color feature (red or blue) for conditioning
-        color_feature = [f for f in features if f in ['red', 'blue']][0]
-        
-        print(f"Evaluating '{task_name}' using '{color_feature}' conditioning")
+        print(f"Evaluating '{task_name}' using feature superposition: {features}")
         
         env.set_task(comp_task)
         
@@ -353,8 +356,8 @@ def evaluate_compositional_tasks(env, agent, episodes=100, max_steps=200):
             obs, info = env.reset()
             
             for step in range(max_steps):
-                # Condition on color feature
-                action = agent.select_action(obs, color_feature, epsilon=0.0)
+                # Use compositional encoding: superpose BOTH features
+                action = agent.select_action(obs, features, epsilon=0.0)
                 obs, _, terminated, truncated, info = env.step(action)
                 
                 if check_task_satisfaction(info, comp_task):
@@ -374,7 +377,7 @@ def evaluate_compositional_tasks(env, agent, episodes=100, max_steps=200):
             'success_rate': np.mean(successes),
             'mean_length': np.mean(lengths),
             'std_length': np.std(lengths),
-            'conditioning': color_feature
+            'conditioning': f'superposition({", ".join(features)})'
         }
         
         print(f"  → Success: {np.mean(successes):.1%}")

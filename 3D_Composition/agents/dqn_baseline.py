@@ -290,6 +290,37 @@ class UnifiedDQNAgent:
         encoding = self.TASK_ENCODINGS[task_name]
         return torch.FloatTensor(encoding).to(self.device)
     
+    def encode_compositional_task(self, features, method='superposition'):
+        """
+        Encode compositional task with multiple features.
+        
+        Args:
+            features: list of feature names (e.g., ['red', 'box'])
+            method: 'superposition' (add + normalize) or 'max' (take max of each dim)
+        
+        Returns:
+            torch.Tensor of shape (4,) on self.device
+        """
+        encoding = torch.zeros(4, device=self.device)
+        
+        for feature in features:
+            if feature not in self.TASK_ENCODINGS:
+                raise ValueError(f"Unknown feature: {feature}")
+            feature_encoding = torch.FloatTensor(self.TASK_ENCODINGS[feature]).to(self.device)
+            
+            if method == 'superposition':
+                encoding += feature_encoding
+            elif method == 'max':
+                encoding = torch.maximum(encoding, feature_encoding)
+            else:
+                raise ValueError(f"Unknown method: {method}")
+        
+        # Normalize if using superposition
+        if method == 'superposition' and len(features) > 1:
+            encoding = encoding / len(features)
+        
+        return encoding
+    
     def tile_task_encoding(self, task_encoding, height, width):
         """
         Tile task encoding across spatial dimensions.
@@ -312,13 +343,13 @@ class UnifiedDQNAgent:
                 self.tau * online_param.data + (1.0 - self.tau) * target_param.data
             )
     
-    def preprocess_obs(self, obs, task_name):
+    def preprocess_obs(self, obs, task_identifier):
         """
         Convert observation to task-conditioned tensor.
         
         Args:
             obs: raw observation from environment
-            task_name: str, task identifier
+            task_identifier: str (single task like 'red') OR list of features (['red', 'box'])
         
         Returns:
             torch.Tensor of shape (7, H, W) - 3 RGB + 4 task channels
@@ -353,8 +384,15 @@ class UnifiedDQNAgent:
         # Convert to tensor
         img_tensor = torch.FloatTensor(img).to(self.device)  # (3, H, W)
         
-        # Get task encoding and tile
-        task_encoding = self.encode_task(task_name)  # (4,)
+        # Get task encoding - handle both single tasks and compositional
+        if isinstance(task_identifier, list):
+            # Compositional task: list of features
+            task_encoding = self.encode_compositional_task(task_identifier, method='superposition')
+        else:
+            # Single task: string identifier
+            task_encoding = self.encode_task(task_identifier)
+        
+        # Tile task encoding
         height, width = img_tensor.shape[1], img_tensor.shape[2]
         task_tiled = self.tile_task_encoding(task_encoding, height, width)  # (4, H, W)
         
@@ -378,8 +416,8 @@ class UnifiedDQNAgent:
     
     def remember(self, obs, task_name, action, reward, next_obs, done):
         """Store transition in replay buffer (with task conditioning)"""
-        state = self.preprocess_obs(obs, task_name)
-        next_state = self.preprocess_obs(next_obs, task_name)
+        state = self.preprocess_obs(obs, task_name).cpu()  # Move to CPU for storage
+        next_state = self.preprocess_obs(next_obs, task_name).cpu()  # Move to CPU for storage
         self.memory.push(state, action, reward, next_state, done)
     
     def train_step(self):
