@@ -1,0 +1,63 @@
+{
+  "training": {
+    "total_episodes": 4000,
+    "final_epsilon": 0.13526760995605422,
+    "final_success_rate": 0.52
+  },
+  "evaluation_simple": {
+    "red": {
+      "mean_reward": 0.082,
+      "std_reward": 0.2743647207641682,
+      "success_rate": 0.082,
+      "mean_length": 183.924
+    },
+    "blue": {
+      "mean_reward": 0.086,
+      "std_reward": 0.2803640490505157,
+      "success_rate": 0.086,
+      "mean_length": 183.082
+    },
+    "box": {
+      "mean_reward": 0.09,
+      "std_reward": 0.2861817604250837,
+      "success_rate": 0.09,
+      "mean_length": 182.342
+    },
+    "sphere": {
+      "mean_reward": 0.086,
+      "std_reward": 0.2803640490505157,
+      "success_rate": 0.086,
+      "mean_length": 183.104
+    }
+  },
+  "evaluation_compositional": {
+    "red_box": {
+      "mean_reward": 0.038,
+      "std_reward": 0.19119623427254,
+      "success_rate": 0.038,
+      "mean_length": 192.532
+    },
+    "red_sphere": {
+      "mean_reward": 0.048,
+      "std_reward": 0.21376622745419815,
+      "success_rate": 0.048,
+      "mean_length": 190.53
+    },
+    "blue_box": {
+      "mean_reward": 0.046,
+      "std_reward": 0.2094850830011531,
+      "success_rate": 0.046,
+      "mean_length": 190.986
+    },
+    "blue_sphere": {
+      "mean_reward": 0.05,
+      "std_reward": 0.21794494717703364,
+      "success_rate": 0.05,
+      "mean_length": 190.172
+    }
+  },
+  "summary": {
+    "avg_simple_success": 0.086,
+    "avg_comp_success": 0.0455
+  }
+}

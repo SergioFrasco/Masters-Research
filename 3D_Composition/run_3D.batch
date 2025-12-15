@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH --job-name=csneuro
+#SBATCH --output=/home-mscluster/sfrasco/result_job1.txt
+#SBATCH --error=/home-mscluster/sfrasco/error_job1.txt
+#SBATCH --ntasks=1
+#SBATCH --time=72:00:00
+#SBATCH --partition=bigbatch
+
+source ~/.bashrc
+conda activate compneuro
+python wvf_baseline2.py

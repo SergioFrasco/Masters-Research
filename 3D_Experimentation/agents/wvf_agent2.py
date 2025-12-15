@@ -726,6 +726,10 @@ class WorldValueFunctionAgent:
             for b in range(batch_size):
                 goal_one_hot[b, goals_t[b, t]] = 1.0
             
+            # states_t[:, t] = (16, 12, 60, 80) - 16 states at timestep t
+            # goal_one_hot = (16, 4) - 16 goal vectors
+            # Inside network: goal is TILED to (16, 4, 60, 80) and concatenated with state
+
             q_vals, hidden = self.q_network(states_t[:, t], goal_one_hot, hidden)
             q_values_list.append(q_vals)
             hidden = (hidden[0].detach(), hidden[1].detach())
@@ -733,6 +737,7 @@ class WorldValueFunctionAgent:
         q_values = torch.stack(q_values_list, dim=1)
         current_q = q_values.gather(2, actions_t.unsqueeze(2)).squeeze(2)
         
+        # Target Network
         with torch.no_grad():
             next_q_list = []
             hidden_copy = self.q_network.init_hidden(batch_size, self.device)
