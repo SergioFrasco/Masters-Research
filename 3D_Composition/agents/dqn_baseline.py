@@ -1,11 +1,11 @@
 """
-DQN Agent for MiniWorld 3D Environment - STABLE VERSION
+Unified DQN Agent with Task Conditioning via Goal Tiling
 
-Key improvements for training stability:
-1. Soft target updates (Polyak averaging) instead of hard updates
-2. Gradient clipping
-3. Better weight initialization
-4. Optional double DQN to reduce overestimation
+Key changes from separate models:
+1. Task encoded as one-hot vector [red, blue, box, sphere]
+2. Task tiled across spatial dimensions and concatenated to RGB input
+3. Input shape changes from (3, H, W) to (7, H, W) - 3 RGB + 4 task channels
+4. Single model handles all tasks
 """
 
 import numpy as np
@@ -17,19 +17,24 @@ from collections import deque
 import random
 
 
-class DQN3D(nn.Module):
+class TaskConditionedDQN3D(nn.Module):
     """
-    Deep Q-Network for 3D MiniWorld environment using CNN on RGB images.
+    Task-conditioned DQN using goal tiling.
+    
+    Input: (7, H, W) where:
+        - Channels 0-2: RGB image
+        - Channels 3-6: Tiled task encoding [red, blue, box, sphere]
     """
     
-    def __init__(self, input_shape=(3, 60, 80), action_size=3, hidden_size=256):
-        super(DQN3D, self).__init__()
+    def __init__(self, input_shape=(7, 60, 80), action_size=3, hidden_size=256):
+        super(TaskConditionedDQN3D, self).__init__()
         
         self.input_shape = input_shape
         
-        # CNN for processing RGB images
+        # CNN for processing RGB + task channels
+        # Note: First conv now takes 7 channels instead of 3
         self.conv = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=8, stride=4, padding=0),
+            nn.Conv2d(7, 32, kernel_size=8, stride=4, padding=0),  # Changed from 3 to 7
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
             nn.ReLU(),
@@ -77,20 +82,20 @@ class DQN3D(nn.Module):
         return self.fc(x)
 
 
-class DuelingDQN3D(nn.Module):
+class TaskConditionedDuelingDQN3D(nn.Module):
     """
-    Dueling DQN architecture - separates value and advantage streams.
+    Task-conditioned Dueling DQN architecture with goal tiling.
     """
     
-    def __init__(self, input_shape=(3, 60, 80), action_size=3, hidden_size=256):
-        super(DuelingDQN3D, self).__init__()
+    def __init__(self, input_shape=(7, 60, 80), action_size=3, hidden_size=256):
+        super(TaskConditionedDuelingDQN3D, self).__init__()
         
         self.input_shape = input_shape
         self.action_size = action_size
         
-        # Shared CNN backbone
+        # Shared CNN backbone (7 channels: 3 RGB + 4 task)
         self.conv = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=8, stride=4, padding=0),
+            nn.Conv2d(7, 32, kernel_size=8, stride=4, padding=0),  # Changed from 3 to 7
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
             nn.ReLU(),
@@ -170,24 +175,29 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-class DQNAgent3D:
+class UnifiedDQNAgent:
     """
-    STABLE DQN Agent for MiniWorld 3D environment.
+    Unified DQN Agent with task conditioning.
     
-    Key stability features:
-    1. Soft target updates (tau parameter) - gradual target network updates
-    2. Double DQN (optional) - reduces Q-value overestimation
-    3. Gradient clipping - prevents exploding gradients
-    4. Huber loss - more robust to outliers than MSE
+    Handles all 4 primitive tasks with a single model.
+    Task information is tiled and concatenated to the observation.
     """
+    
+    # Task encoding: one-hot vectors for [red, blue, box, sphere]
+    TASK_ENCODINGS = {
+        'red': [1.0, 0.0, 0.0, 0.0],
+        'blue': [0.0, 1.0, 0.0, 0.0],
+        'box': [0.0, 0.0, 1.0, 0.0],
+        'sphere': [0.0, 0.0, 0.0, 1.0],
+    }
     
     def __init__(self, env, learning_rate=0.0001, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999,
                  memory_size=100000, batch_size=64, target_update_freq=1,
                  hidden_size=256, use_dueling=True,
-                 tau=0.005,           # Soft update coefficient (0.005 = slow, stable updates)
-                 use_double_dqn=True, # Use Double DQN to reduce overestimation
-                 grad_clip=10.0):     # Gradient clipping threshold
+                 tau=0.005,
+                 use_double_dqn=True,
+                 grad_clip=10.0):
         
         self.env = env
         self.action_dim = 3  # turn_left, turn_right, move_forward
@@ -202,14 +212,15 @@ class DQNAgent3D:
         self.target_update_freq = target_update_freq
         self.learning_rate = learning_rate
         
-        # STABILITY PARAMETERS
-        self.tau = tau                      # Soft update coefficient
+        # Stability parameters
+        self.tau = tau
         self.use_double_dqn = use_double_dqn
         self.grad_clip = grad_clip
         
         # Device setup
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"DQN Agent using device: {self.device}")
+        print(f"Unified DQN Agent using device: {self.device}")
+        print(f"Task conditioning: Goal tiling with one-hot encoding")
         print(f"Stability settings: tau={tau}, double_dqn={use_double_dqn}, grad_clip={grad_clip}")
         
         # Get observation shape from environment
@@ -219,16 +230,20 @@ class DQNAgent3D:
         else:
             sample_img = sample_obs
         
-        # Determine input shape (C, H, W)
+        # Determine base image shape (C, H, W)
         if sample_img.shape[0] in [3, 4]:
-            self.obs_shape = (3, sample_img.shape[1], sample_img.shape[2])
+            self.img_shape = (3, sample_img.shape[1], sample_img.shape[2])
         else:
-            self.obs_shape = (3, sample_img.shape[0], sample_img.shape[1])
+            self.img_shape = (3, sample_img.shape[0], sample_img.shape[1])
         
-        print(f"Observation shape: {self.obs_shape}")
+        # Task-conditioned input shape: 3 RGB + 4 task channels = 7 total
+        self.obs_shape = (7, self.img_shape[1], self.img_shape[2])
+        
+        print(f"Image shape: {self.img_shape}")
+        print(f"Task-conditioned input shape: {self.obs_shape} (3 RGB + 4 task channels)")
         
         # Initialize networks
-        NetworkClass = DuelingDQN3D if use_dueling else DQN3D
+        NetworkClass = TaskConditionedDuelingDQN3D if use_dueling else TaskConditionedDQN3D
         self.q_network = NetworkClass(
             input_shape=self.obs_shape,
             action_size=self.action_dim,
@@ -245,7 +260,7 @@ class DQNAgent3D:
         self.target_network.load_state_dict(self.q_network.state_dict())
         self.target_network.eval()
         
-        # Optimizer with slightly lower learning rate for stability
+        # Optimizer
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
         
         # Replay buffer
@@ -259,35 +274,71 @@ class DQNAgent3D:
         total_params = sum(p.numel() for p in self.q_network.parameters())
         print(f"Total network parameters: {total_params:,}")
     
-    def soft_update_target_network(self):
+    def encode_task(self, task_name):
         """
-        Soft update target network using Polyak averaging:
-        θ_target = τ * θ_online + (1 - τ) * θ_target
+        Convert task name to one-hot encoding.
         
-        This is much more stable than hard updates!
+        Args:
+            task_name: str, one of ['red', 'blue', 'box', 'sphere']
+        
+        Returns:
+            torch.Tensor of shape (4,) on self.device
         """
+        if task_name not in self.TASK_ENCODINGS:
+            raise ValueError(f"Unknown task: {task_name}. Must be one of {list(self.TASK_ENCODINGS.keys())}")
+        
+        encoding = self.TASK_ENCODINGS[task_name]
+        return torch.FloatTensor(encoding).to(self.device)
+    
+    def tile_task_encoding(self, task_encoding, height, width):
+        """
+        Tile task encoding across spatial dimensions.
+        
+        Args:
+            task_encoding: (4,) tensor
+            height, width: spatial dimensions to tile to
+        
+        Returns:
+            (4, height, width) tensor
+        """
+        # Reshape to (4, 1, 1) and expand to (4, height, width)
+        return task_encoding.view(-1, 1, 1).expand(-1, height, width)
+    
+    def soft_update_target_network(self):
+        """Soft update target network using Polyak averaging"""
         for target_param, online_param in zip(self.target_network.parameters(), 
                                                self.q_network.parameters()):
             target_param.data.copy_(
                 self.tau * online_param.data + (1.0 - self.tau) * target_param.data
             )
     
-    def preprocess_obs(self, obs):
-        """Convert observation to tensor suitable for CNN."""
+    def preprocess_obs(self, obs, task_name):
+        """
+        Convert observation to task-conditioned tensor.
+        
+        Args:
+            obs: raw observation from environment
+            task_name: str, task identifier
+        
+        Returns:
+            torch.Tensor of shape (7, H, W) - 3 RGB + 4 task channels
+        """
+        # Extract image
         if isinstance(obs, dict) and 'image' in obs:
             img = obs['image']
         else:
             img = obs
         
+        # Convert to numpy if needed
         if isinstance(img, torch.Tensor):
             img = img.numpy()
         
+        # Ensure correct channel ordering (C, H, W)
         if isinstance(img, np.ndarray):
-            if img.shape[0] in [3, 4]:
-                pass
-            else:
+            if img.shape[0] not in [3, 4]:
                 img = np.transpose(img, (2, 0, 1))
             
+            # Normalize to [0, 1]
             if img.dtype == np.uint8:
                 img = img.astype(np.float32) / 255.0
             elif img.max() > 1.0:
@@ -295,12 +346,24 @@ class DQNAgent3D:
             else:
                 img = img.astype(np.float32)
             
+            # Take only RGB channels
             if img.shape[0] == 4:
                 img = img[:3]
         
-        return torch.FloatTensor(img).to(self.device)
+        # Convert to tensor
+        img_tensor = torch.FloatTensor(img).to(self.device)  # (3, H, W)
+        
+        # Get task encoding and tile
+        task_encoding = self.encode_task(task_name)  # (4,)
+        height, width = img_tensor.shape[1], img_tensor.shape[2]
+        task_tiled = self.tile_task_encoding(task_encoding, height, width)  # (4, H, W)
+        
+        # Concatenate: (3, H, W) + (4, H, W) = (7, H, W)
+        conditioned_obs = torch.cat([img_tensor, task_tiled], dim=0)
+        
+        return conditioned_obs
     
-    def select_action(self, obs, epsilon=None):
+    def select_action(self, obs, task_name, epsilon=None):
         """Select action using epsilon-greedy policy."""
         if epsilon is None:
             epsilon = self.epsilon
@@ -308,21 +371,19 @@ class DQNAgent3D:
         if random.random() < epsilon:
             return random.randint(0, self.action_dim - 1)
         
-        state = self.preprocess_obs(obs)
+        state = self.preprocess_obs(obs, task_name)
         with torch.no_grad():
             q_values = self.q_network(state.unsqueeze(0))
             return q_values.argmax().item()
     
-    def remember(self, obs, action, reward, next_obs, done):
-        """Store transition in replay buffer"""
-        state = self.preprocess_obs(obs)
-        next_state = self.preprocess_obs(next_obs)
+    def remember(self, obs, task_name, action, reward, next_obs, done):
+        """Store transition in replay buffer (with task conditioning)"""
+        state = self.preprocess_obs(obs, task_name)
+        next_state = self.preprocess_obs(next_obs, task_name)
         self.memory.push(state, action, reward, next_state, done)
     
     def train_step(self):
-        """
-        Perform one training step with stability improvements.
-        """
+        """Perform one training step with stability improvements."""
         if len(self.memory) < self.batch_size:
             return 0.0
         
@@ -336,22 +397,20 @@ class DQNAgent3D:
         next_states = next_states.to(self.device)
         dones = dones.to(self.device)
         
-        # Current Q values: Q(s, a)
+        # Current Q values
         current_q = self.q_network(states).gather(1, actions.unsqueeze(1))
         
-        # Target Q values with Double DQN (optional)
+        # Target Q values with Double DQN
         with torch.no_grad():
             if self.use_double_dqn:
-                # Double DQN: use online network to SELECT action, target network to EVALUATE
                 next_actions = self.q_network(next_states).argmax(1, keepdim=True)
                 next_q = self.target_network(next_states).gather(1, next_actions).squeeze(1)
             else:
-                # Standard DQN
                 next_q = self.target_network(next_states).max(1)[0]
             
             target_q = rewards + (self.gamma * next_q * ~dones)
         
-        # Compute Huber loss (more robust than MSE)
+        # Compute Huber loss
         loss = F.smooth_l1_loss(current_q.squeeze(), target_q)
         
         # Optimize with gradient clipping
@@ -360,7 +419,7 @@ class DQNAgent3D:
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.grad_clip)
         self.optimizer.step()
         
-        # Soft update target network EVERY step (with small tau)
+        # Soft update target network
         self.soft_update_target_network()
         
         self.update_counter += 1
@@ -398,8 +457,8 @@ class DQNAgent3D:
         self.training_steps = checkpoint.get('training_steps', 0)
         print(f"Model loaded from {filepath}")
     
-    def get_q_values(self, obs):
+    def get_q_values(self, obs, task_name):
         """Get Q-values for debugging/visualization"""
-        state = self.preprocess_obs(obs)
+        state = self.preprocess_obs(obs, task_name)
         with torch.no_grad():
             return self.q_network(state.unsqueeze(0)).squeeze().cpu().numpy()
