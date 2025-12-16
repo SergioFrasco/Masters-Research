@@ -29,11 +29,7 @@ class SuccessorAgent:
         self.prev_state = None
         self.prev_action = None
 
-        # Vision model tracking (keep intact)
-        self.true_reward_map = np.zeros((self.grid_size, self.grid_size))
-        self.visited_positions = np.zeros((self.grid_size, self.grid_size), dtype=bool)
-
-        # Feature map - now stores confidence values (0.0 to 1.0)
+        # Feature map - stores confidence values (0.0 to 1.0)
         self.feature_map = {
             "red": np.zeros((self.grid_size, self.grid_size), dtype=np.float32),
             "blue": np.zeros((self.grid_size, self.grid_size), dtype=np.float32),
@@ -43,7 +39,7 @@ class SuccessorAgent:
         
         # Confidence parameters
         self.confidence_boost = 0.4  # How much to increase confidence per detection
-        self.decay_factor = 0.95     # How much confidence decays each step
+        self.decay_factor = 0.90     # How much confidence decays each episode (faster for random tasks)
         self.confidence_threshold = 0.5  # Threshold for considering a location valid
         
         # Composed reward map (task-specific)
@@ -56,17 +52,13 @@ class SuccessorAgent:
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
     
     def update_feature_map(self, detected_objects, positions):
-        """Update feature map with confidence accumulation and temporal decay"""
+        """Update feature map with confidence accumulation (decay moved to reset())"""
         
-        # FIRST: Decay existing confidence (objects not seen recently fade)
-        for feature in self.feature_map:
-            self.feature_map[feature] *= self.decay_factor
-        
-        # SECOND: Get agent info
+        # Get agent info
         agent_x, agent_z = self._get_agent_pos_from_env()
         agent_dir = self._get_agent_dir_from_env()
         
-        # THIRD: Boost confidence for newly detected objects
+        # Boost confidence for newly detected objects
         for obj_name in detected_objects:
             if obj_name in positions and positions[obj_name] is not None:
                 dx, dz = positions[obj_name]
@@ -280,83 +272,9 @@ class SuccessorAgent:
         self.prev_state = None
         self.prev_action = None
         
-        # Reset feature maps for new episode (zero out confidence)
+        # Decay feature maps each episode (objects not seen recently fade)
         for feature in self.feature_map:
-            self.feature_map[feature].fill(0)
+            self.feature_map[feature] *= self.decay_factor
         
         self.composed_reward_map.fill(0)
         self.wvf.fill(0)
-    
-    def create_egocentric_observation(self, goal_pos_red_box=None, goal_pos_blue_box=None, 
-                                    goal_pos_red_sphere=None, goal_pos_blue_sphere=None, 
-                                    matrix_size=13):
-        """
-        Create an egocentric observation matrix where:
-        - Agent is always at the bottom-middle cell, facing upward.
-        - Goal positions (red box, blue box, red sphere, blue sphere) are given in the agent's egocentric coordinates.
-        
-        This is kept intact for vision model training.
-        """
-        ego_matrix = np.zeros((matrix_size, matrix_size), dtype=np.float32)
-
-        # Agent position (bottom-center)
-        agent_row = matrix_size - 1
-        agent_col = matrix_size // 2
-
-        def place_goal(pos, value):
-            if pos is None:
-                return
-            gx, gz = pos  # (right, forward)
-            # Convert to matrix coordinates
-            ego_row = agent_row + gz  # forward is upward (smaller row)
-            ego_col = agent_col + gx  # right is right (larger col)
-
-            # Check bounds and place marker
-            if 0 <= ego_row < matrix_size and 0 <= ego_col < matrix_size:
-                ego_matrix[int(ego_row), int(ego_col)] = value
-
-        # Place all four goals
-        place_goal(goal_pos_red_box, 1.0)
-        place_goal(goal_pos_blue_box, 1.0)
-        place_goal(goal_pos_red_sphere, 1.0)
-        place_goal(goal_pos_blue_sphere, 1.0)
-
-        return ego_matrix
-
-
-## **Key Changes Summary:**
-
-# 1. **Feature maps now store continuous confidence values** (0.0 to 1.0) instead of binary
-# 2. **`update_feature_map`**:
-#    - Decays all confidence values by `decay_factor` (0.95) each step
-#    - Boosts confidence by `confidence_boost` (0.4) when object detected
-#    - Caps confidence at 1.0
-# 3. **`compose_reward_map`**:
-#    - Thresholds feature maps at `confidence_threshold` (0.5) before composing
-#    - Converts to binary for WVF computation
-
-# ---
-
-# ## **How It Works:**
-# ```
-# Step 1: Agent detects "red_box" at (3, 5)
-#   → feature_map["red"][5, 3] += 0.4  → now 0.4
-#   → feature_map["box"][5, 3] += 0.4  → now 0.4
-
-# Step 2: No detection at (3, 5), decay occurs
-#   → feature_map["red"][5, 3] *= 0.95  → now 0.38
-#   → feature_map["box"][5, 3] *= 0.95  → now 0.38
-
-# Step 3: Agent detects "red_box" at (3, 5) again (consistent!)
-#   → feature_map["red"][5, 3] += 0.4  → now 0.78
-#   → feature_map["box"][5, 3] += 0.4  → now 0.78
-
-# Step 4: Agent detects "red_box" at (3, 5) AGAIN (very confident now!)
-#   → feature_map["red"][5, 3] += 0.4  → now 1.0 (capped)
-#   → feature_map["box"][5, 3] += 0.4  → now 1.0 (capped)
-
-# Meanwhile, a false positive at (7, 2) decays away:
-# Step 1: feature_map["red"][2, 7] = 0.4 (false detection)
-# Step 2: feature_map["red"][2, 7] = 0.38 (decay, no re-detection)
-# Step 3: feature_map["red"][2, 7] = 0.36
-# Step 4: feature_map["red"][2, 7] = 0.34 (below threshold of 0.5, ignored)

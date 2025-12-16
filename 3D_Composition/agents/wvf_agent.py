@@ -1,24 +1,12 @@
 """
-World Value Functions (WVF) Agent for Compositional RL
+Unified World Value Functions (WVF) Agent for Compositional RL
+
+CRITICAL CHANGE: Single unified model instead of 4 separate models
+- Task conditioning: primitive task encoded as one-hot and tiled like goal
+- Random task sampling each episode to prevent catastrophic forgetting
+- Same composition logic at evaluation time
 
 Based on Nangue Tasse et al.'s Boolean Task Algebra (NeurIPS 2020)
-
-GOAL CONDITIONING: Option 3 - Goal Tiling
-- Goal one-hot is tiled across spatial dimensions and concatenated with image
-- This makes the goal a prominent part of the CNN input (not just appended later)
-- Combined with LSTM for temporal reasoning
-
-KEY DESIGN:
-1. Goal tiled as extra image channels -> CNN sees goal at every pixel
-2. LSTM for temporal memory
-3. Train separately for each primitive task
-4. Extended rewards teach which goals are good/bad for each task
-5. Zero-shot composition via min operation
-
-CRITICAL FIX:
-- Extended reward now gives +1 for ANY valid goal that satisfies the task
-- This allows Q(s, red_box, a) and Q(s, red_sphere, a) to both be learned as good for "red"
-- Enables proper generalization and composition
 """
 
 import numpy as np
@@ -51,33 +39,30 @@ class FrameStack:
         return np.concatenate(list(self.frames), axis=0)
 
 
-class GoalTiledLSTMNetwork(nn.Module):
+class UnifiedGoalTaskLSTMNetwork(nn.Module):
     """
-    Goal-Conditioned Q-Network with Goal Tiling + LSTM.
+    UNIFIED Goal-Conditioned Q-Network with BOTH Goal and Task Tiling + LSTM.
     
-    Goal Conditioning Strategy:
-        - The goal one-hot vector is tiled across the spatial dimensions
-        - Concatenated with the image as extra channels BEFORE the CNN
-        - This forces the CNN to see the goal at every pixel location
-        - Much stronger conditioning than concatenating after CNN
+    Key change: Network now sees BOTH the goal AND the primitive task
     
     Architecture:
-        [Image (12 ch) | Goal Tiled (4 ch)] -> CNN -> LSTM -> Dueling Q
+        [Image (12 ch) | Goal Tiled (4 ch) | Task Tiled (4 ch)] -> CNN -> LSTM -> Dueling Q
         
-    Input: (batch, 12 + 4, H, W) = (batch, 16, 60, 80)
+    Input: (batch, 12 + 4 + 4, H, W) = (batch, 20, 60, 80)
     """
     
-    def __init__(self, input_shape=(12, 60, 80), num_goals=4, action_size=3,
+    def __init__(self, input_shape=(12, 60, 80), num_goals=4, num_tasks=4, action_size=3,
                  hidden_size=128, lstm_size=64):
-        super(GoalTiledLSTMNetwork, self).__init__()
+        super(UnifiedGoalTaskLSTMNetwork, self).__init__()
         
         self.input_shape = input_shape
         self.num_goals = num_goals
+        self.num_tasks = num_tasks
         self.action_size = action_size
         self.lstm_size = lstm_size
         
-        # CNN input channels = image channels + goal channels
-        cnn_input_channels = input_shape[0] + num_goals  # 12 + 4 = 16
+        # CNN input channels = image channels + goal channels + task channels
+        cnn_input_channels = input_shape[0] + num_goals + num_tasks  # 12 + 4 + 4 = 20
         
         # CNN backbone
         self.conv = nn.Sequential(
@@ -141,38 +126,42 @@ class GoalTiledLSTMNetwork(nn.Module):
                     elif 'bias' in name:
                         nn.init.constant_(param.data, 0)
     
-    def tile_goal(self, state, goal):
+    def tile_conditioning(self, state, goal, task):
         """
-        Tile goal across spatial dimensions and concatenate with state.
+        Tile BOTH goal and task across spatial dimensions and concatenate with state.
         
         Args:
             state: (batch, C, H, W) image tensor
             goal: (batch, num_goals) one-hot goal vector
+            task: (batch, num_tasks) one-hot task vector
         
         Returns:
-            combined: (batch, C + num_goals, H, W)
+            combined: (batch, C + num_goals + num_tasks, H, W)
         """
         batch_size = state.size(0)
         H, W = state.size(2), state.size(3)
         
-        # Reshape goal: (batch, num_goals) -> (batch, num_goals, 1, 1)
+        # Tile goal: (batch, num_goals) -> (batch, num_goals, H, W)
         goal_expanded = goal.view(batch_size, self.num_goals, 1, 1)
-        
-        # Tile across spatial dimensions: (batch, num_goals, H, W)
         goal_tiled = goal_expanded.expand(batch_size, self.num_goals, H, W)
         
-        # Concatenate with state along channel dimension
-        combined = torch.cat([state, goal_tiled], dim=1)
+        # Tile task: (batch, num_tasks) -> (batch, num_tasks, H, W)
+        task_expanded = task.view(batch_size, self.num_tasks, 1, 1)
+        task_tiled = task_expanded.expand(batch_size, self.num_tasks, H, W)
+        
+        # Concatenate: state + goal + task
+        combined = torch.cat([state, goal_tiled, task_tiled], dim=1)
         
         return combined
     
-    def forward(self, state, goal, hidden=None):
+    def forward(self, state, goal, task, hidden=None):
         """
-        Forward pass with goal tiling.
+        Forward pass with goal and task tiling.
         
         Args:
             state: (batch, C, H, W) image tensor
             goal: (batch, num_goals) one-hot goal vector
+            task: (batch, num_tasks) one-hot task vector
             hidden: Optional LSTM hidden state (h, c)
         
         Returns:
@@ -181,8 +170,8 @@ class GoalTiledLSTMNetwork(nn.Module):
         """
         batch_size = state.size(0)
         
-        # Tile goal and concatenate with state
-        combined = self.tile_goal(state, goal)  # (batch, C+4, H, W)
+        # Tile goal and task, concatenate with state
+        combined = self.tile_conditioning(state, goal, task)  # (batch, C+4+4, H, W)
         
         # CNN features
         conv_features = self.conv(combined)
@@ -205,34 +194,6 @@ class GoalTiledLSTMNetwork(nn.Module):
         
         return q_values, hidden
     
-    def forward_all_goals(self, state, hidden=None):
-        """
-        Compute Q-values for ALL goals at once.
-        
-        Returns:
-            q_values: (batch, num_goals, action_size)
-            hidden: Updated LSTM hidden state
-        """
-        batch_size = state.size(0)
-        device = state.device
-        
-        all_q_values = []
-        
-        for g in range(self.num_goals):
-            # Create one-hot goal vector
-            goal = torch.zeros(batch_size, self.num_goals, device=device)
-            goal[:, g] = 1.0
-            
-            q_vals, hidden = self.forward(state, goal, hidden)
-            all_q_values.append(q_vals)
-            
-            # Detach hidden to prevent memory buildup across goals
-            if hidden is not None:
-                hidden = (hidden[0].detach(), hidden[1].detach())
-        
-        # Stack: (batch, num_goals, action_size)
-        return torch.stack(all_q_values, dim=1), hidden
-    
     def init_hidden(self, batch_size=1, device='cpu'):
         """Initialize LSTM hidden state."""
         h = torch.zeros(1, batch_size, self.lstm_size, device=device)
@@ -250,9 +211,9 @@ class EpisodeReplayBuffer:
         self.episodes = deque(maxlen=capacity)
         self.current_episode = []
     
-    def push(self, state, goal_idx, action, reward, next_state, done):
+    def push(self, state, goal_idx, task_idx, action, reward, next_state, done):
         """Add a transition to the current episode."""
-        self.current_episode.append((state, goal_idx, action, reward, next_state, done))
+        self.current_episode.append((state, goal_idx, task_idx, action, reward, next_state, done))
         if done:
             self.end_episode()
     
@@ -287,19 +248,17 @@ class EpisodeReplayBuffer:
         self.current_episode = []
 
 
-class WorldValueFunctionAgent:
+class UnifiedWorldValueFunctionAgent:
     """
-    World Value Function (WVF) Agent with Goal Tiling + LSTM
+    UNIFIED World Value Function (WVF) Agent
     
-    KEY DESIGN:
-    1. Goal tiled as extra image channels - CNN sees goal at every pixel
-    2. LSTM for temporal memory across steps
-    3. Train separately for each primitive task
-    4. Extended rewards teach which goals are good/bad for each task
-    5. Zero-shot composition via min operation over primitive Q-values
+    KEY CHANGE: Single model for all primitive tasks
+    - Task conditioning via one-hot tiled across image
+    - Random task sampling each episode
+    - Same composition at evaluation
     
     Goals: [red_box, blue_box, red_sphere, blue_sphere]
-    Primitives: red, blue, box, sphere
+    Tasks: [red, blue, box, sphere]
     """
     
     # Goal space - the 4 objects in the environment
@@ -309,6 +268,9 @@ class WorldValueFunctionAgent:
     
     # Primitive tasks and which goals are valid for each
     PRIMITIVES = ['red', 'blue', 'box', 'sphere']
+    TASK_TO_IDX = {t: i for i, t in enumerate(PRIMITIVES)}
+    IDX_TO_TASK = {i: t for i, t in enumerate(PRIMITIVES)}
+    
     VALID_GOALS = {
         'red': ['red_box', 'red_sphere'],
         'blue': ['blue_box', 'blue_sphere'],
@@ -327,6 +289,7 @@ class WorldValueFunctionAgent:
         self.action_dim = 3
         self.k_frames = k_frames
         self.num_goals = len(self.GOALS)
+        self.num_tasks = len(self.PRIMITIVES)
         self.seq_len = seq_len
         
         # Extended reward parameters
@@ -337,6 +300,7 @@ class WorldValueFunctionAgent:
         
         # Hyperparameters
         self.gamma = gamma
+        self.epsilon = epsilon_start
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
@@ -350,7 +314,7 @@ class WorldValueFunctionAgent:
         
         # Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"WorldValueFunctionAgent using device: {self.device}")
+        print(f"UnifiedWorldValueFunctionAgent using device: {self.device}")
         
         # Get observation shape
         sample_obs = env.reset()[0]
@@ -368,40 +332,33 @@ class WorldValueFunctionAgent:
         
         print(f"Observation shape: {self.obs_shape}")
         print(f"Goal conditioning: Tiled as {self.num_goals} extra channels")
-        print(f"CNN input shape: ({self.obs_shape[0] + self.num_goals}, {self.obs_shape[1]}, {self.obs_shape[2]})")
-        print(f"Extended rewards: r_correct={r_correct}, r_wrong={r_wrong}")
+        print(f"Task conditioning: Tiled as {self.num_tasks} extra channels")
+        print(f"CNN input shape: ({self.obs_shape[0] + self.num_goals + self.num_tasks}, {self.obs_shape[1]}, {self.obs_shape[2]})")
         
         # Frame stacker
         self.frame_stack = FrameStack(k=k_frames)
         
-        # Networks (initialized when training starts)
-        self.q_network = None
-        self.target_network = None
-        self.optimizer = None
-        self.memory = None
+        # Create UNIFIED networks
+        self._create_networks()
         
-        # Storage for trained networks (one per primitive)
-        self.trained_networks = {}
-        
-        # Current training state
-        self.current_primitive = None
-        self.current_valid_goals = None
-        self.epsilon = epsilon_start
+        # Current episode state
         self.current_hidden = None
     
     def _create_networks(self):
-        """Create fresh networks for training."""
-        self.q_network = GoalTiledLSTMNetwork(
+        """Create unified networks."""
+        self.q_network = UnifiedGoalTaskLSTMNetwork(
             input_shape=self.obs_shape,
             num_goals=self.num_goals,
+            num_tasks=self.num_tasks,
             action_size=self.action_dim,
             hidden_size=self.hidden_size,
             lstm_size=self.lstm_size
         ).to(self.device)
         
-        self.target_network = GoalTiledLSTMNetwork(
+        self.target_network = UnifiedGoalTaskLSTMNetwork(
             input_shape=self.obs_shape,
             num_goals=self.num_goals,
+            num_tasks=self.num_tasks,
             action_size=self.action_dim,
             hidden_size=self.hidden_size,
             lstm_size=self.lstm_size
@@ -413,67 +370,30 @@ class WorldValueFunctionAgent:
         self.memory = EpisodeReplayBuffer(capacity=self.memory_size)
         
         total_params = sum(p.numel() for p in self.q_network.parameters())
-        print(f"  Network parameters: {total_params:,}")
+        print(f"  Unified network parameters: {total_params:,}")
     
-    def set_training_primitive(self, primitive):
-        """Set which primitive we're currently training."""
-        assert primitive in self.PRIMITIVES, f"Unknown primitive: {primitive}"
-        self.current_primitive = primitive
-        self.current_valid_goals = self.VALID_GOALS[primitive]
-        self.epsilon = self.epsilon_start
-        
-        # Create fresh networks and clear memory
-        self._create_networks()
-        
-        print(f"\nTraining primitive: {primitive}")
-        print(f"  Valid goals: {self.current_valid_goals}")
-    
-    def save_trained_network(self, primitive):
-        """Save the trained network for a primitive."""
-        self.trained_networks[primitive] = copy.deepcopy(self.q_network.state_dict())
-        print(f"  Saved trained network for '{primitive}'")
-        
-        # Clear to free memory
-        self.q_network = None
-        self.target_network = None
-        self.optimizer = None
-        self.memory = None
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    
-    def load_trained_network(self, primitive):
-        """Load a previously trained network for evaluation."""
-        if primitive not in self.trained_networks:
-            raise ValueError(f"No trained network for primitive '{primitive}'")
-        
-        if self.q_network is None:
-            self.q_network = GoalTiledLSTMNetwork(
-                input_shape=self.obs_shape,
-                num_goals=self.num_goals,
-                action_size=self.action_dim,
-                hidden_size=self.hidden_size,
-                lstm_size=self.lstm_size
-            ).to(self.device)
-        
-        self.q_network.load_state_dict(self.trained_networks[primitive])
-        self.q_network.eval()
+    def sample_task(self):
+        """Randomly sample a primitive task for this episode."""
+        return random.choice(self.PRIMITIVES)
     
     def get_valid_goal_indices(self, primitive):
         """Get indices of valid goals for a primitive task."""
         valid_goals = self.VALID_GOALS[primitive]
         return [self.GOAL_TO_IDX[g] for g in valid_goals]
     
-    def sample_target_goal(self, valid_bias=0.8):
+    def sample_target_goal(self, current_task, valid_bias=0.8):
         """
-        Sample a target goal with bias toward valid goals.
+        Sample a target goal with bias toward valid goals for current task.
         
         80% valid goals (strong learning signal)
         20% invalid goals (learn they're bad)
         """
+        valid_goals = self.VALID_GOALS[current_task]
+        
         if random.random() < valid_bias:
-            goal_name = random.choice(self.current_valid_goals)
+            goal_name = random.choice(valid_goals)
         else:
-            invalid_goals = [g for g in self.GOALS if g not in self.current_valid_goals]
+            invalid_goals = [g for g in self.GOALS if g not in valid_goals]
             goal_name = random.choice(invalid_goals)
         
         return self.GOAL_TO_IDX[goal_name]
@@ -489,20 +409,22 @@ class WorldValueFunctionAgent:
             one_hot[:, goal_idx] = 1.0
         return one_hot
     
-    def compute_rewards(self, info, target_goal_idx):
+    def get_task_one_hot(self, task_idx, batch_size=1):
+        """Convert task index to one-hot tensor."""
+        if isinstance(task_idx, (list, np.ndarray)):
+            one_hot = torch.zeros(len(task_idx), self.num_tasks, device=self.device)
+            for i, idx in enumerate(task_idx):
+                one_hot[i, int(idx)] = 1.0
+        else:
+            one_hot = torch.zeros(batch_size, self.num_tasks, device=self.device)
+            one_hot[:, task_idx] = 1.0
+        return one_hot
+    
+    def compute_rewards(self, info, target_goal_idx, current_task):
         """
-        Compute TRUE reward (for plotting) and EXTENDED reward (for training).
+        Compute TRUE reward and EXTENDED reward.
         
-        CRITICAL FIX: Extended reward is +1 for ANY valid goal that satisfies the task,
-        not just the specific goal we conditioned on. This allows the network to
-        learn that Q(s, red_box, a) and Q(s, red_sphere, a) are both good for "red".
-        
-        This aligns the training signal with the environment's implicit task goal.
-        
-        Returns:
-            true_reward: 0 or 1 (did we satisfy the primitive task?)
-            extended_reward: shaped reward for goal-conditioned learning
-            done: whether episode should end
+        Extended reward: +1 for ANY valid goal that satisfies the current task.
         """
         contacted = info.get('contacted_object', None)
         
@@ -515,19 +437,16 @@ class WorldValueFunctionAgent:
         if contacted_goal_idx is None:
             return 0.0, self.step_penalty, False
         
-        # TRUE reward: did we satisfy the current primitive task?
-        task_satisfied = contacted in self.current_valid_goals
+        # TRUE reward: did we satisfy the current task?
+        valid_goals_for_task = self.VALID_GOALS[current_task]
+        task_satisfied = contacted in valid_goals_for_task
         true_reward = 1.0 if task_satisfied else 0.0
         
-        # EXTENDED reward for goal-conditioned learning
-        # KEY FIX: Give +1 for ANY object that satisfies the task, regardless of
-        # which specific goal we conditioned on. This teaches proper generalization.
+        # EXTENDED reward: +1 for ANY object that satisfies the task
         if task_satisfied:
-            # Task complete - give full reward regardless of exact goal
-            extended_reward = self.r_correct  # +1.0
+            extended_reward = self.r_correct
         else:
-            # Contacted wrong object entirely
-            extended_reward = self.r_wrong  # -1.0
+            extended_reward = self.r_wrong
         
         return true_reward, extended_reward, True
     
@@ -561,8 +480,7 @@ class WorldValueFunctionAgent:
         frame = self.preprocess_frame(obs)
         stacked = self.frame_stack.reset(frame)
         
-        if self.q_network is not None:
-            self.current_hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
+        self.current_hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
         
         return stacked
     
@@ -571,8 +489,8 @@ class WorldValueFunctionAgent:
         frame = self.preprocess_frame(obs)
         return self.frame_stack.step(frame)
     
-    def select_action(self, stacked_obs, target_goal_idx, epsilon=None):
-        """Select action using epsilon-greedy, conditioned on target goal."""
+    def select_action(self, stacked_obs, target_goal_idx, current_task_idx, epsilon=None):
+        """Select action using epsilon-greedy, conditioned on goal and task."""
         if epsilon is None:
             epsilon = self.epsilon
         
@@ -581,61 +499,20 @@ class WorldValueFunctionAgent:
         
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         goal = self.get_goal_one_hot(target_goal_idx)
+        task = self.get_task_one_hot(current_task_idx)
         
         with torch.no_grad():
-            q_values, self.current_hidden = self.q_network(state, goal, self.current_hidden)
+            q_values, self.current_hidden = self.q_network(state, goal, task, self.current_hidden)
             if self.current_hidden is not None:
                 self.current_hidden = (self.current_hidden[0].detach(),
                                        self.current_hidden[1].detach())
             return q_values.argmax().item()
     
-    def select_action_greedy_over_goals(self, stacked_obs, valid_goal_indices=None):
-        """
-        Select action by: argmax_a max_g Q(s, g, a)
-        
-        If valid_goal_indices provided, only consider those goals.
-        """
-        state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            all_q, self.current_hidden = self.q_network.forward_all_goals(state, self.current_hidden)
-            
-            if valid_goal_indices is not None:
-                valid_q = all_q[:, valid_goal_indices, :]
-                max_over_goals = valid_q.max(dim=1)[0]
-            else:
-                max_over_goals = all_q.max(dim=1)[0]
-            
-            return max_over_goals.argmax().item()
-    
-    def select_action_composed(self, stacked_obs, features):
+    def select_action_composed(self, stacked_obs, features, target_goal_idx):
         """
         Select action using composed Q-values.
         
-        Q_composed = min over features of Q_feature
-        action = argmax_a max_g Q_composed(s, g, a)
-        """
-        state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
-        
-        q_all_features = []
-        
-        with torch.no_grad():
-            for feature in features:
-                self.load_trained_network(feature)
-                hidden = self.q_network.init_hidden(1, self.device)
-                all_q, _ = self.q_network.forward_all_goals(state, hidden)
-                q_all_features.append(all_q)
-            
-            q_stacked = torch.stack(q_all_features, dim=0)
-            q_composed = q_stacked.min(dim=0)[0]
-            q_max_goal = q_composed.max(dim=1)[0]
-            
-            return q_max_goal.argmax().item()
-    
-    def select_action_composed_for_goal(self, stacked_obs, features, target_goal_idx):
-        """
-        Select action for a SPECIFIC target goal using composition.
-        
+        For compositional task, take min over feature Q-values:
         Q_composed = min over features of Q_feature(s, target_goal, a)
         action = argmax_a Q_composed
         """
@@ -646,9 +523,11 @@ class WorldValueFunctionAgent:
         
         with torch.no_grad():
             for feature in features:
-                self.load_trained_network(feature)
+                task_idx = self.TASK_TO_IDX[feature]
+                task_one_hot = self.get_task_one_hot(task_idx)
+                
                 hidden = self.q_network.init_hidden(1, self.device)
-                q_vals, _ = self.q_network(state, goal_one_hot, hidden)
+                q_vals, _ = self.q_network(state, goal_one_hot, task_one_hot, hidden)
                 q_values_per_feature.append(q_vals)
             
             q_stacked = torch.stack(q_values_per_feature, dim=0)
@@ -656,9 +535,9 @@ class WorldValueFunctionAgent:
             
             return q_composed.argmax().item()
     
-    def remember(self, state, goal_idx, action, reward, next_state, done):
+    def remember(self, state, goal_idx, task_idx, action, reward, next_state, done):
         """Store transition."""
-        self.memory.push(state, goal_idx, action, reward, next_state, done)
+        self.memory.push(state, goal_idx, task_idx, action, reward, next_state, done)
     
     def soft_update_target(self):
         """Soft update target network."""
@@ -678,7 +557,7 @@ class WorldValueFunctionAgent:
         sequences = self.memory.sample(self.batch_size, self.seq_len)
         max_len = max(len(seq) for seq in sequences)
         
-        states_batch, goals_batch, actions_batch = [], [], []
+        states_batch, goals_batch, tasks_batch, actions_batch = [], [], [], []
         rewards_batch, next_states_batch, dones_batch, lengths = [], [], [], []
         
         for seq in sequences:
@@ -687,15 +566,17 @@ class WorldValueFunctionAgent:
             
             states = [s[0] for s in seq]
             goals = [s[1] for s in seq]
-            actions = [s[2] for s in seq]
-            rewards = [s[3] for s in seq]
-            next_states = [s[4] for s in seq]
-            dones = [s[5] for s in seq]
+            tasks = [s[2] for s in seq]
+            actions = [s[3] for s in seq]
+            rewards = [s[4] for s in seq]
+            next_states = [s[5] for s in seq]
+            dones = [s[6] for s in seq]
             
             if seq_len_actual < max_len:
                 pad_len = max_len - seq_len_actual
                 states.extend([states[-1]] * pad_len)
                 goals.extend([goals[-1]] * pad_len)
+                tasks.extend([tasks[-1]] * pad_len)
                 actions.extend([0] * pad_len)
                 rewards.extend([0.0] * pad_len)
                 next_states.extend([next_states[-1]] * pad_len)
@@ -703,6 +584,7 @@ class WorldValueFunctionAgent:
             
             states_batch.append(states)
             goals_batch.append(goals)
+            tasks_batch.append(tasks)
             actions_batch.append(actions)
             rewards_batch.append(rewards)
             next_states_batch.append(next_states)
@@ -710,6 +592,7 @@ class WorldValueFunctionAgent:
         
         states_t = torch.FloatTensor(np.array(states_batch)).to(self.device)
         goals_t = torch.LongTensor(goals_batch).to(self.device)
+        tasks_t = torch.LongTensor(tasks_batch).to(self.device)
         actions_t = torch.LongTensor(actions_batch).to(self.device)
         rewards_t = torch.FloatTensor(rewards_batch).to(self.device)
         next_states_t = torch.FloatTensor(np.array(next_states_batch)).to(self.device)
@@ -720,46 +603,51 @@ class WorldValueFunctionAgent:
         hidden = self.q_network.init_hidden(batch_size, self.device)
         target_hidden = self.target_network.init_hidden(batch_size, self.device)
         
+        # Forward pass through online network
         q_values_list = []
         for t in range(seq_len):
             goal_one_hot = torch.zeros(batch_size, self.num_goals, device=self.device)
+            task_one_hot = torch.zeros(batch_size, self.num_tasks, device=self.device)
             for b in range(batch_size):
                 goal_one_hot[b, goals_t[b, t]] = 1.0
+                task_one_hot[b, tasks_t[b, t]] = 1.0
             
-            # states_t[:, t] = (16, 12, 60, 80) - 16 states at timestep t
-            # goal_one_hot = (16, 4) - 16 goal vectors
-            # Inside network: goal is TILED to (16, 4, 60, 80) and concatenated with state
-
-            q_vals, hidden = self.q_network(states_t[:, t], goal_one_hot, hidden)
+            q_vals, hidden = self.q_network(states_t[:, t], goal_one_hot, task_one_hot, hidden)
             q_values_list.append(q_vals)
             hidden = (hidden[0].detach(), hidden[1].detach())
         
         q_values = torch.stack(q_values_list, dim=1)
         current_q = q_values.gather(2, actions_t.unsqueeze(2)).squeeze(2)
         
-        # Target Network
+        # Target Network (Double DQN)
         with torch.no_grad():
+            # Get next actions from online network
             next_q_list = []
             hidden_copy = self.q_network.init_hidden(batch_size, self.device)
             for t in range(seq_len):
                 goal_one_hot = torch.zeros(batch_size, self.num_goals, device=self.device)
+                task_one_hot = torch.zeros(batch_size, self.num_tasks, device=self.device)
                 for b in range(batch_size):
                     goal_one_hot[b, goals_t[b, t]] = 1.0
+                    task_one_hot[b, tasks_t[b, t]] = 1.0
                 
-                nq, hidden_copy = self.q_network(next_states_t[:, t], goal_one_hot, hidden_copy)
+                nq, hidden_copy = self.q_network(next_states_t[:, t], goal_one_hot, task_one_hot, hidden_copy)
                 next_q_list.append(nq)
                 hidden_copy = (hidden_copy[0].detach(), hidden_copy[1].detach())
             
             next_q_values = torch.stack(next_q_list, dim=1)
             next_actions = next_q_values.argmax(2, keepdim=True)
             
+            # Evaluate actions with target network
             target_q_list = []
             for t in range(seq_len):
                 goal_one_hot = torch.zeros(batch_size, self.num_goals, device=self.device)
+                task_one_hot = torch.zeros(batch_size, self.num_tasks, device=self.device)
                 for b in range(batch_size):
                     goal_one_hot[b, goals_t[b, t]] = 1.0
+                    task_one_hot[b, tasks_t[b, t]] = 1.0
                 
-                tq, target_hidden = self.target_network(next_states_t[:, t], goal_one_hot, target_hidden)
+                tq, target_hidden = self.target_network(next_states_t[:, t], goal_one_hot, task_one_hot, target_hidden)
                 target_q_list.append(tq)
                 target_hidden = (target_hidden[0].detach(), target_hidden[1].detach())
             
@@ -768,6 +656,7 @@ class WorldValueFunctionAgent:
             
             target_q = rewards_t + (self.gamma * next_q * ~dones_t)
         
+        # Masking for variable-length sequences
         loss_mask = torch.zeros(batch_size, seq_len, device=self.device)
         for i, length in enumerate(lengths):
             loss_mask[i, :length] = 1.0
@@ -791,22 +680,29 @@ class WorldValueFunctionAgent:
         self.epsilon = self.epsilon_start
     
     def save_model(self, filepath):
-        """Save all trained networks."""
+        """Save unified model."""
         checkpoint = {
             'obs_shape': self.obs_shape,
             'k_frames': self.k_frames,
             'num_goals': self.num_goals,
+            'num_tasks': self.num_tasks,
             'hidden_size': self.hidden_size,
             'lstm_size': self.lstm_size,
-            'trained_networks': self.trained_networks,
+            'q_network_state': self.q_network.state_dict(),
+            'target_network_state': self.target_network.state_dict(),
+            'optimizer_state': self.optimizer.state_dict(),
         }
         torch.save(checkpoint, filepath)
-        print(f"WVF model saved to {filepath}")
+        print(f"Unified WVF model saved to {filepath}")
     
     def load_model(self, filepath):
-        """Load all trained networks."""
+        """Load unified model."""
         checkpoint = torch.load(filepath, map_location=self.device)
-        self.trained_networks = checkpoint['trained_networks']
         self.hidden_size = checkpoint.get('hidden_size', 128)
         self.lstm_size = checkpoint.get('lstm_size', 64)
-        print(f"WVF model loaded from {filepath}")
+        
+        self.q_network.load_state_dict(checkpoint['q_network_state'])
+        self.target_network.load_state_dict(checkpoint['target_network_state'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state'])
+        
+        print(f"Unified WVF model loaded from {filepath}")
