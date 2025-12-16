@@ -1,0 +1,64 @@
+{
+  "training": {
+    "total_episodes": 8000,
+    "final_success_rate": 0.73,
+    "final_epsilon": 0.05,
+    "task_distribution": {
+      "box": 1973,
+      "sphere": 2011,
+      "red": 2048,
+      "blue": 1968
+    },
+    "per_task_final_success": {
+      "red": 0.81,
+      "blue": 0.73,
+      "box": 0.7,
+      "sphere": 0.73
+    },
+    "model_path": "results/current/12_15_2025/1/unified_dqn_model.pt"
+  },
+  "evaluation_simple": {
+    "red": {
+      "success_rate": 0.31,
+      "mean_length": 140.01
+    },
+    "blue": {
+      "success_rate": 0.4,
+      "mean_length": 122.27
+    },
+    "box": {
+      "success_rate": 0.37,
+      "mean_length": 127.91
+    },
+    "sphere": {
+      "success_rate": 0.33,
+      "mean_length": 136.71
+    }
+  },
+  "evaluation_compositional": {
+    "red_box": {
+      "success_rate": 0.0,
+      "conditioning": "superposition(red, box)",
+      "mean_length": 200.0
+    },
+    "red_sphere": {
+      "success_rate": 0.01,
+      "conditioning": "superposition(red, sphere)",
+      "mean_length": 198.04
+    },
+    "blue_box": {
+      "success_rate": 0.01,
+      "conditioning": "superposition(blue, box)",
+      "mean_length": 198.03
+    },
+    "blue_sphere": {
+      "success_rate": 0.02,
+      "conditioning": "superposition(blue, sphere)",
+      "mean_length": 196.05
+    }
+  },
+  "summary": {
+    "avg_simple_success": 0.35250000000000004,
+    "avg_comp_success": 0.01
+  }
+}

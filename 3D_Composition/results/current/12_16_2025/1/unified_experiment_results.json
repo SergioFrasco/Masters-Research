@@ -1,0 +1,87 @@
+{
+  "architecture": "Unified LSTM-DQN with Goal Tiling",
+  "training": {
+    "episodes": 8000,
+    "final_success_rate": 0.98,
+    "final_epsilon": 0.05,
+    "final_task_success_rates": {
+      "red": 1.0,
+      "blue": 1.0,
+      "box": 0.99,
+      "sphere": 0.97
+    },
+    "final_buffer_distribution": {
+      "red": 0.25383597883597886,
+      "blue": 0.2466931216931217,
+      "box": 0.25396825396825395,
+      "sphere": 0.2455026455026455
+    },
+    "task_episode_counts": {
+      "red": 1998,
+      "blue": 1944,
+      "box": 2037,
+      "sphere": 2021
+    }
+  },
+  "evaluation_simple": {
+    "red": {
+      "success_rate": 0.93,
+      "mean_length": 23.84
+    },
+    "blue": {
+      "success_rate": 0.89,
+      "mean_length": 31.26
+    },
+    "box": {
+      "success_rate": 0.885,
+      "mean_length": 33.31
+    },
+    "sphere": {
+      "success_rate": 0.93,
+      "mean_length": 26.6
+    }
+  },
+  "evaluation_compositional": {
+    "red_box": {
+      "direct_success": 0.095,
+      "color_success": 0.765,
+      "color_used": "red",
+      "features": [
+        "red",
+        "box"
+      ]
+    },
+    "red_sphere": {
+      "direct_success": 0.215,
+      "color_success": 0.78,
+      "color_used": "red",
+      "features": [
+        "red",
+        "sphere"
+      ]
+    },
+    "blue_box": {
+      "direct_success": 0.445,
+      "color_success": 0.78,
+      "color_used": "blue",
+      "features": [
+        "blue",
+        "box"
+      ]
+    },
+    "blue_sphere": {
+      "direct_success": 0.425,
+      "color_success": 0.73,
+      "color_used": "blue",
+      "features": [
+        "blue",
+        "sphere"
+      ]
+    }
+  },
+  "summary": {
+    "avg_simple_success": 0.9087500000000001,
+    "avg_comp_direct_success": 0.295,
+    "avg_comp_color_success": 0.76375
+  }
+}
