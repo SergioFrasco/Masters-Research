@@ -1,6 +1,16 @@
 import os
+import sys
+
+# Force headless mode
 os.environ["MINIWORLD_HEADLESS"] = "1"
-os.environ["PYGLET_HEADLESS"] = "True" 
+os.environ["PYGLET_HEADLESS"] = "True"
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+os.environ["MUJOCO_GL"] = "osmesa"
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+
+if "DISPLAY" in os.environ:
+    del os.environ["DISPLAY"]
 
 import matplotlib
 matplotlib.use('Agg')  
