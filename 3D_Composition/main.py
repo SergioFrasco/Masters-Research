@@ -1,7 +1,6 @@
 import os
 import sys
 
-# Force headless mode
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
 os.environ["PYOPENGL_PLATFORM"] = "osmesa"
@@ -9,11 +8,15 @@ os.environ["MUJOCO_GL"] = "osmesa"
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 
+# Force remove DISPLAY
 if "DISPLAY" in os.environ:
     del os.environ["DISPLAY"]
 
+os.environ["SDL_VIDEODRIVER"] = "dummy"  # For any SDL usage
+os.environ["SDL_AUDIODRIVER"] = "dummy"
+
 import matplotlib
-matplotlib.use('Agg')  
+matplotlib.use('Agg')
 
 import gymnasium as gym
 import miniworld
