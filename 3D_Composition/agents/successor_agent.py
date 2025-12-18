@@ -39,7 +39,7 @@ class SuccessorAgent:
         
         # Confidence parameters
         self.confidence_boost = 0.4  # How much to increase confidence per detection
-        self.decay_factor = 0.90     # How much confidence decays each episode (faster for random tasks)
+        self.step_decay_factor = 0.95  # Within-episode decay to filter detector noise
         self.confidence_threshold = 0.5  # Threshold for considering a location valid
         
         # Composed reward map (task-specific)
@@ -52,13 +52,17 @@ class SuccessorAgent:
         self.reward_maps = np.zeros((self.state_size, self.grid_size, self.grid_size), dtype=np.float32)
     
     def update_feature_map(self, detected_objects, positions):
-        """Update feature map with confidence accumulation (decay moved to reset())"""
+        """Update feature map with within-episode decay for noisy detector"""
         
-        # Get agent info
+        # FIRST: Decay existing confidence each step to filter out noise
+        for feature in self.feature_map:
+            self.feature_map[feature] *= self.step_decay_factor
+        
+        # SECOND: Get agent info
         agent_x, agent_z = self._get_agent_pos_from_env()
         agent_dir = self._get_agent_dir_from_env()
         
-        # Boost confidence for newly detected objects
+        # THIRD: Boost confidence for newly detected objects
         for obj_name in detected_objects:
             if obj_name in positions and positions[obj_name] is not None:
                 dx, dz = positions[obj_name]
@@ -268,13 +272,13 @@ class SuccessorAgent:
         return np.random.randint(self.action_size)
     
     def reset(self):
-        """Reset for new episode"""
+        """Reset for new episode - completely clear feature maps for new environment"""
         self.prev_state = None
         self.prev_action = None
         
-        # Decay feature maps each episode (objects not seen recently fade)
+        # Zero out feature maps completely - new episode = new environment with new object positions
         for feature in self.feature_map:
-            self.feature_map[feature] *= self.decay_factor
+            self.feature_map[feature].fill(0)
         
         self.composed_reward_map.fill(0)
         self.wvf.fill(0)
