@@ -46,15 +46,15 @@ from experiment_utils import (
 # ============================================================================
 
 # Easily adjustable number of seeds
-NUM_SEEDS = 3
+NUM_SEEDS = 2
 
 # Algorithms to compare
 ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
 
 # Training configuration
 TRAINING_CONFIG = {
-    "training_episodes": 10000,
-    "eval_episodes_per_task": 300,  # 300 per compositional task
+    "training_episodes": 10,
+    "eval_episodes_per_task": 10,  # 300 per compositional task
     "max_steps": 200,
     "env_size": 10,
     
