@@ -274,13 +274,11 @@ def main():
     
     executor = submitit.SlurmExecutor(folder=log_dir)
     
-    # Update SLURM parameters
+    # Update SLURM parameters (only what your cluster allows)
     executor.update_parameters(
         partition=SLURM_CONFIG["partition"],
         time=SLURM_CONFIG["time"],
         ntasks_per_node=SLURM_CONFIG["ntasks"],
-        cpus_per_task=SLURM_CONFIG.get("cpus_per_task", 1),
-        mem=SLURM_CONFIG.get("mem", "8GB"),
         stderr_to_stdout=True,
     )
     
