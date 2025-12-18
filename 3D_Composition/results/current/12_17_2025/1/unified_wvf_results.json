@@ -1,0 +1,64 @@
+{
+  "method": "Unified World Value Functions",
+  "innovation": "Single model with task conditioning, random task sampling per episode",
+  "training": {
+    "total_episodes": 8000,
+    "task_distribution": {
+      "red": 1992,
+      "blue": 1984,
+      "box": 1998,
+      "sphere": 2026
+    },
+    "final_success_rates": {
+      "red": 0.88,
+      "blue": 0.93,
+      "box": 0.9,
+      "sphere": 0.9
+    }
+  },
+  "evaluation_primitives": {
+    "red": {
+      "success_rate": 0.795,
+      "mean_length": 46.96
+    },
+    "blue": {
+      "success_rate": 0.705,
+      "mean_length": 63.54
+    },
+    "box": {
+      "success_rate": 0.64,
+      "mean_length": 74.205
+    },
+    "sphere": {
+      "success_rate": 0.52,
+      "mean_length": 97.52
+    }
+  },
+  "evaluation_compositional_zero_shot": {
+    "red_box": {
+      "success_rate": 0.525,
+      "mean_length": 99.265,
+      "composition": "min(red, box)"
+    },
+    "red_sphere": {
+      "success_rate": 0.385,
+      "mean_length": 124.19,
+      "composition": "min(red, sphere)"
+    },
+    "blue_box": {
+      "success_rate": 0.38,
+      "mean_length": 127.36,
+      "composition": "min(blue, box)"
+    },
+    "blue_sphere": {
+      "success_rate": 0.425,
+      "mean_length": 115.665,
+      "composition": "min(blue, sphere)"
+    }
+  },
+  "summary": {
+    "avg_primitive_success": 0.665,
+    "avg_compositional_success": 0.42875,
+    "generalization_gap": 0.23625000000000002
+  }
+}
