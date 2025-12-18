@@ -1,0 +1,37 @@
+submitit INFO (2025-12-18 19:31:49,189) - Starting with JobEnvironment(job_id=171293, hostname=mscluster67.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-18 19:31:49,189) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_Composition/experiment_results/comparison_20251218_193137/slurm_logs/171293_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=WVF, Seed=0
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED WVF (Seed=0)
+======================================================================
+
+UnifiedWorldValueFunctionAgent using device: cuda
+Observation shape: (12, 60, 80)
+Goal conditioning: Tiled as 4 extra channels
+Task conditioning: Tiled as 4 extra channels
+CNN input shape: (20, 60, 80)
+  Unified network parameters: 538,020
+Starting training phase...
+Training WVF:   0%|          | 0/10 [00:00<?, ?it/s]Training WVF:  30%|███       | 3/10 [00:00<00:00, 17.78it/s]Training WVF:  50%|█████     | 5/10 [00:00<00:00,  9.96it/s]Training WVF:  80%|████████  | 8/10 [00:00<00:00, 14.34it/s]Training WVF: 100%|██████████| 10/10 [00:00<00:00, 13.85it/s]Training WVF: 100%|██████████| 10/10 [00:00<00:00, 13.55it/s]
+Unified WVF model saved to experiment_results/comparison_20251218_193137/WVF_seed0/model.pt
+
+Starting evaluation phase...
+Evaluating blue_sphere...
+Evaluating red_sphere...
+Evaluating blue_box...
+Evaluating red_box...
+
+✓ WVF training complete (seed=0)
+
+======================================================================
+JOB COMPLETE: Algorithm=WVF, Seed=0
+Results saved to: experiment_results/comparison_20251218_193137/WVF_seed0/results.json
+======================================================================
+
+submitit INFO (2025-12-18 19:32:14,553) - Job completed successfully
+submitit INFO (2025-12-18 19:32:14,560) - Exiting after successful completion

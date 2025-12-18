@@ -1,0 +1,37 @@
+submitit INFO (2025-12-18 19:31:39,524) - Starting with JobEnvironment(job_id=171288, hostname=mscluster59.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-18 19:31:39,525) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_Composition/experiment_results/comparison_20251218_193137/slurm_logs/171288_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=SR, Seed=1
+======================================================================
+
+
+======================================================================
+TRAINING SR AGENT (Seed=1)
+======================================================================
+Training episodes: 10
+SR freeze episode: 3000
+Eval episodes per task: 10
+======================================================================
+
+Starting training phase...
+Training SR:   0%|          | 0/10 [00:00<?, ?it/s]Training SR:  10%|█         | 1/10 [00:00<00:01,  5.87it/s]Training SR:  30%|███       | 3/10 [00:00<00:02,  3.38it/s]Training SR:  40%|████      | 4/10 [00:01<00:02,  2.44it/s]Training SR:  50%|█████     | 5/10 [00:02<00:02,  2.08it/s]Training SR:  70%|███████   | 7/10 [00:02<00:00,  3.15it/s]Training SR:  80%|████████  | 8/10 [00:03<00:00,  2.53it/s]Training SR: 100%|██████████| 10/10 [00:03<00:00,  2.63it/s]Training SR: 100%|██████████| 10/10 [00:03<00:00,  2.68it/s]
+
+Starting evaluation phase (using frozen SR from episode 3000)...
+Evaluating blue_sphere...
+Evaluating red_sphere...
+Evaluating blue_box...
+Evaluating red_box...
+
+✓ SR Agent training complete (seed=1)
+  Training episodes: 10
+  Eval episodes: 40
+  SR frozen at episode: 3000
+
+======================================================================
+JOB COMPLETE: Algorithm=SR, Seed=1
+Results saved to: experiment_results/comparison_20251218_193137/SR_seed1/results.json
+======================================================================
+
+submitit INFO (2025-12-18 19:32:19,218) - Job completed successfully
+submitit INFO (2025-12-18 19:32:19,281) - Exiting after successful completion

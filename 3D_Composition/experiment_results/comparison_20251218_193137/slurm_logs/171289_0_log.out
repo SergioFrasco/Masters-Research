@@ -1,0 +1,37 @@
+submitit INFO (2025-12-18 19:31:49,200) - Starting with JobEnvironment(job_id=171289, hostname=mscluster60.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-18 19:31:49,200) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_Composition/experiment_results/comparison_20251218_193137/slurm_logs/171289_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=DQN, Seed=0
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED DQN (Seed=0)
+======================================================================
+
+Unified DQN Agent using device: cuda
+Task conditioning: Goal tiling with one-hot encoding
+Stability settings: tau=0.005, double_dqn=True, grad_clip=10.0
+Image shape: (3, 60, 80)
+Task-conditioned input shape: (7, 60, 80) (3 RGB + 4 task channels)
+Total network parameters: 872,100
+Starting training phase...
+Training DQN:   0%|          | 0/10 [00:00<?, ?it/s]Training DQN:  10%|█         | 1/10 [00:00<00:01,  5.34it/s]Training DQN:  20%|██        | 2/10 [00:08<00:41,  5.17s/it]Training DQN:  30%|███       | 3/10 [00:09<00:22,  3.24s/it]Training DQN:  40%|████      | 4/10 [00:11<00:15,  2.62s/it]Training DQN:  50%|█████     | 5/10 [00:12<00:10,  2.08s/it]Training DQN:  60%|██████    | 6/10 [00:14<00:08,  2.12s/it]Training DQN:  70%|███████   | 7/10 [00:16<00:06,  2.14s/it]Training DQN:  80%|████████  | 8/10 [00:19<00:04,  2.16s/it]Training DQN:  90%|█████████ | 9/10 [00:19<00:01,  1.59s/it]Training DQN: 100%|██████████| 10/10 [00:21<00:00,  1.68s/it]Training DQN: 100%|██████████| 10/10 [00:21<00:00,  2.14s/it]
+Model saved to experiment_results/comparison_20251218_193137/DQN_seed0/model.pt
+
+Starting evaluation phase...
+Evaluating blue_sphere...
+Evaluating red_sphere...
+Evaluating blue_box...
+Evaluating red_box...
+
+✓ DQN training complete (seed=0)
+
+======================================================================
+JOB COMPLETE: Algorithm=DQN, Seed=0
+Results saved to: experiment_results/comparison_20251218_193137/DQN_seed0/results.json
+======================================================================
+
+submitit INFO (2025-12-18 19:32:31,329) - Job completed successfully
+submitit INFO (2025-12-18 19:32:31,332) - Exiting after successful completion

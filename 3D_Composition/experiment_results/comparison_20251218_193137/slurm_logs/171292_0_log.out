@@ -1,0 +1,37 @@
+submitit INFO (2025-12-18 19:31:49,187) - Starting with JobEnvironment(job_id=171292, hostname=mscluster66.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-18 19:31:49,188) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_Composition/experiment_results/comparison_20251218_193137/slurm_logs/171292_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=LSTM, Seed=1
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED LSTM-DQN (Seed=1)
+======================================================================
+
+Unified LSTM-DQN Agent using device: cuda
+Frame stacking: k=4, LSTM size: 64
+Task encoding: Goal tiling with 4 additional channels
+Single frame shape: (3, 60, 80)
+Stacked observation shape (with task): (16, 60, 80)
+Total network parameters: 529,828
+Starting training phase...
+Training LSTM-DQN:   0%|          | 0/10 [00:00<?, ?it/s]Training LSTM-DQN:  10%|█         | 1/10 [00:00<00:01,  6.14it/s]Training LSTM-DQN:  30%|███       | 3/10 [00:00<00:00, 10.03it/s]Training LSTM-DQN:  50%|█████     | 5/10 [00:00<00:00,  9.46it/s]Training LSTM-DQN:  60%|██████    | 6/10 [00:00<00:00,  6.04it/s]Training LSTM-DQN:  70%|███████   | 7/10 [00:01<00:00,  6.29it/s]Training LSTM-DQN:  80%|████████  | 8/10 [00:01<00:00,  6.51it/s]Training LSTM-DQN: 100%|██████████| 10/10 [00:01<00:00,  8.05it/s]
+Model saved to experiment_results/comparison_20251218_193137/LSTM_seed1/model.pt
+
+Starting evaluation phase...
+Evaluating blue_sphere...
+Evaluating red_sphere...
+Evaluating blue_box...
+Evaluating red_box...
+
+✓ LSTM-DQN training complete (seed=1)
+
+======================================================================
+JOB COMPLETE: Algorithm=LSTM, Seed=1
+Results saved to: experiment_results/comparison_20251218_193137/LSTM_seed1/results.json
+======================================================================
+
+submitit INFO (2025-12-18 19:32:08,651) - Job completed successfully
+submitit INFO (2025-12-18 19:32:08,653) - Exiting after successful completion

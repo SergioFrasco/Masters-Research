@@ -1,0 +1,37 @@
+submitit INFO (2025-12-18 19:31:39,564) - Starting with JobEnvironment(job_id=171287, hostname=mscluster58.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-18 19:31:39,565) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_Composition/experiment_results/comparison_20251218_193137/slurm_logs/171287_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=SR, Seed=0
+======================================================================
+
+
+======================================================================
+TRAINING SR AGENT (Seed=0)
+======================================================================
+Training episodes: 10
+SR freeze episode: 3000
+Eval episodes per task: 10
+======================================================================
+
+Starting training phase...
+Training SR:   0%|          | 0/10 [00:00<?, ?it/s]Training SR:  10%|█         | 1/10 [00:00<00:03,  2.67it/s]Training SR:  20%|██        | 2/10 [00:00<00:03,  2.45it/s]Training SR:  30%|███       | 3/10 [00:01<00:03,  2.00it/s]Training SR:  40%|████      | 4/10 [00:01<00:02,  2.65it/s]Training SR:  50%|█████     | 5/10 [00:01<00:01,  3.43it/s]Training SR:  60%|██████    | 6/10 [00:02<00:01,  2.50it/s]Training SR:  70%|███████   | 7/10 [00:02<00:01,  2.35it/s]Training SR:  80%|████████  | 8/10 [00:03<00:00,  2.07it/s]Training SR:  90%|█████████ | 9/10 [00:03<00:00,  2.36it/s]Training SR: 100%|██████████| 10/10 [00:03<00:00,  2.72it/s]Training SR: 100%|██████████| 10/10 [00:03<00:00,  2.51it/s]
+
+Starting evaluation phase (using frozen SR from episode 3000)...
+Evaluating blue_sphere...
+Evaluating red_sphere...
+Evaluating blue_box...
+Evaluating red_box...
+
+✓ SR Agent training complete (seed=0)
+  Training episodes: 10
+  Eval episodes: 40
+  SR frozen at episode: 3000
+
+======================================================================
+JOB COMPLETE: Algorithm=SR, Seed=0
+Results saved to: experiment_results/comparison_20251218_193137/SR_seed0/results.json
+======================================================================
+
+submitit INFO (2025-12-18 19:32:14,937) - Job completed successfully
+submitit INFO (2025-12-18 19:32:14,947) - Exiting after successful completion
