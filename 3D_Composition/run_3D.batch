@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python run_parallel_experiments.py
+python run_experiments.py
