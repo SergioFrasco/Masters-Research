@@ -509,30 +509,19 @@ class UnifiedWorldValueFunctionAgent:
             return q_values.argmax().item()
     
     def select_action_composed(self, stacked_obs, features, target_goal_idx):
-        """
-        Select action using composed Q-values.
-        
-        For compositional task, take min over feature Q-values:
-        Q_composed = min over features of Q_feature(s, target_goal, a)
-        action = argmax_a Q_composed
-        """
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         goal_one_hot = self.get_goal_one_hot(target_goal_idx)
         
         q_values_per_feature = []
-        
         with torch.no_grad():
             for feature in features:
                 task_idx = self.TASK_TO_IDX[feature]
                 task_one_hot = self.get_task_one_hot(task_idx)
-                
-                hidden = self.q_network.init_hidden(1, self.device)
-                q_vals, _ = self.q_network(state, goal_one_hot, task_one_hot, hidden)
+                # USE CURRENT HIDDEN STATE
+                q_vals, _ = self.q_network(state, goal_one_hot, task_one_hot, self.current_hidden)
                 q_values_per_feature.append(q_vals)
             
-            q_stacked = torch.stack(q_values_per_feature, dim=0)
-            q_composed = q_stacked.min(dim=0)[0]
-            
+            q_composed = torch.stack(q_values_per_feature, dim=0).min(dim=0)[0]
             return q_composed.argmax().item()
     
     def remember(self, state, goal_idx, task_idx, action, reward, next_state, done):

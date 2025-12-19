@@ -39,8 +39,8 @@ class SuccessorAgent:
         
         # Confidence parameters
         self.confidence_boost = 0.4  # How much to increase confidence per detection
-        self.step_decay_factor = 0.95  # Within-episode decay to filter detector noise
-        self.confidence_threshold = 0.5  # Threshold for considering a location valid
+        self.step_decay_factor = 0.98  # Within-episode decay to filter detector noise
+        self.confidence_threshold = 0.3  # Threshold for considering a location valid
         
         # Composed reward map (task-specific)
         self.composed_reward_map = np.zeros((self.grid_size, self.grid_size))
