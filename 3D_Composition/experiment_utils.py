@@ -608,6 +608,7 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         lstm_size=64,
         tau=0.005,
         grad_clip=10.0,
+        r_min = -1.0,
         r_correct=1.0,
         r_wrong=-1.0,
         step_penalty=-0.01
