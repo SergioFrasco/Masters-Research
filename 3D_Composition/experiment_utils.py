@@ -581,12 +581,24 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
 # UNIFIED WVF AGENT
 # ============================================================================
 
+
 def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
                       learning_rate, gamma, epsilon_decay, output_dir):
-    """Train Unified WVF agent."""
+    """
+    Train Unified WVF agent (Option A - Pure Task Conditioning).
+    
+    Key differences from original:
+    1. No goal conditioning - only task conditioning
+    2. Simpler reward: +1 for any valid object, -0.1 for wrong, small step penalty
+    3. Composition via min(Q_task1, Q_task2) matches WVF theory exactly
+    """
+    
+    # Import here to avoid circular imports
+    from env import DiscreteMiniWorldWrapper
     
     print(f"\n{'='*70}")
-    print(f"TRAINING UNIFIED WVF (Seed={seed})")
+    print(f"TRAINING UNIFIED WVF - OPTION A (Seed={seed})")
+    print(f"Pure Task Conditioning (No Goal Conditioning)")
     print(f"{'='*70}\n")
     
     np.random.seed(seed)
@@ -610,52 +622,58 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         lstm_size=64,
         tau=0.005,
         grad_clip=10.0,
-        r_min = -1.0,
         r_correct=1.0,
-        r_wrong=-1.0,
-        step_penalty=-0.01
+        r_wrong=-0.1,
+        step_penalty=-0.005
     )
     
     all_rewards = []
     episode_labels = []
     
-    # ===== TRAINING =====
+    # ===== TRAINING PHASE =====
     print("Starting training phase...")
+    print("Training on primitive tasks: red, blue, box, sphere")
+    print("Each task rewards reaching ANY object satisfying the task\n")
     
     for episode in tqdm(range(training_episodes), desc="Training WVF"):
-        current_task = agent.sample_task()
+        # Sample random primitive task
+        current_task = agent.sample_task()  # Returns task name like 'blue'
         task_idx = agent.TASK_TO_IDX[current_task]
         
+        # Create task config for environment
         task_config = {"name": current_task, "features": [current_task], "type": "primitive"}
         env.set_task(task_config)
         
         obs, info = env.reset()
-        stacked_obs = agent.reset_episode(obs)
-        
-        target_goal_idx = agent.sample_target_goal(current_task)
+        stacked_obs = agent.reset_episode(obs, current_task)
         
         episode_reward = 0
         
         for step in range(max_steps):
-            action = agent.select_action(stacked_obs, target_goal_idx, task_idx)
+            # Select action conditioned on current task
+            action = agent.select_action(stacked_obs, task_idx)
+            
             next_obs, _, terminated, truncated, info = env.step(action)
             next_stacked_obs = agent.step_episode(next_obs)
             
-            true_reward, extended_reward, goal_reached = agent.compute_rewards(
-                info, target_goal_idx, current_task
-            )
+            # Compute reward based on task satisfaction
+            reward, goal_reached = agent.compute_reward(info, current_task)
             
-            episode_reward = max(episode_reward, true_reward)
+            # Track if we got positive reward
+            if reward > 0:
+                episode_reward = 1.0
             
-            agent.remember(stacked_obs, target_goal_idx, task_idx, action,
-                          extended_reward, next_stacked_obs, goal_reached or terminated or truncated)
+            # Store transition
+            done = goal_reached or terminated or truncated
+            agent.remember(stacked_obs, task_idx, action, reward, next_stacked_obs, done)
             
+            # Train periodically
             if step % 4 == 0 and len(agent.memory) >= agent.batch_size:
                 agent.train_step()
             
             stacked_obs = next_stacked_obs
             
-            if goal_reached or terminated or truncated:
+            if done:
                 break
         
         agent.decay_epsilon()
@@ -666,17 +684,20 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
     model_path = output_dir / "model.pt"
     agent.save_model(str(model_path))
     
-    # ===== EVALUATION =====
-    print("\nStarting evaluation phase...")
+    # ===== EVALUATION PHASE =====
+    print(f"\nStarting evaluation phase...")
+    print("Evaluating on compositional tasks using min(Q_task1, Q_task2) composition\n")
     
     eval_task_labels = []
     
     for comp_task in COMPOSITIONAL_TASKS:
         env.set_task(comp_task)
-        print(f"Evaluating {comp_task['name']}...")
+        task_name = comp_task['name']
+        features = comp_task['features']  # e.g., ['blue', 'sphere']
         
-        features = comp_task['features']
-        target_goal_idx = agent.GOAL_TO_IDX[comp_task['name']]
+        print(f"Evaluating {task_name} = min(Q_{features[0]}, Q_{features[1]})")
+        
+        task_successes = 0
         
         for ep in range(eval_episodes_per_task):
             obs, info = env.reset()
@@ -684,23 +705,32 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
             episode_reward = 0
             
             for step in range(max_steps):
-                action = agent.select_action_composed(stacked_obs, features, target_goal_idx)
+                # Use composition: min over task Q-values
+                action = agent.select_action_composed(stacked_obs, features)
+                
                 obs, _, terminated, truncated, info = env.step(action)
                 stacked_obs = agent.step_episode(obs)
                 
+                # Check if we satisfied the compositional task
                 if check_task_satisfaction(info, comp_task):
                     episode_reward = 1.0
+                    task_successes += 1
                     break
                 
                 if terminated or truncated:
                     break
             
             all_rewards.append(episode_reward)
-            eval_task_labels.append(comp_task['name'])
+            eval_task_labels.append(task_name)
+        
+        success_rate = task_successes / eval_episodes_per_task
+        print(f"  {task_name}: {success_rate:.1%} success rate ({task_successes}/{eval_episodes_per_task})")
     
     all_labels = episode_labels + eval_task_labels
     
-    print(f"\n✓ WVF training complete (seed={seed})")
+    print(f"\n✓ WVF (Option A) training complete (seed={seed})")
+    print(f"  Training episodes: {training_episodes}")
+    print(f"  Eval episodes: {len(eval_task_labels)}")
     
     return {
         "algorithm": "WVF",
