@@ -517,8 +517,10 @@ class UnifiedWorldValueFunctionAgent:
             for feature in features:
                 task_idx = self.TASK_TO_IDX[feature]
                 task_one_hot = self.get_task_one_hot(task_idx)
-                # USE CURRENT HIDDEN STATE
-                q_vals, _ = self.q_network(state, goal_one_hot, task_one_hot, self.current_hidden)
+                
+                # Initialize fresh hidden state for each feature evaluation
+                hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
+                q_vals, _ = self.q_network(state, goal_one_hot, task_one_hot, hidden)
                 q_values_per_feature.append(q_vals)
             
             q_composed = torch.stack(q_values_per_feature, dim=0).min(dim=0)[0]

@@ -107,6 +107,9 @@ def run_single_experiment(algorithm: str, seed: int, config: dict, output_dir: P
     print(f"\n{'='*70}")
     print(f"STARTING JOB: Algorithm={algorithm}, Seed={seed}")
     print(f"{'='*70}\n")
+
+    # Flush immediately
+    sys.stdout.flush()
     
     # Set all random seeds
     np.random.seed(seed)
