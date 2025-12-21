@@ -582,7 +582,7 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
 # ============================================================================
 
 
-def train_unified_wvf_improved(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
+def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
                                 learning_rate, gamma, epsilon_decay, output_dir,
                                 composition_mode='softmin',
                                 softmin_temperature=0.1,
