@@ -58,7 +58,7 @@ ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
 
 # Training configuration
 TRAINING_CONFIG = {
-    "training_episodes": 6000,
+    "training_episodes": 10000,
     "eval_episodes_per_task": 500,  # 300 per compositional task
     "max_steps": 200,
     "env_size": 10,
