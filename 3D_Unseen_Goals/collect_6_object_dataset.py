@@ -348,9 +348,9 @@ if __name__ == "__main__":
 
     collect_dataset(
         env, 
-        num_images=30000, 
+        num_images=20000, 
         out_dir="dataset/dataset_3d", 
-        test_fraction=0.2,
+        test_fraction=0.15,
         fov_angle=90,
         max_distance=20,
     )
