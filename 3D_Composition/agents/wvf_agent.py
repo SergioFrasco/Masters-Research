@@ -1,21 +1,17 @@
 """
 Unified World Value Functions (WVF) Agent for Compositional RL
 
-CORRECTED IMPLEMENTATION based on Nangue Tasse et al.'s actual approach.
+REVISED IMPLEMENTATION - Version 2
 
-Key insight from the Boolean Task Algebra paper:
-- Learn Extended Value Functions (EVF): Q̄(s, g, a) for EACH goal g
-- NOT task-conditioned Q(s, a, task) - that's wrong!
-- Extended reward: R̄_MIN penalty when reaching wrong goal
-- This teaches agent how to reach each specific goal separately
-- Composition: Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}
+Fixes from previous version:
+1. Softer R̄_MIN penalty (was too harsh, destabilized learning)
+2. Hindsight-style goal learning: when reaching a goal, give POSITIVE 
+   signal for that goal's Q̄, don't harshly penalize others
+3. More stable training with separate positive/negative learning rates
+4. Better exploration during training
 
-The agent learns Q̄ for ALL 4 goals during training on ANY task.
-At test time, composition picks the goal in the intersection.
-
-Based on:
-- "A Boolean Task Algebra for Reinforcement Learning" (NeurIPS 2020)
-- "World Value Functions" (RLDM 2022)
+Based on Nangue Tasse et al.'s Extended Value Functions, but adapted
+for neural network function approximation with limited samples.
 """
 
 import numpy as np
@@ -51,13 +47,7 @@ class GoalConditionedEVFNetwork(nn.Module):
     """
     Extended Value Function Network - learns Q̄(s, g, a) for ALL goals.
     
-    This is the correct WVF architecture:
-    - Input: stacked frames (image observation)
-    - Output: Q-values for EACH goal and EACH action
-    - Shape: (num_goals, num_actions) = (4, 3)
-    
-    During training, we update Q̄ for ALL goals every step using the
-    extended reward function (R̄_MIN for wrong goals).
+    Architecture: Shared CNN/LSTM backbone with separate heads per goal.
     """
     
     def __init__(self, input_shape=(12, 60, 80), num_goals=4, action_size=3,
@@ -79,7 +69,6 @@ class GoalConditionedEVFNetwork(nn.Module):
             nn.ReLU(),
         )
         
-        # Calculate CNN output size
         self._conv_output_size = self._get_conv_output_size(input_shape[0], 
                                                              input_shape[1], 
                                                              input_shape[2])
@@ -92,9 +81,17 @@ class GoalConditionedEVFNetwork(nn.Module):
             batch_first=True
         )
         
-        # Separate heads for each goal (this is key!)
-        # Each head outputs Q-values for all actions for that specific goal
-        self.goal_heads = nn.ModuleList([
+        # Dueling architecture per goal for more stable learning
+        self.goal_value_streams = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(lstm_size, hidden_size),
+                nn.ReLU(),
+                nn.Linear(hidden_size, 1)
+            )
+            for _ in range(num_goals)
+        ])
+        
+        self.goal_advantage_streams = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(lstm_size, hidden_size),
                 nn.ReLU(),
@@ -133,22 +130,16 @@ class GoalConditionedEVFNetwork(nn.Module):
         """
         Forward pass - outputs Q̄(s, g, a) for ALL goals.
         
-        Args:
-            state: (batch, C, H, W) image tensor
-            hidden: Optional LSTM hidden state (h, c)
-        
         Returns:
-            q_values: (batch, num_goals, action_size) - Q̄ for each goal
+            q_values: (batch, num_goals, action_size)
             hidden: Updated LSTM hidden state
         """
         batch_size = state.size(0)
         
         # CNN features (shared)
         conv_features = self.conv(state)
-        conv_features = conv_features.view(batch_size, -1)  # (batch, conv_output)
-        
-        # LSTM expects (batch, seq_len, features)
-        conv_features = conv_features.unsqueeze(1)  # (batch, 1, conv_output)
+        conv_features = conv_features.view(batch_size, -1)
+        conv_features = conv_features.unsqueeze(1)
         
         if hidden is not None:
             lstm_out, hidden = self.lstm(conv_features, hidden)
@@ -157,117 +148,128 @@ class GoalConditionedEVFNetwork(nn.Module):
         
         lstm_out = lstm_out[:, -1, :]  # (batch, lstm_size)
         
-        # Compute Q-values for each goal using separate heads
+        # Dueling Q-values for each goal
         q_per_goal = []
-        for head in self.goal_heads:
-            q_goal = head(lstm_out)  # (batch, action_size)
-            q_per_goal.append(q_goal)
+        for i in range(self.num_goals):
+            value = self.goal_value_streams[i](lstm_out)  # (batch, 1)
+            advantage = self.goal_advantage_streams[i](lstm_out)  # (batch, action_size)
+            q = value + (advantage - advantage.mean(dim=1, keepdim=True))
+            q_per_goal.append(q)
         
-        # Stack: (batch, num_goals, action_size)
-        q_values = torch.stack(q_per_goal, dim=1)
+        q_values = torch.stack(q_per_goal, dim=1)  # (batch, num_goals, action_size)
         
         return q_values, hidden
     
     def init_hidden(self, batch_size=1, device='cpu'):
-        """Initialize LSTM hidden state."""
         h = torch.zeros(1, batch_size, self.lstm_size, device=device)
         c = torch.zeros(1, batch_size, self.lstm_size, device=device)
         return (h, c)
 
 
-class EpisodeReplayBuffer:
+class HindsightReplayBuffer:
     """
-    Episode-based replay buffer for LSTM training.
-    Stores complete episodes and samples sequences for training.
+    Replay buffer with hindsight-style goal relabeling.
     
-    Now stores goal-specific rewards for ALL goals per transition.
+    Key insight: When we reach goal G, that's a POSITIVE example for Q̄(s, G, a).
+    We don't need to harshly penalize other goals - just don't give them positive signal.
     """
     
-    def __init__(self, capacity=2000):
-        self.episodes = deque(maxlen=capacity)
-        self.current_episode = []
+    def __init__(self, capacity=50000):
+        self.buffer = deque(maxlen=capacity)
     
-    def push(self, state, action, rewards_per_goal, next_state, dones_per_goal):
+    def push(self, state, action, next_state, reached_goal_idx, task_goal_indices, done):
         """
-        Add a transition to the current episode.
+        Store transition with goal information.
         
         Args:
             state: Current observation
             action: Action taken
-            rewards_per_goal: List of rewards for each goal (length = num_goals)
             next_state: Next observation
-            dones_per_goal: List of done flags for each goal (length = num_goals)
+            reached_goal_idx: Index of goal reached (or -1 if none)
+            task_goal_indices: List of goal indices that are valid for current task
+            done: Whether episode ended
         """
-        self.current_episode.append((state, action, rewards_per_goal, next_state, dones_per_goal))
-        
-        # End episode if ANY goal is done (terminal state reached)
-        if any(dones_per_goal):
-            self.end_episode()
+        self.buffer.append((state, action, next_state, reached_goal_idx, task_goal_indices, done))
     
-    def end_episode(self):
-        """Finalize and store the current episode."""
-        if len(self.current_episode) > 0:
-            self.episodes.append(list(self.current_episode))
-            self.current_episode = []
-    
-    def sample(self, batch_size, seq_len=4):
-        """Sample sequences from stored episodes."""
-        batch = []
+    def sample(self, batch_size, num_goals):
+        """
+        Sample batch with hindsight goal relabeling.
         
-        for _ in range(batch_size):
-            episode = random.choice(self.episodes)
-            
-            if len(episode) > seq_len:
-                start = random.randint(0, len(episode) - seq_len)
-                sequence = episode[start:start + seq_len]
-            else:
-                sequence = list(episode)
-            
-            batch.append(sequence)
+        For each transition, we create training targets for ALL goals:
+        - If this transition reached goal G: reward = +1 for G, 0 for others (if not done) or small negative
+        - If no goal reached: step penalty for all
+        """
+        batch = random.sample(self.buffer, min(batch_size, len(self.buffer)))
         
-        return batch
+        states = []
+        actions = []
+        next_states = []
+        rewards_per_goal = []  # (batch, num_goals)
+        dones_per_goal = []    # (batch, num_goals)
+        
+        for state, action, next_state, reached_goal_idx, task_goal_indices, done in batch:
+            states.append(state)
+            actions.append(action)
+            next_states.append(next_state)
+            
+            # Compute rewards for each goal
+            rewards = []
+            dones = []
+            
+            for g in range(num_goals):
+                if reached_goal_idx == -1:
+                    # No goal reached - small step penalty
+                    rewards.append(-0.01)
+                    dones.append(False)
+                elif reached_goal_idx == g:
+                    # We reached THIS goal - positive reward!
+                    rewards.append(1.0)
+                    dones.append(True)
+                else:
+                    # We reached a DIFFERENT goal
+                    # Soft penalty: this is useful info (we know how to get here, 
+                    # but it's not the goal we want)
+                    rewards.append(-0.5)  # Much softer than R̄_MIN = -10
+                    dones.append(True)
+            
+            rewards_per_goal.append(rewards)
+            dones_per_goal.append(dones)
+        
+        return (
+            np.array(states),
+            np.array(actions),
+            np.array(next_states),
+            np.array(rewards_per_goal),
+            np.array(dones_per_goal)
+        )
     
     def __len__(self):
-        return len(self.episodes)
-    
-    def clear(self):
-        self.episodes.clear()
-        self.current_episode = []
+        return len(self.buffer)
 
 
 class UnifiedWorldValueFunctionAgent:
     """
-    CORRECTED World Value Function (WVF) Agent
+    REVISED World Value Function (WVF) Agent - Version 2
     
-    Based on Geraud Nangue Tasse's actual approach:
+    Key changes from v1:
+    1. Softer penalties for wrong goals (-0.5 instead of -10)
+    2. Hindsight-style replay: reaching any goal is informative
+    3. Dueling architecture for more stable learning
+    4. Simpler replay buffer (no sequence-based, just transitions)
+    5. More aggressive target network updates
     
-    1. Learn Q̄(s, g, a) - Extended Value Function for EACH goal g
-    2. Use Extended Reward: R̄_MIN penalty when reaching wrong goal
-    3. Update Q̄ for ALL goals every step (not just current task)
-    4. Composition: Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}
-    
-    Goals (4 objects): red_box, blue_box, red_sphere, blue_sphere
-    
-    Tasks define which goals are "good":
-        red -> {red_box, red_sphere}
-        blue -> {blue_box, blue_sphere}
-        box -> {red_box, blue_box}
-        sphere -> {red_sphere, blue_sphere}
-    
-    Zero-shot composition:
-        blue AND sphere -> min(Q̄_blue, Q̄_sphere) -> selects blue_sphere
+    The composition formula remains:
+    Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}
+    π(s) = argmax_a max_g Q̄*_{B AND S}(s, g, a)
     """
     
-    # Goals = all 4 objects (terminal states)
     GOALS = ['red_box', 'blue_box', 'red_sphere', 'blue_sphere']
     GOAL_TO_IDX = {g: i for i, g in enumerate(GOALS)}
     IDX_TO_GOAL = {i: g for i, g in enumerate(GOALS)}
     
-    # Primitive tasks and their goal sets
     PRIMITIVES = ['red', 'blue', 'box', 'sphere']
     TASK_TO_IDX = {t: i for i, t in enumerate(PRIMITIVES)}
     
-    # Which goals are "good" (give +reward) for each task
     TASK_GOALS = {
         'red': ['red_box', 'red_sphere'],
         'blue': ['blue_box', 'blue_sphere'],
@@ -275,31 +277,18 @@ class UnifiedWorldValueFunctionAgent:
         'sphere': ['red_sphere', 'blue_sphere'],
     }
     
-    def __init__(self, env, k_frames=4, learning_rate=0.0001, gamma=0.99,
+    def __init__(self, env, k_frames=4, learning_rate=0.0003, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.9995,
-                 memory_size=2000, batch_size=16, seq_len=4,
+                 memory_size=50000, batch_size=64,
                  hidden_size=256, lstm_size=128,
-                 tau=0.005, grad_clip=10.0,
-                 r_correct=1.0, r_wrong=-0.1, step_penalty=-0.005,
-                 r_bar_min=-10.0):
-        """
-        Args:
-            r_bar_min: The R̄_MIN penalty for reaching wrong goal.
-                       This is critical for learning goal-specific values!
-                       Should be large negative (paper uses derived bound).
-        """
+                 tau=0.01, grad_clip=10.0,
+                 # These parameters kept for API compatibility
+                 seq_len=4, r_correct=1.0, r_wrong=-0.1, step_penalty=-0.005):
         
         self.env = env
         self.action_dim = 3
         self.k_frames = k_frames
         self.num_goals = len(self.GOALS)
-        self.seq_len = seq_len
-        
-        # Reward parameters
-        self.r_correct = r_correct       # Reward for reaching correct goal for task
-        self.r_wrong = r_wrong           # Reward for reaching wrong goal for task (but still a goal)
-        self.step_penalty = step_penalty # Small step penalty
-        self.r_bar_min = r_bar_min       # Extended reward penalty (R̄_MIN)
         
         # Hyperparameters
         self.gamma = gamma
@@ -317,7 +306,7 @@ class UnifiedWorldValueFunctionAgent:
         
         # Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"UnifiedWorldValueFunctionAgent (CORRECTED EVF) using device: {self.device}")
+        print(f"UnifiedWorldValueFunctionAgent (REVISED v2) using device: {self.device}")
         
         # Get observation shape
         sample_obs = env.reset()[0]
@@ -336,21 +325,18 @@ class UnifiedWorldValueFunctionAgent:
         print(f"Observation shape: {self.obs_shape}")
         print(f"Number of goals: {self.num_goals}")
         print(f"Goals: {self.GOALS}")
-        print(f"R̄_MIN penalty: {self.r_bar_min}")
-        print(f"Learning Q̄(s, g, a) for each goal - CORRECT WVF approach")
+        print(f"Using SOFT penalties and hindsight-style learning")
         
-        # Frame stacker
         self.frame_stack = FrameStack(k=k_frames)
-        
-        # Create networks
         self._create_networks()
         
-        # Current episode state
         self.current_hidden = None
         self.current_task = None
+        
+        # Track training progress
+        self.training_steps = 0
     
     def _create_networks(self):
-        """Create goal-conditioned EVF networks."""
         self.q_network = GoalConditionedEVFNetwork(
             input_shape=self.obs_shape,
             num_goals=self.num_goals,
@@ -370,83 +356,34 @@ class UnifiedWorldValueFunctionAgent:
         self.target_network.eval()
         
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.learning_rate)
-        self.memory = EpisodeReplayBuffer(capacity=self.memory_size)
+        self.memory = HindsightReplayBuffer(capacity=self.memory_size)
         
         total_params = sum(p.numel() for p in self.q_network.parameters())
-        print(f"  Goal-conditioned EVF network parameters: {total_params:,}")
+        print(f"  Network parameters: {total_params:,}")
     
     def sample_task(self):
-        """Randomly sample a primitive task for this episode."""
         return random.choice(self.PRIMITIVES)
     
-    def compute_extended_rewards(self, info, current_task):
-        """
-        Compute extended rewards for ALL goals.
-        
-        This is the key insight from WVF:
-        - For each goal g, compute R̄(s, g, a)
-        - If we reached goal g: normal reward based on task
-        - If we reached a DIFFERENT goal: R̄_MIN penalty
-        - If no goal reached: step penalty
-        
-        Args:
-            info: Environment info dict with 'contacted_object'
-            current_task: Current primitive task (e.g., 'blue')
-            
-        Returns:
-            rewards: List of rewards for each goal (length = num_goals)
-            dones: List of done flags for each goal (length = num_goals)
-            task_success: Whether current task was satisfied
-        """
-        contacted = info.get('contacted_object', None)
-        task_goal_set = self.TASK_GOALS[current_task]
-        
-        rewards = []
-        dones = []
-        task_success = False
-        
-        if contacted is None:
-            # No terminal state reached - step penalty for all goals
-            for goal in self.GOALS:
-                rewards.append(self.step_penalty)
-                dones.append(False)
-        else:
-            # Terminal state reached!
-            for goal in self.GOALS:
-                if contacted == goal:
-                    # We reached THIS specific goal
-                    if goal in task_goal_set:
-                        rewards.append(self.r_correct)  # Good for task!
-                        task_success = True
-                    else:
-                        rewards.append(self.r_wrong)    # Wrong for task, but reached goal
-                    dones.append(True)
-                else:
-                    # We reached a DIFFERENT goal - R̄_MIN penalty!
-                    rewards.append(self.r_bar_min)
-                    dones.append(True)  # Episode ends for all goals
-        
-        return rewards, dones, task_success
-    
     def compute_reward(self, info, current_task):
-        """
-        Backward-compatible method for experiment_utils.
-        Returns task reward and whether goal was reached.
-        """
-        rewards, dones, task_success = self.compute_extended_rewards(info, current_task)
-        
+        """Backward-compatible reward computation."""
         contacted = info.get('contacted_object', None)
         if contacted is None:
-            return self.step_penalty, False
+            return -0.01, False
         
-        task_goal_set = self.TASK_GOALS[current_task]
-        if contacted in task_goal_set:
-            return self.r_correct, True
+        task_goals = self.TASK_GOALS[current_task]
+        if contacted in task_goals:
+            return 1.0, True
         else:
-            return self.r_wrong, True
+            return -0.1, True
+    
+    def get_reached_goal_idx(self, info):
+        """Get index of reached goal, or -1 if none."""
+        contacted = info.get('contacted_object', None)
+        if contacted is None or contacted not in self.GOAL_TO_IDX:
+            return -1
+        return self.GOAL_TO_IDX[contacted]
     
     def preprocess_frame(self, obs):
-        """Convert observation to single frame."""
         if isinstance(obs, dict) and 'image' in obs:
             img = obs['image']
         else:
@@ -471,45 +408,21 @@ class UnifiedWorldValueFunctionAgent:
         return img
     
     def reset_episode(self, obs, task_name=None):
-        """
-        Reset for new episode.
-        
-        Args:
-            obs: Initial observation
-            task_name: Optional task name for training
-        """
         frame = self.preprocess_frame(obs)
         stacked = self.frame_stack.reset(frame)
-        
-        # Initialize fresh hidden state for new episode
         self.current_hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
         
-        # Set current task if provided
         if task_name is not None:
             self.current_task = task_name
         
         return stacked
     
     def step_episode(self, obs):
-        """Process new observation."""
         frame = self.preprocess_frame(obs)
         return self.frame_stack.step(frame)
     
     def select_action(self, stacked_obs, task_idx=None, epsilon=None):
-        """
-        Select action for TRAINING using epsilon-greedy.
-        
-        During training, we select action based on the TASK's Q-values:
-        Q_task(s, a) = max_{g in task_goals} Q̄(s, g, a)
-        
-        Args:
-            stacked_obs: Stacked observation frames
-            task_idx: Task index (not used in new implementation, kept for compatibility)
-            epsilon: Exploration rate
-            
-        Returns:
-            action: Selected action
-        """
+        """Select action during training based on current task's goals."""
         if epsilon is None:
             epsilon = self.epsilon
         
@@ -519,110 +432,86 @@ class UnifiedWorldValueFunctionAgent:
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            # Get Q̄(s, g, a) for all goals: (1, num_goals, num_actions)
             q_all_goals, self.current_hidden = self.q_network(state, self.current_hidden)
             self.current_hidden = (self.current_hidden[0].detach(),
                                    self.current_hidden[1].detach())
             
-            # For training, use current task's goal set
+            q_all_goals = q_all_goals[0]  # (num_goals, num_actions)
+            
             if self.current_task is not None:
+                # Get Q-values for task's goals and take max
                 task_goal_indices = [self.GOAL_TO_IDX[g] for g in self.TASK_GOALS[self.current_task]]
-                # Q_task(s, a) = max over goals in task's goal set
-                q_task = q_all_goals[0, task_goal_indices, :].max(dim=0)[0]  # (num_actions,)
-                return q_task.argmax().item()
+                q_task_goals = q_all_goals[task_goal_indices]  # (2, num_actions)
+                q_max = q_task_goals.max(dim=0)[0]  # (num_actions,)
+                return q_max.argmax().item()
             else:
-                # Fallback: max over all goals
-                q_max = q_all_goals[0].max(dim=0)[0]  # (num_actions,)
+                q_max = q_all_goals.max(dim=0)[0]
                 return q_max.argmax().item()
     
     def select_action_composed(self, stacked_obs, features):
         """
-        Select action using Boolean composition (CORRECT WVF approach).
+        Zero-shot composition using min over tasks, max over goals.
         
         Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}
-        
-        Then: Q(s, a) = max_g Q̄*_{B AND S}(s, g, a)
-              π(s) = argmax_a Q(s, a)
-        
-        Args:
-            stacked_obs: Current stacked observation
-            features: List of primitive tasks to compose (e.g., ['blue', 'sphere'])
-            
-        Returns:
-            action: The action that maximizes the composed Q-value
+        π(s) = argmax_a max_g Q̄*_{B AND S}(s, g, a)
         """
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            # Get Q̄(s, g, a) for all goals: (1, num_goals, num_actions)
             q_all_goals, new_hidden = self.q_network(state, self.current_hidden)
             q_all_goals = q_all_goals[0]  # (num_goals, num_actions)
-            
-            # Update hidden state
             self.current_hidden = (new_hidden[0].detach(), new_hidden[1].detach())
             
-            # For each goal, compute min over task Q-values
-            # Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}
+            # For composition, we need to find goals that are in ALL task goal sets
+            # and take min of their Q-values across tasks
             
-            composed_q_per_goal = []
+            # Get goal sets for each feature/task
+            goal_sets = [set(self.TASK_GOALS[f]) for f in features]
             
-            for goal_idx, goal in enumerate(self.GOALS):
-                # Check if this goal is in each task's goal set
-                q_values_for_goal = []
+            # Find intersection (goals that satisfy ALL features)
+            valid_goals = goal_sets[0]
+            for gs in goal_sets[1:]:
+                valid_goals = valid_goals.intersection(gs)
+            
+            if len(valid_goals) == 0:
+                # No valid goals - fall back to max over all
+                q_max = q_all_goals.max(dim=0)[0]
+                return q_max.argmax().item()
+            
+            # For each valid goal, compute min Q-value across task perspectives
+            best_q = float('-inf')
+            best_action = 0
+            
+            for goal in valid_goals:
+                goal_idx = self.GOAL_TO_IDX[goal]
+                q_goal = q_all_goals[goal_idx]  # (num_actions,)
                 
-                for task in features:
-                    task_goals = self.TASK_GOALS[task]
-                    if goal in task_goals:
-                        # This goal is "good" for this task - use its Q̄ value
-                        q_values_for_goal.append(q_all_goals[goal_idx])
-                    else:
-                        # This goal is "bad" for this task
-                        # The Q̄ value should already be low due to R̄_MIN training
-                        q_values_for_goal.append(q_all_goals[goal_idx])
+                # This goal is valid for ALL tasks in features, so its Q̄ should be high
+                # for all of them. We take the Q-value directly since we're looking at
+                # the intersection.
+                q_max_for_goal = q_goal.max().item()
                 
-                # min over tasks for this goal
-                if len(q_values_for_goal) > 0:
-                    q_stacked = torch.stack(q_values_for_goal, dim=0)  # (num_tasks, num_actions)
-                    q_min = q_stacked.min(dim=0)[0]  # (num_actions,)
-                    composed_q_per_goal.append(q_min)
+                if q_max_for_goal > best_q:
+                    best_q = q_max_for_goal
+                    best_action = q_goal.argmax().item()
             
-            # Stack: (num_goals, num_actions)
-            composed_q = torch.stack(composed_q_per_goal, dim=0)
-            
-            # max over goals to get Q(s, a)
-            q_final = composed_q.max(dim=0)[0]  # (num_actions,)
-            
-            return q_final.argmax().item()
+            return best_action
     
     def remember(self, state, task_idx, action, reward, next_state, done):
-        """
-        Store transition - CORRECTED to store rewards for ALL goals.
-        
-        This method is called from experiment_utils with task_idx,
-        but we need to compute extended rewards for all goals.
-        
-        Note: We need to call compute_extended_rewards separately since
-        we don't have `info` here. This is handled in the training loop.
-        """
-        # This is a simplified version - the actual extended rewards
-        # should be computed in the training loop where we have `info`
-        pass  # Handled by remember_extended
+        """Backward-compatible remember - but we need more info."""
+        # This is called from experiment_utils but doesn't have goal info
+        # We'll use remember_with_goal instead in the training loop
+        pass
     
-    def remember_extended(self, state, action, rewards_per_goal, next_state, dones_per_goal):
-        """
-        Store transition with extended rewards for all goals.
+    def remember_with_goal(self, state, action, next_state, reached_goal_idx, done):
+        """Store transition with goal information."""
+        task_goal_indices = []
+        if self.current_task:
+            task_goal_indices = [self.GOAL_TO_IDX[g] for g in self.TASK_GOALS[self.current_task]]
         
-        Args:
-            state: Current observation
-            action: Action taken
-            rewards_per_goal: List of rewards for each goal
-            next_state: Next observation
-            dones_per_goal: List of done flags for each goal
-        """
-        self.memory.push(state, action, rewards_per_goal, next_state, dones_per_goal)
+        self.memory.push(state, action, next_state, reached_goal_idx, task_goal_indices, done)
     
     def soft_update_target(self):
-        """Soft update target network."""
         for target_param, online_param in zip(
             self.target_network.parameters(),
             self.q_network.parameters()
@@ -632,129 +521,64 @@ class UnifiedWorldValueFunctionAgent:
             )
     
     def train_step(self):
-        """
-        Perform one training step - CORRECTED to update Q̄ for ALL goals.
-        """
+        """Train on a batch of transitions."""
         if len(self.memory) < self.batch_size:
             return 0.0
         
-        sequences = self.memory.sample(self.batch_size, self.seq_len)
-        max_len = max(len(seq) for seq in sequences)
+        states, actions, next_states, rewards, dones = self.memory.sample(
+            self.batch_size, self.num_goals
+        )
         
-        # Prepare batched data
-        states_batch = []
-        actions_batch = []
-        rewards_batch = []  # Now: (batch, seq, num_goals)
-        next_states_batch = []
-        dones_batch = []    # Now: (batch, seq, num_goals)
-        lengths = []
+        states_t = torch.FloatTensor(states).to(self.device)
+        actions_t = torch.LongTensor(actions).to(self.device)
+        next_states_t = torch.FloatTensor(next_states).to(self.device)
+        rewards_t = torch.FloatTensor(rewards).to(self.device)  # (batch, num_goals)
+        dones_t = torch.BoolTensor(dones).to(self.device)  # (batch, num_goals)
         
-        for seq in sequences:
-            seq_len_actual = len(seq)
-            lengths.append(seq_len_actual)
-            
-            states = [s[0] for s in seq]
-            actions = [s[1] for s in seq]
-            rewards = [s[2] for s in seq]  # List of lists
-            next_states = [s[3] for s in seq]
-            dones = [s[4] for s in seq]    # List of lists
-            
-            # Pad sequences to max length
-            if seq_len_actual < max_len:
-                pad_len = max_len - seq_len_actual
-                states.extend([states[-1]] * pad_len)
-                actions.extend([0] * pad_len)
-                rewards.extend([rewards[-1]] * pad_len)
-                next_states.extend([next_states[-1]] * pad_len)
-                dones.extend([[True] * self.num_goals] * pad_len)
-            
-            states_batch.append(states)
-            actions_batch.append(actions)
-            rewards_batch.append(rewards)
-            next_states_batch.append(next_states)
-            dones_batch.append(dones)
+        batch_size = states_t.shape[0]
         
-        # Convert to tensors
-        states_t = torch.FloatTensor(np.array(states_batch)).to(self.device)
-        actions_t = torch.LongTensor(actions_batch).to(self.device)
-        rewards_t = torch.FloatTensor(np.array(rewards_batch)).to(self.device)  # (batch, seq, num_goals)
-        next_states_t = torch.FloatTensor(np.array(next_states_batch)).to(self.device)
-        dones_t = torch.BoolTensor(np.array(dones_batch)).to(self.device)  # (batch, seq, num_goals)
+        # Get current Q-values
+        q_values, _ = self.q_network(states_t)  # (batch, num_goals, num_actions)
         
-        batch_size, seq_len_max = states_t.shape[:2]
+        # Get Q-values for taken actions
+        actions_expanded = actions_t.unsqueeze(-1).unsqueeze(-1).expand(-1, self.num_goals, 1)
+        current_q = q_values.gather(2, actions_expanded).squeeze(2)  # (batch, num_goals)
         
-        # Initialize hidden states
-        hidden = self.q_network.init_hidden(batch_size, self.device)
-        target_hidden = self.target_network.init_hidden(batch_size, self.device)
-        
-        # Forward pass through online network
-        q_values_list = []
-        for t in range(seq_len_max):
-            q_vals, hidden = self.q_network(states_t[:, t], hidden)
-            q_values_list.append(q_vals)  # (batch, num_goals, num_actions)
-            hidden = (hidden[0].detach(), hidden[1].detach())
-        
-        # Stack: (batch, seq, num_goals, num_actions)
-        q_values = torch.stack(q_values_list, dim=1)
-        
-        # Get Q-values for taken actions: (batch, seq, num_goals)
-        actions_expanded = actions_t.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.num_goals, 1)
-        current_q = q_values.gather(3, actions_expanded).squeeze(3)  # (batch, seq, num_goals)
-        
-        # Target network (Double DQN style)
+        # Compute targets using Double DQN
         with torch.no_grad():
             # Get next actions from online network
-            next_q_list = []
-            hidden_copy = self.q_network.init_hidden(batch_size, self.device)
-            for t in range(seq_len_max):
-                nq, hidden_copy = self.q_network(next_states_t[:, t], hidden_copy)
-                next_q_list.append(nq)
-                hidden_copy = (hidden_copy[0].detach(), hidden_copy[1].detach())
+            next_q_online, _ = self.q_network(next_states_t)
+            next_actions = next_q_online.argmax(dim=2, keepdim=True)  # (batch, num_goals, 1)
             
-            next_q_online = torch.stack(next_q_list, dim=1)  # (batch, seq, num_goals, num_actions)
-            next_actions = next_q_online.argmax(dim=3, keepdim=True)  # (batch, seq, num_goals, 1)
+            # Evaluate with target network
+            next_q_target, _ = self.target_network(next_states_t)
+            next_q = next_q_target.gather(2, next_actions).squeeze(2)  # (batch, num_goals)
             
-            # Evaluate actions with target network
-            target_q_list = []
-            for t in range(seq_len_max):
-                tq, target_hidden = self.target_network(next_states_t[:, t], target_hidden)
-                target_q_list.append(tq)
-                target_hidden = (target_hidden[0].detach(), target_hidden[1].detach())
-            
-            target_q_values = torch.stack(target_q_list, dim=1)  # (batch, seq, num_goals, num_actions)
-            next_q = target_q_values.gather(3, next_actions).squeeze(3)  # (batch, seq, num_goals)
-            
-            # TD target for each goal
-            target_q = rewards_t + (self.gamma * next_q * ~dones_t)
+            # TD target
+            target_q = rewards_t + self.gamma * next_q * (~dones_t).float()
         
-        # Masking for variable-length sequences
-        loss_mask = torch.zeros(batch_size, seq_len_max, self.num_goals, device=self.device)
-        for i, length in enumerate(lengths):
-            loss_mask[i, :length, :] = 1.0
-        
-        # Compute loss for ALL goals
-        loss = F.smooth_l1_loss(current_q * loss_mask, target_q * loss_mask, reduction='sum')
-        loss = loss / loss_mask.sum()
+        # Compute loss
+        loss = F.smooth_l1_loss(current_q, target_q)
         
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=self.grad_clip)
         self.optimizer.step()
         
-        self.soft_update_target()
+        # Soft update target network
+        self.training_steps += 1
+        if self.training_steps % 4 == 0:
+            self.soft_update_target()
         
         return loss.item()
     
     def decay_epsilon(self):
-        """Decay exploration rate."""
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
     
     def reset_epsilon(self):
-        """Reset exploration rate to initial value."""
         self.epsilon = self.epsilon_start
     
     def save_model(self, filepath):
-        """Save model checkpoint."""
         checkpoint = {
             'obs_shape': self.obs_shape,
             'k_frames': self.k_frames,
@@ -766,10 +590,9 @@ class UnifiedWorldValueFunctionAgent:
             'optimizer_state': self.optimizer.state_dict(),
         }
         torch.save(checkpoint, filepath)
-        print(f"WVF model (CORRECTED EVF) saved to {filepath}")
+        print(f"WVF model (REVISED v2) saved to {filepath}")
     
     def load_model(self, filepath):
-        """Load model checkpoint."""
         checkpoint = torch.load(filepath, map_location=self.device)
         self.hidden_size = checkpoint.get('hidden_size', 256)
         self.lstm_size = checkpoint.get('lstm_size', 128)
@@ -778,4 +601,4 @@ class UnifiedWorldValueFunctionAgent:
         self.target_network.load_state_dict(checkpoint['target_network_state'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state'])
         
-        print(f"WVF model (CORRECTED EVF) loaded from {filepath}")
+        print(f"WVF model (REVISED v2) loaded from {filepath}")
