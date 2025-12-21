@@ -30,9 +30,11 @@ class SuccessorAgent:
         self.prev_action = None
 
         # Feature map - stores confidence values (0.0 to 1.0)
+        # Now includes green as a color feature
         self.feature_map = {
             "red": np.zeros((self.grid_size, self.grid_size), dtype=np.float32),
             "blue": np.zeros((self.grid_size, self.grid_size), dtype=np.float32),
+            "green": np.zeros((self.grid_size, self.grid_size), dtype=np.float32),
             "box": np.zeros((self.grid_size, self.grid_size), dtype=np.float32),
             "sphere": np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
         }
@@ -76,12 +78,18 @@ class SuccessorAgent:
                     continue
                 
                 # Accumulate confidence (cap at 1.0)
+                # Color features
                 if "red" in obj_name:
                     self.feature_map["red"][global_z, global_x] = min(1.0, 
                         self.feature_map["red"][global_z, global_x] + self.confidence_boost)
                 if "blue" in obj_name:
                     self.feature_map["blue"][global_z, global_x] = min(1.0,
                         self.feature_map["blue"][global_z, global_x] + self.confidence_boost)
+                if "green" in obj_name:
+                    self.feature_map["green"][global_z, global_x] = min(1.0,
+                        self.feature_map["green"][global_z, global_x] + self.confidence_boost)
+                
+                # Shape features
                 if "box" in obj_name:
                     self.feature_map["box"][global_z, global_x] = min(1.0,
                         self.feature_map["box"][global_z, global_x] + self.confidence_boost)

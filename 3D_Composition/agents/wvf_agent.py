@@ -1,19 +1,11 @@
 """
 Unified World Value Functions (WVF) Agent for Compositional RL
 
-OPTION A REWRITE - Pure Task Conditioning (No Goal Conditioning)
+IMPROVED VERSION - Softmin Composition + Q-Value Normalization
 
-Key insight from WVF theory (Nangue Tasse et al.):
-- Learn Q(s, a, task) for each primitive task
-- Primitive tasks: red, blue, box, sphere
-- Composition: Q_composed(s, a) = min(Q(s, a, task1), Q(s, a, task2))
-  - min = AND (pessimistic: action must be good for BOTH tasks)
-
-This is simpler and matches the WVF theory more closely:
-- No goal conditioning needed
-- Task tells you WHAT to look for (color or shape)
-- Reward is +1 for reaching ANY object satisfying the task
-- Composition naturally emerges from min over task Q-values
+Key improvements over base WVF:
+1. Softmin composition instead of hard min (less pessimistic)
+2. Q-value normalization before composition (calibrates across tasks)
 
 Based on Nangue Tasse et al.'s Boolean Task Algebra (NeurIPS 2020)
 """
@@ -253,21 +245,16 @@ class EpisodeReplayBuffer:
 
 class UnifiedWorldValueFunctionAgent:
     """
-    UNIFIED World Value Function (WVF) Agent - OPTION A
+    IMPROVED World Value Function (WVF) Agent
     
-    Pure Task Conditioning (No Goal Conditioning)
+    Key improvements:
+    1. Softmin composition - less pessimistic than hard min
+    2. Q-value normalization - calibrates values across tasks before composition
     
     Theory:
     - Learn Q(s, a, task) for primitive tasks: red, blue, box, sphere
     - Each task defines a reward function: +1 for ANY object satisfying the task
-    - Composition via min: Q_AND(s, a) = min(Q(s,a,task1), Q(s,a,task2))
-    
-    Example:
-    - Q(s, a, task=blue) = expected return for reaching any blue object
-    - Q(s, a, task=sphere) = expected return for reaching any sphere
-    - Q_blue_sphere(s, a) = min(Q_blue, Q_sphere) = value for reaching blue AND sphere
-    
-    This matches WVF theory exactly.
+    - Composition via softmin: smoother than hard min, still pessimistic
     
     Tasks: [red, blue, box, sphere]
     Valid objects per task:
@@ -298,7 +285,11 @@ class UnifiedWorldValueFunctionAgent:
                  memory_size=2000, batch_size=16, seq_len=4,
                  hidden_size=128, lstm_size=64,
                  tau=0.005, grad_clip=10.0,
-                 r_correct=1.0, r_wrong=-0.1, step_penalty=-0.005):
+                 r_correct=1.0, r_wrong=-0.1, step_penalty=-0.005,
+                 # NEW: Composition parameters
+                 composition_mode='softmin',  # 'softmin', 'min', or 'normalized_min'
+                 softmin_temperature=0.1,
+                 normalize_q_values=True):
         
         self.env = env
         self.action_dim = 3
@@ -307,9 +298,14 @@ class UnifiedWorldValueFunctionAgent:
         self.seq_len = seq_len
         
         # Reward parameters
-        self.r_correct = r_correct    # Reward for reaching valid object
-        self.r_wrong = r_wrong        # Penalty for reaching wrong object
-        self.step_penalty = step_penalty  # Small step penalty
+        self.r_correct = r_correct
+        self.r_wrong = r_wrong
+        self.step_penalty = step_penalty
+        
+        # NEW: Composition parameters
+        self.composition_mode = composition_mode
+        self.softmin_temperature = softmin_temperature
+        self.normalize_q_values = normalize_q_values
         
         # Hyperparameters
         self.gamma = gamma
@@ -327,7 +323,10 @@ class UnifiedWorldValueFunctionAgent:
         
         # Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"UnifiedWorldValueFunctionAgent (Option A) using device: {self.device}")
+        print(f"UnifiedWorldValueFunctionAgentImproved using device: {self.device}")
+        print(f"Composition mode: {composition_mode}")
+        print(f"Softmin temperature: {softmin_temperature}")
+        print(f"Normalize Q-values: {normalize_q_values}")
         
         # Get observation shape
         sample_obs = env.reset()[0]
@@ -346,7 +345,6 @@ class UnifiedWorldValueFunctionAgent:
         print(f"Observation shape: {self.obs_shape}")
         print(f"Task conditioning: Tiled as {self.num_tasks} extra channels")
         print(f"CNN input shape: ({self.obs_shape[0] + self.num_tasks}, {self.obs_shape[1]}, {self.obs_shape[2]})")
-        print(f"NO goal conditioning - pure WVF approach")
         
         # Frame stacker
         self.frame_stack = FrameStack(k=k_frames)
@@ -402,26 +400,12 @@ class UnifiedWorldValueFunctionAgent:
     def compute_reward(self, info, current_task):
         """
         Compute reward based on task satisfaction.
-        
-        Simple WVF reward:
-        - +1 for reaching ANY object that satisfies the current task
-        - -0.1 for reaching wrong object
-        - small step penalty otherwise
-        
-        Args:
-            info: Environment info dict with 'contacted_object'
-            current_task: Current primitive task name (e.g., 'blue')
-            
-        Returns:
-            reward: float
-            done: bool (True if any object was contacted)
         """
         contacted = info.get('contacted_object', None)
         
         if contacted is None:
             return self.step_penalty, False
         
-        # Check if contacted object satisfies the task
         valid_objects = self.VALID_OBJECTS[current_task]
         task_satisfied = contacted in valid_objects
         
@@ -456,20 +440,12 @@ class UnifiedWorldValueFunctionAgent:
         return img
     
     def reset_episode(self, obs, task_name=None):
-        """
-        Reset for new episode.
-        
-        Args:
-            obs: Initial observation
-            task_name: Optional task name (if None, will be set later)
-        """
+        """Reset for new episode."""
         frame = self.preprocess_frame(obs)
         stacked = self.frame_stack.reset(frame)
         
-        # Initialize fresh hidden state for new episode
         self.current_hidden = self.q_network.init_hidden(batch_size=1, device=self.device)
         
-        # Set current task if provided
         if task_name is not None:
             self.current_task_idx = self.TASK_TO_IDX[task_name]
         
@@ -481,17 +457,7 @@ class UnifiedWorldValueFunctionAgent:
         return self.frame_stack.step(frame)
     
     def select_action(self, stacked_obs, task_idx=None, epsilon=None):
-        """
-        Select action using epsilon-greedy, conditioned on task.
-        
-        Args:
-            stacked_obs: Stacked observation frames
-            task_idx: Task index (uses self.current_task_idx if None)
-            epsilon: Exploration rate (uses self.epsilon if None)
-            
-        Returns:
-            action: Selected action
-        """
+        """Select action using epsilon-greedy, conditioned on task."""
         if epsilon is None:
             epsilon = self.epsilon
         
@@ -506,25 +472,81 @@ class UnifiedWorldValueFunctionAgent:
         
         with torch.no_grad():
             q_values, self.current_hidden = self.q_network(state, task, self.current_hidden)
-            # Detach hidden state to prevent gradient accumulation
             self.current_hidden = (self.current_hidden[0].detach(),
                                    self.current_hidden[1].detach())
             return q_values.argmax().item()
     
-    def select_action_composed(self, stacked_obs, features):
+    def _normalize_q_values(self, q_vals):
         """
-        Select action using Boolean composition (min over task Q-values).
+        Normalize Q-values to [0, 1] range.
         
-        This is the core WVF composition:
-        Q_AND(s, a) = min(Q(s, a, task1), Q(s, a, task2))
+        This ensures different tasks are on comparable scales before composition.
+        """
+        q_min = q_vals.min()
+        q_max = q_vals.max()
+        
+        if q_max - q_min > 1e-6:
+            return (q_vals - q_min) / (q_max - q_min)
+        else:
+            # All values are the same, return uniform
+            return torch.ones_like(q_vals) * 0.5
+    
+    def _compose_softmin(self, q_values_list, temperature=None):
+        """
+        Softmin composition: smoother version of min.
+        
+        softmin(x) = sum(x_i * softmax(-x_i / temp))
+        
+        As temperature -> 0, this approaches hard min.
+        Higher temperature = more averaging.
+        
+        Args:
+            q_values_list: List of Q-value tensors, one per task
+            temperature: Softmin temperature (lower = more like hard min)
+            
+        Returns:
+            Composed Q-values
+        """
+        if temperature is None:
+            temperature = self.softmin_temperature
+        
+        # Stack: (num_tasks, batch=1, num_actions)
+        q_stack = torch.stack(q_values_list, dim=0)
+        
+        # Softmin weights: softmax of negative Q-values (lower Q gets higher weight)
+        weights = F.softmax(-q_stack / temperature, dim=0)
+        
+        # Weighted combination
+        q_composed = (weights * q_stack).sum(dim=0)
+        
+        return q_composed
+    
+    def _compose_min(self, q_values_list):
+        """Hard min composition (original WVF)."""
+        q_stack = torch.stack(q_values_list, dim=0)
+        return q_stack.min(dim=0)[0]
+    
+    def select_action_composed(self, stacked_obs, features, epsilon=0.0):
+        """
+        Select action using Boolean composition with improvements.
+        
+        Supports multiple composition modes:
+        - 'softmin': Smooth approximation to min (default, recommended)
+        - 'min': Hard min (original WVF)
+        - 'normalized_min': Normalize Q-values then take min
         
         Args:
             stacked_obs: Current stacked observation
             features: List of primitive tasks to compose (e.g., ['blue', 'sphere'])
+            epsilon: Exploration rate (default 0 for evaluation)
             
         Returns:
             action: The action that maximizes the composed Q-value
         """
+        # Epsilon-greedy for potential exploration during fine-tuning
+        if random.random() < epsilon:
+            return random.randint(0, self.action_dim - 1)
+        
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
         q_values_per_task = []
@@ -535,17 +557,28 @@ class UnifiedWorldValueFunctionAgent:
                 task_idx = self.TASK_TO_IDX[task_name]
                 task_one_hot = self.get_task_one_hot(task_idx)
                 
-                # Use current hidden state for temporal context
                 q_vals, _ = self.q_network(state, task_one_hot, self.current_hidden)
+                
+                # Optionally normalize Q-values before composition
+                if self.normalize_q_values:
+                    q_vals = self._normalize_q_values(q_vals)
+                
                 q_values_per_task.append(q_vals)
             
-            # Boolean AND = min over Q-values (pessimistic composition)
-            # Shape: (num_tasks, batch=1, num_actions) -> min over dim 0
-            q_composed = torch.stack(q_values_per_task, dim=0).min(dim=0)[0]
+            # Compose based on selected mode
+            if self.composition_mode == 'softmin':
+                q_composed = self._compose_softmin(q_values_per_task)
+            elif self.composition_mode == 'min':
+                q_composed = self._compose_min(q_values_per_task)
+            elif self.composition_mode == 'normalized_min':
+                # Already normalized above if normalize_q_values=True
+                q_composed = self._compose_min(q_values_per_task)
+            else:
+                raise ValueError(f"Unknown composition mode: {self.composition_mode}")
+            
             best_action = q_composed.argmax().item()
             
-            # Update hidden state using the first task (arbitrary but consistent)
-            # This maintains temporal context across steps
+            # Update hidden state for temporal context
             first_task_idx = self.TASK_TO_IDX[features[0]]
             first_task_one_hot = self.get_task_one_hot(first_task_idx)
             _, new_hidden = self.q_network(state, first_task_one_hot, self.current_hidden)
@@ -589,7 +622,6 @@ class UnifiedWorldValueFunctionAgent:
             next_states = [s[4] for s in seq]
             dones = [s[5] for s in seq]
             
-            # Pad sequences to max length
             if seq_len_actual < max_len:
                 pad_len = max_len - seq_len_actual
                 states.extend([states[-1]] * pad_len)
@@ -606,7 +638,6 @@ class UnifiedWorldValueFunctionAgent:
             next_states_batch.append(next_states)
             dones_batch.append(dones)
         
-        # Convert to tensors
         states_t = torch.FloatTensor(np.array(states_batch)).to(self.device)
         tasks_t = torch.LongTensor(tasks_batch).to(self.device)
         actions_t = torch.LongTensor(actions_batch).to(self.device)
@@ -616,11 +647,9 @@ class UnifiedWorldValueFunctionAgent:
         
         batch_size, seq_len = states_t.shape[:2]
         
-        # Initialize hidden states
         hidden = self.q_network.init_hidden(batch_size, self.device)
         target_hidden = self.target_network.init_hidden(batch_size, self.device)
         
-        # Forward pass through online network
         q_values_list = []
         for t in range(seq_len):
             task_one_hot = torch.zeros(batch_size, self.num_tasks, device=self.device)
@@ -634,9 +663,7 @@ class UnifiedWorldValueFunctionAgent:
         q_values = torch.stack(q_values_list, dim=1)
         current_q = q_values.gather(2, actions_t.unsqueeze(2)).squeeze(2)
         
-        # Target Network (Double DQN)
         with torch.no_grad():
-            # Get next actions from online network
             next_q_list = []
             hidden_copy = self.q_network.init_hidden(batch_size, self.device)
             for t in range(seq_len):
@@ -651,7 +678,6 @@ class UnifiedWorldValueFunctionAgent:
             next_q_values = torch.stack(next_q_list, dim=1)
             next_actions = next_q_values.argmax(2, keepdim=True)
             
-            # Evaluate actions with target network
             target_q_list = []
             for t in range(seq_len):
                 task_one_hot = torch.zeros(batch_size, self.num_tasks, device=self.device)
@@ -667,7 +693,6 @@ class UnifiedWorldValueFunctionAgent:
             
             target_q = rewards_t + (self.gamma * next_q * ~dones_t)
         
-        # Masking for variable-length sequences
         loss_mask = torch.zeros(batch_size, seq_len, device=self.device)
         for i, length in enumerate(lengths):
             loss_mask[i, :length] = 1.0
@@ -700,21 +725,30 @@ class UnifiedWorldValueFunctionAgent:
             'num_tasks': self.num_tasks,
             'hidden_size': self.hidden_size,
             'lstm_size': self.lstm_size,
+            'composition_mode': self.composition_mode,
+            'softmin_temperature': self.softmin_temperature,
+            'normalize_q_values': self.normalize_q_values,
             'q_network_state': self.q_network.state_dict(),
             'target_network_state': self.target_network.state_dict(),
             'optimizer_state': self.optimizer.state_dict(),
         }
         torch.save(checkpoint, filepath)
-        print(f"WVF model (Option A) saved to {filepath}")
+        print(f"WVF model (Improved) saved to {filepath}")
     
     def load_model(self, filepath):
         """Load model checkpoint."""
         checkpoint = torch.load(filepath, map_location=self.device)
         self.hidden_size = checkpoint.get('hidden_size', 128)
         self.lstm_size = checkpoint.get('lstm_size', 64)
+        self.composition_mode = checkpoint.get('composition_mode', 'softmin')
+        self.softmin_temperature = checkpoint.get('softmin_temperature', 0.1)
+        self.normalize_q_values = checkpoint.get('normalize_q_values', True)
         
         self.q_network.load_state_dict(checkpoint['q_network_state'])
         self.target_network.load_state_dict(checkpoint['target_network_state'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state'])
         
-        print(f"WVF model (Option A) loaded from {filepath}")
+        print(f"WVF model (Improved) loaded from {filepath}")
+        print(f"  Composition mode: {self.composition_mode}")
+        print(f"  Softmin temperature: {self.softmin_temperature}")
+        print(f"  Normalize Q-values: {self.normalize_q_values}")

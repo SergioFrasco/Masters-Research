@@ -582,23 +582,27 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
 # ============================================================================
 
 
-def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
-                      learning_rate, gamma, epsilon_decay, output_dir):
+def train_unified_wvf_improved(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
+                                learning_rate, gamma, epsilon_decay, output_dir,
+                                composition_mode='softmin',
+                                softmin_temperature=0.1,
+                                normalize_q_values=True):
     """
-    Train Unified WVF agent (Option A - Pure Task Conditioning).
+    Train Improved WVF agent with softmin composition and Q-value normalization.
     
-    Key differences from original:
-    1. No goal conditioning - only task conditioning
-    2. Simpler reward: +1 for any valid object, -0.1 for wrong, small step penalty
-    3. Composition via min(Q_task1, Q_task2) matches WVF theory exactly
+    New parameters:
+        composition_mode: 'softmin' (default), 'min', or 'normalized_min'
+        softmin_temperature: Temperature for softmin (lower = more like hard min)
+        normalize_q_values: Whether to normalize Q-values before composition
     """
     
-    # Import here to avoid circular imports
     from env import DiscreteMiniWorldWrapper
     
     print(f"\n{'='*70}")
-    print(f"TRAINING UNIFIED WVF - OPTION A (Seed={seed})")
-    print(f"Pure Task Conditioning (No Goal Conditioning)")
+    print(f"TRAINING IMPROVED WVF (Seed={seed})")
+    print(f"Composition mode: {composition_mode}")
+    print(f"Softmin temperature: {softmin_temperature}")
+    print(f"Normalize Q-values: {normalize_q_values}")
     print(f"{'='*70}\n")
     
     np.random.seed(seed)
@@ -624,7 +628,11 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         grad_clip=10.0,
         r_correct=1.0,
         r_wrong=-0.1,
-        step_penalty=-0.005
+        step_penalty=-0.005,
+        # NEW parameters
+        composition_mode=composition_mode,
+        softmin_temperature=softmin_temperature,
+        normalize_q_values=normalize_q_values
     )
     
     all_rewards = []
@@ -632,15 +640,12 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
     
     # ===== TRAINING PHASE =====
     print("Starting training phase...")
-    print("Training on primitive tasks: red, blue, box, sphere")
-    print("Each task rewards reaching ANY object satisfying the task\n")
+    print("Training on primitive tasks: red, blue, box, sphere\n")
     
-    for episode in tqdm(range(training_episodes), desc="Training WVF"):
-        # Sample random primitive task
-        current_task = agent.sample_task()  # Returns task name like 'blue'
+    for episode in tqdm(range(training_episodes), desc="Training WVF (Improved)"):
+        current_task = agent.sample_task()
         task_idx = agent.TASK_TO_IDX[current_task]
         
-        # Create task config for environment
         task_config = {"name": current_task, "features": [current_task], "type": "primitive"}
         env.set_task(task_config)
         
@@ -650,24 +655,19 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         episode_reward = 0
         
         for step in range(max_steps):
-            # Select action conditioned on current task
             action = agent.select_action(stacked_obs, task_idx)
             
             next_obs, _, terminated, truncated, info = env.step(action)
             next_stacked_obs = agent.step_episode(next_obs)
             
-            # Compute reward based on task satisfaction
             reward, goal_reached = agent.compute_reward(info, current_task)
             
-            # Track if we got positive reward
             if reward > 0:
                 episode_reward = 1.0
             
-            # Store transition
             done = goal_reached or terminated or truncated
             agent.remember(stacked_obs, task_idx, action, reward, next_stacked_obs, done)
             
-            # Train periodically
             if step % 4 == 0 and len(agent.memory) >= agent.batch_size:
                 agent.train_step()
             
@@ -686,16 +686,19 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
     
     # ===== EVALUATION PHASE =====
     print(f"\nStarting evaluation phase...")
-    print("Evaluating on compositional tasks using min(Q_task1, Q_task2) composition\n")
+    print(f"Composition mode: {composition_mode}")
+    if composition_mode == 'softmin':
+        print(f"Temperature: {softmin_temperature}")
+    print(f"Q-value normalization: {normalize_q_values}\n")
     
     eval_task_labels = []
     
     for comp_task in COMPOSITIONAL_TASKS:
         env.set_task(comp_task)
         task_name = comp_task['name']
-        features = comp_task['features']  # e.g., ['blue', 'sphere']
+        features = comp_task['features']
         
-        print(f"Evaluating {task_name} = min(Q_{features[0]}, Q_{features[1]})")
+        print(f"Evaluating {task_name} = compose(Q_{features[0]}, Q_{features[1]})")
         
         task_successes = 0
         
@@ -705,13 +708,11 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
             episode_reward = 0
             
             for step in range(max_steps):
-                # Use composition: min over task Q-values
                 action = agent.select_action_composed(stacked_obs, features)
                 
                 obs, _, terminated, truncated, info = env.step(action)
                 stacked_obs = agent.step_episode(obs)
                 
-                # Check if we satisfied the compositional task
                 if check_task_satisfaction(info, comp_task):
                     episode_reward = 1.0
                     task_successes += 1
@@ -728,15 +729,18 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
     
     all_labels = episode_labels + eval_task_labels
     
-    print(f"\n✓ WVF (Option A) training complete (seed={seed})")
+    print(f"\n✓ WVF (Improved) training complete (seed={seed})")
     print(f"  Training episodes: {training_episodes}")
     print(f"  Eval episodes: {len(eval_task_labels)}")
     
     return {
-        "algorithm": "WVF",
+        "algorithm": "WVF_improved",
         "seed": seed,
         "all_rewards": np.array(all_rewards),
         "episode_labels": all_labels,
         "training_episodes": training_episodes,
         "eval_episodes": len(eval_task_labels),
+        "composition_mode": composition_mode,
+        "softmin_temperature": softmin_temperature,
+        "normalize_q_values": normalize_q_values,
     }
