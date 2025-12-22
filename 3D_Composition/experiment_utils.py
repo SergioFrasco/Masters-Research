@@ -603,7 +603,7 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
     os.environ["PYOPENGL_PLATFORM"] = "osmesa"
     
     from env import DiscreteMiniWorldWrapper
-    from wvf_agent_workaround import UnifiedWorldValueFunctionAgent
+    from agents import UnifiedWorldValueFunctionAgent
     
     print(f"\n{'='*70}")
     print(f"TRAINING TASK-CONDITIONED WVF (WORKAROUND) - Seed={seed}")
