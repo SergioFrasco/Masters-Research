@@ -507,8 +507,8 @@ def run_experiment_with_unseen_goals(
 if __name__ == "__main__":
     results, agent = run_experiment_with_unseen_goals(
         env_size=10,
-        total_episodes=1000,
-        eval_episodes=100,
+        total_episodes=1500,
+        eval_episodes=200,
         max_steps=200,
         learning_rate=0.0001,
         gamma=0.99,
