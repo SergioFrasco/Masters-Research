@@ -255,6 +255,7 @@ class UnifiedWorldValueFunctionAgent:
         self.grad_clip = grad_clip
         self.hidden_size = hidden_size
         self.lstm_size = lstm_size
+        self.memory_size = memory_size
         
         # Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -310,7 +311,7 @@ class UnifiedWorldValueFunctionAgent:
         self.target_network.eval()
         
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=self.learning_rate)
-        self.memory = EpisodeReplayBuffer(capacity=memory_size)
+        self.memory = EpisodeReplayBuffer(capacity=self.memory_size)
         
         total_params = sum(p.numel() for p in self.q_network.parameters())
         print(f"  EVF network parameters: {total_params:,}")
