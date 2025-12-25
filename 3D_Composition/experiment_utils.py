@@ -10,7 +10,7 @@ import os
 # Set environment variables for headless mode
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
-os.environ["PYOPENGL_PLATFORM"] = "osmesa"  # Removed duplicate
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["MUJOCO_GL"] = "osmesa"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -25,12 +25,16 @@ from pathlib import Path
 from tqdm import tqdm
 import json
 
+# Import fixed WVF components
+from agents import UnifiedWorldValueFunctionAgent
+from env import DiscreteMiniWorldWrapper
+
+# Import original components for other algorithms
 from env import DiscreteMiniWorldWrapper
 from agents import (
     SuccessorAgent,
     UnifiedDQNAgent,
     UnifiedLSTMDQNAgent3D,
-    UnifiedWorldValueFunctionAgent
 )
 from train_vision import CubeDetector
 from torchvision import transforms
@@ -193,8 +197,8 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
     ])
     
     # Tracking
-    all_rewards = []  # All episodes (training + eval)
-    episode_labels = []  # Which task each episode
+    all_rewards = []
+    episode_labels = []
     
     epsilon = 1.0
     epsilon_end = 0.05
@@ -254,7 +258,7 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
                 break
         
         # FREEZE SR at specified episode
-        if episode == sr_freeze_episode - 1:  # -1 because 0-indexed
+        if episode == sr_freeze_episode - 1:
             print(f"\n⚠️  FREEZING SR MATRIX at episode {episode + 1}")
             frozen_sr_matrix = agent.M.copy()
             sr_frozen = True
@@ -302,7 +306,7 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
                 agent.compute_wvf()
                 
                 # Select action
-                action = agent.sample_action_with_wvf(obs, epsilon=0.0)  # Greedy
+                action = agent.sample_action_with_wvf(obs, epsilon=0.0)
                 
                 obs, env_reward, terminated, truncated, info = env.step(action)
                 
@@ -423,7 +427,6 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
             episode_reward = 0
             
             for step in range(max_steps):
-                # Use compositional encoding
                 action = agent.select_action(obs, comp_task['features'], epsilon=0.0)
                 obs, _, terminated, truncated, info = env.step(action)
                 
@@ -577,25 +580,20 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
     }
 
 # ============================================================================
-# UNIFIED WVF AGENT
+# UNIFIED WVF AGENT (THEORY-COMPLIANT)
 # ============================================================================
 
 def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
                       learning_rate, gamma, epsilon_decay, output_dir):
     """
-    Train THEORY-COMPLIANT WVF agent
+    Train THEORY-COMPLIANT WVF agent using FIXED environment and agent.
     
     Key properties:
     1. NO FRAME STACKING - LSTM handles temporal integration
     2. Episodes terminate on ANY collision (theory requirement)
     3. Learn Q̄(s, g, a) for ALL goals with R̄_MIN penalties
     4. Zero-shot composition via min operator
-    
-    This matches Nangue Tasse et al.'s actual experimental setup.
     """
-    
-    from env_fixed import DiscreteMiniWorldWrapper
-    from wvf_agent_fixed import UnifiedWorldValueFunctionAgent
     
     print(f"\n{'='*70}")
     print(f"TRAINING THEORY-COMPLIANT WVF (Seed={seed})")
@@ -610,8 +608,10 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
     torch.manual_seed(seed)
     random.seed(seed)
     
+    # Use FIXED environment that terminates on ANY collision
     env = DiscreteMiniWorldWrapper(size=env_size, render_mode="rgb_array")
     
+    # Use FIXED agent with LSTM-only (no frame stacking)
     agent = UnifiedWorldValueFunctionAgent(
         env,
         learning_rate=learning_rate,
@@ -629,7 +629,7 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         r_correct=1.0,
         r_wrong=-0.1,
         step_penalty=-0.01,
-        r_bar_min=-10.0  # R̄_MIN penalty for wrong goals
+        r_bar_min=-10.0
     )
     
     all_rewards = []
