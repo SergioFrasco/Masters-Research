@@ -576,52 +576,37 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
         "eval_episodes": len(eval_task_labels),
     }
 
-
 # ============================================================================
 # UNIFIED WVF AGENT
 # ============================================================================
 
 
-
 def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
                       learning_rate, gamma, epsilon_decay, output_dir):
     """
-    Train Task-Conditioned WVF agent - WORKAROUND VERSION.
+    Train CORRECTED WVF agent using Extended Value Functions.
     
-    For environments where:
-    - Wrong contacts DON'T terminate the episode
-    - Only correct contacts terminate
-    
-    The workaround:
-    - Give R̄_MIN penalty on wrong contact (but episode continues)
-    - Agent learns to avoid wrong goals through accumulated penalties
+    Key differences from wrong implementation:
+    1. Learn Q̄(s, g, a) for EACH goal, not Q(s, a, task)
+    2. Use extended reward R̄_MIN when reaching wrong goal
+    3. Update Q̄ for ALL goals every step
+    4. Composition via min over task Q-values, then max over goals
     """
     
-    import os
-    os.environ["MINIWORLD_HEADLESS"] = "1"
-    os.environ["PYGLET_HEADLESS"] = "True"
-    os.environ["PYOPENGL_PLATFORM"] = "osmesa"
-    
+    # Import here to avoid circular imports
     from env import DiscreteMiniWorldWrapper
-    from agents import UnifiedWorldValueFunctionAgent
     
     print(f"\n{'='*70}")
-    print(f"TRAINING TASK-CONDITIONED WVF (WORKAROUND) - Seed={seed}")
-    print(f"{'='*70}")
-    print(f"NOTE: Wrong contacts do NOT terminate - using penalty workaround")
+    print(f"TRAINING CORRECTED WVF (Seed={seed})")
+    print(f"Using Extended Value Functions - Q̄(s, g, a) for each goal")
     print(f"{'='*70}\n")
     
-    # Set seeds
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
     
-    # Create environment
     env = DiscreteMiniWorldWrapper(size=env_size, render_mode="rgb_array")
     
-    # Create workaround WVF agent
     agent = UnifiedWorldValueFunctionAgent(
         env,
         k_frames=4,
@@ -630,131 +615,119 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         epsilon_start=1.0,
         epsilon_end=0.05,
         epsilon_decay=epsilon_decay,
-        memory_size=50000,
-        batch_size=64,
+        memory_size=2000,
+        batch_size=16,
+        seq_len=4,
         hidden_size=256,
+        lstm_size=128,
         tau=0.005,
         grad_clip=10.0,
-        r_bar_min=-5.0,  # Penalty for wrong contact (less harsh since not terminal)
-        step_penalty=-0.01,
+        r_correct=1.0,
+        r_wrong=-0.1,
+        step_penalty=-0.005,
+        r_bar_min=-10.0  # Critical: R̄_MIN penalty for wrong goals
     )
     
     all_rewards = []
     episode_labels = []
     
     # ===== TRAINING PHASE =====
-    print("="*50)
-    print("TRAINING PHASE")
-    print("="*50)
-    print("Learning Q̄_τ(s, g, a) with non-terminating wrong contacts")
-    print("Agent receives R̄_MIN penalty on wrong contact but continues\n")
+    print("Starting training phase...")
+    print("Training on primitive tasks: red, blue, box, sphere")
+    print("Learning Q̄(s, g, a) for ALL 4 goals with extended rewards\n")
     
     for episode in tqdm(range(training_episodes), desc="Training WVF"):
-        # Sample primitive task
-        task_name = agent.sample_task()
-        task_config = {"name": task_name, "features": [task_name], "type": "primitive"}
+        # Sample random primitive task
+        current_task = agent.sample_task()  # Returns task name like 'blue'
+        agent.current_task = current_task
         
-        # Set task
-        agent.set_task(task_name)
+        # Create task config for environment
+        task_config = {"name": current_task, "features": [current_task], "type": "primitive"}
         env.set_task(task_config)
         
-        # Reset
         obs, info = env.reset()
-        stacked_obs = agent.reset_episode(obs, task_name)
+        stacked_obs = agent.reset_episode(obs, current_task)
         
         episode_reward = 0
-        episode_terminated = False
+        task_success = False
         
         for step in range(max_steps):
-            # Select action
+            # Select action based on task's Q-values
             action = agent.select_action(stacked_obs)
             
-            # Environment step
             next_obs, _, terminated, truncated, info = env.step(action)
             next_stacked_obs = agent.step_episode(next_obs)
             
-            # Get contact info
-            contacted_goal_idx = agent.get_contacted_goal_idx(info)
-            is_correct = agent.check_contact_correct_for_task(info, task_name)
-            
-            # Episode terminates only on correct contact (per your env)
-            episode_terminated = terminated  # This is True only for correct contact
-            
-            # Track success
-            if is_correct and terminated:
-                episode_reward = 1.0
-            
-            # Store transition
-            # Key: we pass the actual termination status from env
-            agent.remember_with_goal(
-                state=stacked_obs,
-                action=action,
-                next_state=next_stacked_obs,
-                contacted_goal_idx=contacted_goal_idx,
-                is_correct_for_task=is_correct,
-                episode_terminated=episode_terminated
+            # Compute EXTENDED rewards for ALL goals
+            rewards_per_goal, dones_per_goal, step_success = agent.compute_extended_rewards(
+                info, current_task
             )
             
-            # Train
-            if len(agent.memory) >= agent.batch_size:
+            if step_success:
+                task_success = True
+                episode_reward = 1.0
+            
+            # Store transition with extended rewards for all goals
+            agent.remember_extended(
+                stacked_obs, action, rewards_per_goal, next_stacked_obs, dones_per_goal
+            )
+            
+            # Train periodically
+            if step % 4 == 0 and len(agent.memory) >= agent.batch_size:
                 agent.train_step()
             
             stacked_obs = next_stacked_obs
             
-            if episode_terminated or truncated:
+            # Check if episode is done (any goal reached)
+            if any(dones_per_goal) or terminated or truncated:
                 break
         
         agent.decay_epsilon()
         all_rewards.append(episode_reward)
-        episode_labels.append(task_name)
+        episode_labels.append(current_task)
         
-        # Logging
+        # Periodic logging
         if (episode + 1) % 500 == 0:
-            recent = all_rewards[-500:]
-            print(f"\n  Episode {episode+1}: Success={np.mean(recent):.1%}, ε={agent.epsilon:.3f}")
+            recent_rewards = all_rewards[-500:]
+            print(f"  Episode {episode+1}: Recent success rate = {np.mean(recent_rewards):.2%}")
     
     # Save model
     model_path = output_dir / "model.pt"
     agent.save_model(str(model_path))
     
     # ===== EVALUATION PHASE =====
-    print(f"\n{'='*50}")
-    print("EVALUATION PHASE: Zero-Shot Composition")
-    print("="*50)
-    print("Using: Q̄_{A∧B} = min{Q̄_A, Q̄_B}\n")
+    print(f"\nStarting evaluation phase...")
+    print("Evaluating on compositional tasks using CORRECT composition:")
+    print("Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}")
+    print("Then: π(s) = argmax_a max_g Q̄*_{B AND S}(s, g, a)\n")
     
     eval_task_labels = []
-    eval_results = {}
     
     for comp_task in COMPOSITIONAL_TASKS:
         env.set_task(comp_task)
         task_name = comp_task['name']
-        features = comp_task['features']
+        features = comp_task['features']  # e.g., ['blue', 'sphere']
         
-        # Show composition
-        goal_sets = [agent.TASK_GOALS[f] for f in features]
-        intersection = goal_sets[0].intersection(*goal_sets[1:])
-        print(f"Evaluating: {task_name}")
-        print(f"  {features[0]} ∩ {features[1]} = {intersection}")
+        print(f"Evaluating {task_name} = {features[0]} AND {features[1]}")
         
-        successes = 0
+        task_successes = 0
         
         for ep in range(eval_episodes_per_task):
             obs, info = env.reset()
             stacked_obs = agent.reset_episode(obs)
-            
             episode_reward = 0
             
             for step in range(max_steps):
-                # Zero-shot composition
-                action = agent.select_action_composed(stacked_obs, features, epsilon=0.0)
+                # Use CORRECT composition: min over tasks, max over goals
+                action = agent.select_action_composed(stacked_obs, features)
                 
                 obs, _, terminated, truncated, info = env.step(action)
                 stacked_obs = agent.step_episode(obs)
                 
+                # Check if we satisfied the compositional task
                 if check_task_satisfaction(info, comp_task):
                     episode_reward = 1.0
-                    successes += 1
+                    task_successes += 1
                     break
                 
                 if terminated or truncated:
@@ -763,20 +736,14 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
             all_rewards.append(episode_reward)
             eval_task_labels.append(task_name)
         
-        success_rate = successes / eval_episodes_per_task
-        eval_results[task_name] = success_rate
-        print(f"  Success: {success_rate:.1%} ({successes}/{eval_episodes_per_task})")
-    
-    # Summary
-    print(f"\n{'='*50}")
-    print("EVALUATION SUMMARY")
-    print("="*50)
-    for task_name, rate in eval_results.items():
-        print(f"  {task_name}: {rate:.1%}")
-    print(f"  Average: {np.mean(list(eval_results.values())):.1%}")
-    print("="*50)
+        success_rate = task_successes / eval_episodes_per_task
+        print(f"  {task_name}: {success_rate:.1%} success rate ({task_successes}/{eval_episodes_per_task})")
     
     all_labels = episode_labels + eval_task_labels
+    
+    print(f"\n✓ CORRECTED WVF training complete (seed={seed})")
+    print(f"  Training episodes: {training_episodes}")
+    print(f"  Eval episodes: {len(eval_task_labels)}")
     
     return {
         "algorithm": "WVF",
@@ -785,5 +752,4 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         "episode_labels": all_labels,
         "training_episodes": training_episodes,
         "eval_episodes": len(eval_task_labels),
-        "eval_results": eval_results,
     }
