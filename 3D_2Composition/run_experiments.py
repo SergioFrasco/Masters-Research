@@ -59,8 +59,8 @@ ALGORITHMS = ["WVF"]
 
 # Training configuration
 TRAINING_CONFIG = {
-    "training_episodes": 6000,
-    "eval_episodes_per_task": 500,  # 300 per compositional task
+    "training_episodes": 1,
+    "eval_episodes_per_task": 1,  # 300 per compositional task
     "max_steps": 200,
     "env_size": 10,
     
