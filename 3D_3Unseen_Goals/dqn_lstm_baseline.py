@@ -895,8 +895,8 @@ def run_lstm_experiment_with_unseen_goals(
 if __name__ == "__main__":
     results, agent = run_lstm_experiment_with_unseen_goals(
         env_size=10,
-        total_episodes=3500,  # Matching DQN experiment
-        eval_episodes=300,
+        total_episodes=8000,  # Matching DQN experiment
+        eval_episodes=400,
         max_steps=200,
         learning_rate=0.0001,
         gamma=0.99,
