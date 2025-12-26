@@ -54,8 +54,8 @@ from experiment_utils import (
 NUM_SEEDS = 1
 
 # Algorithms to compare
-ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
-# ALGORITHMS = ["WVF"]
+# ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
+ALGORITHMS = ["WVF"]
 
 # Training configuration
 TRAINING_CONFIG = {

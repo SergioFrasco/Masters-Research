@@ -1,0 +1,27 @@
+{
+  "timestamp": "20251226_114015",
+  "algorithms": [
+    "WVF"
+  ],
+  "num_seeds": 1,
+  "seeds": [
+    0
+  ],
+  "training_config": {
+    "training_episodes": 6000,
+    "eval_episodes_per_task": 500,
+    "max_steps": 200,
+    "env_size": 10,
+    "sr_freeze_episode": 3000,
+    "learning_rate": 0.0001,
+    "gamma": 0.99,
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay": 0.9995
+  },
+  "slurm_config": {
+    "partition": "bigbatch",
+    "time": 4320,
+    "ntasks": 1
+  }
+}

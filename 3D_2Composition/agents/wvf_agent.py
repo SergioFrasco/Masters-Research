@@ -534,18 +534,54 @@ class UnifiedWorldValueFunctionAgent:
                 q_max = q_all_goals[0].max(dim=0)[0]  # (num_actions,)
                 return q_max.argmax().item()
     
-    def select_action_composed(self, stacked_obs, features):
+    def select_action_primitive(self, stacked_obs, task_name, use_target=True):
+        """
+        Select action for a PRIMITIVE task during evaluation.
+        
+        Uses the target network for more stable Q-estimates during eval.
+        
+        Args:
+            stacked_obs: Current stacked observation
+            task_name: Primitive task name (e.g., 'blue', 'red', 'box', 'sphere')
+            use_target: Whether to use target network (more stable for eval)
+            
+        Returns:
+            action: The greedy action for this primitive task
+        """
+        state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
+        
+        with torch.no_grad():
+            # Use target network for eval (more stable)
+            network = self.target_network if use_target else self.q_network
+            q_all_goals, new_hidden = network(state, self.current_hidden)
+            q_all_goals = q_all_goals[0]  # (num_goals, num_actions)
+            
+            # Update hidden state
+            self.current_hidden = (new_hidden[0].detach(), new_hidden[1].detach())
+            
+            # Get goal indices for this primitive task
+            task_goal_indices = [self.GOAL_TO_IDX[g] for g in self.TASK_GOALS[task_name]]
+            
+            # Q_task(s, a) = max over goals in task's goal set
+            q_task = q_all_goals[task_goal_indices, :].max(dim=0)[0]  # (num_actions,)
+            
+            return q_task.argmax().item()
+    
+    def select_action_composed(self, stacked_obs, features, use_target=True):
         """
         Select action using Boolean composition (CORRECT WVF approach).
         
-        Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}
+        For compositional tasks like "blue AND sphere":
+        1. Find goals that satisfy ALL features (intersection)
+        2. For valid goals, use their Q-values directly
+        3. Take max over valid goals, then argmax over actions
         
-        Then: Q(s, a) = max_g Q̄*_{B AND S}(s, g, a)
-              π(s) = argmax_a Q(s, a)
+        Uses target network for more stable Q-estimates during evaluation.
         
         Args:
             stacked_obs: Current stacked observation
             features: List of primitive tasks to compose (e.g., ['blue', 'sphere'])
+            use_target: Whether to use target network (more stable for eval)
             
         Returns:
             action: The action that maximizes the composed Q-value
@@ -553,43 +589,32 @@ class UnifiedWorldValueFunctionAgent:
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            # Get Q̄(s, g, a) for all goals: (1, num_goals, num_actions)
-            q_all_goals, new_hidden = self.q_network(state, self.current_hidden)
+            # Use target network for eval (more stable)
+            network = self.target_network if use_target else self.q_network
+            q_all_goals, new_hidden = network(state, self.current_hidden)
             q_all_goals = q_all_goals[0]  # (num_goals, num_actions)
             
             # Update hidden state
             self.current_hidden = (new_hidden[0].detach(), new_hidden[1].detach())
             
-            # For each goal, compute min over task Q-values
-            # Q̄*_{B AND S}(s, g, a) = min{Q̄*_B(s, g, a), Q̄*_S(s, g, a)}
-            
-            composed_q_per_goal = []
-            
+            # Find goals that satisfy ALL features (intersection)
+            # For "blue AND sphere", only "blue_sphere" satisfies both
+            valid_goal_indices = []
             for goal_idx, goal in enumerate(self.GOALS):
-                # Check if this goal is in each task's goal set
-                q_values_for_goal = []
-                
-                for task in features:
-                    task_goals = self.TASK_GOALS[task]
-                    if goal in task_goals:
-                        # This goal is "good" for this task - use its Q̄ value
-                        q_values_for_goal.append(q_all_goals[goal_idx])
-                    else:
-                        # This goal is "bad" for this task
-                        # The Q̄ value should already be low due to R̄_MIN training
-                        q_values_for_goal.append(q_all_goals[goal_idx])
-                
-                # min over tasks for this goal
-                if len(q_values_for_goal) > 0:
-                    q_stacked = torch.stack(q_values_for_goal, dim=0)  # (num_tasks, num_actions)
-                    q_min = q_stacked.min(dim=0)[0]  # (num_actions,)
-                    composed_q_per_goal.append(q_min)
+                satisfies_all = all(goal in self.TASK_GOALS[task] for task in features)
+                if satisfies_all:
+                    valid_goal_indices.append(goal_idx)
             
-            # Stack: (num_goals, num_actions)
-            composed_q = torch.stack(composed_q_per_goal, dim=0)
-            
-            # max over goals to get Q(s, a)
-            q_final = composed_q.max(dim=0)[0]  # (num_actions,)
+            if len(valid_goal_indices) == 0:
+                # Fallback: no goal satisfies all features (shouldn't happen with valid tasks)
+                print(f"WARNING: No goal satisfies all features {features}")
+                q_final = q_all_goals.max(dim=0)[0]
+            else:
+                # Get Q-values only for valid goals (those in the intersection)
+                valid_q_values = q_all_goals[valid_goal_indices, :]  # (num_valid_goals, num_actions)
+                
+                # Max over valid goals to get Q(s, a)
+                q_final = valid_q_values.max(dim=0)[0]  # (num_actions,)
             
             return q_final.argmax().item()
     

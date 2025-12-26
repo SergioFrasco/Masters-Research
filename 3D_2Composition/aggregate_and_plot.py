@@ -75,7 +75,7 @@ def aggregate_rewards(all_results):
     Aggregate rewards across seeds for each algorithm.
     
     Returns:
-        dict: {algorithm: {'mean': array, 'std': array, 'training_episodes': int}}
+        dict: {algorithm: {'mean': array, 'std': array, 'training_episodes': int, ...}}
     """
     
     aggregated = {}
@@ -90,21 +90,48 @@ def aggregate_rewards(all_results):
         mean_rewards = rewards_stacked.mean(axis=0)
         std_rewards = rewards_stacked.std(axis=0)
         
-        # Get training episodes count (same across all seeds)
-        training_episodes = list(seed_results.values())[0]['training_episodes']
+        # Get episode counts (same across all seeds)
+        first_result = list(seed_results.values())[0]
+        training_episodes = first_result['training_episodes']
+        
+        # Handle both old format (eval_episodes) and new format (primitive_eval_episodes, comp_eval_episodes)
+        if 'primitive_eval_episodes' in first_result:
+            primitive_eval_episodes = first_result['primitive_eval_episodes']
+            comp_eval_episodes = first_result['comp_eval_episodes']
+        else:
+            # Backward compatibility: old format only had compositional eval
+            primitive_eval_episodes = 0
+            comp_eval_episodes = first_result.get('eval_episodes', len(mean_rewards) - training_episodes)
         
         aggregated[algorithm] = {
             'mean': mean_rewards,
             'std': std_rewards,
             'training_episodes': training_episodes,
+            'primitive_eval_episodes': primitive_eval_episodes,
+            'comp_eval_episodes': comp_eval_episodes,
             'num_seeds': len(seed_results)
         }
         
+        total_eval = primitive_eval_episodes + comp_eval_episodes
+        
         print(f"{algorithm}:")
         print(f"  Seeds: {len(seed_results)}")
-        print(f"  Episodes: {len(mean_rewards)} (training={training_episodes}, eval={len(mean_rewards) - training_episodes})")
+        print(f"  Episodes: {len(mean_rewards)} (training={training_episodes}, prim_eval={primitive_eval_episodes}, comp_eval={comp_eval_episodes})")
         print(f"  Final training reward: {mean_rewards[training_episodes-1]:.3f} ± {std_rewards[training_episodes-1]:.3f}")
-        print(f"  Final eval reward: {mean_rewards[-1]:.3f} ± {std_rewards[-1]:.3f}\n")
+        
+        if primitive_eval_episodes > 0:
+            prim_eval_end = training_episodes + primitive_eval_episodes
+            prim_eval_mean = mean_rewards[training_episodes:prim_eval_end].mean()
+            prim_eval_std = std_rewards[training_episodes:prim_eval_end].mean()
+            print(f"  Primitive eval reward: {prim_eval_mean:.3f} ± {prim_eval_std:.3f}")
+        
+        if comp_eval_episodes > 0:
+            comp_eval_start = training_episodes + primitive_eval_episodes
+            comp_eval_mean = mean_rewards[comp_eval_start:].mean()
+            comp_eval_std = std_rewards[comp_eval_start:].mean()
+            print(f"  Compositional eval reward: {comp_eval_mean:.3f} ± {comp_eval_std:.3f}")
+        
+        print()
     
     return aggregated
 
@@ -116,7 +143,7 @@ def create_comparison_plot(aggregated, metadata, output_path, window=50):
     Shows all algorithms with:
     - Smoothed rewards (window=50)
     - Shaded std error regions
-    - Vertical line at training/eval boundary
+    - Vertical lines at training/primitive_eval/comp_eval boundaries
     - Task labels above graph
     """
     
@@ -124,7 +151,7 @@ def create_comparison_plot(aggregated, metadata, output_path, window=50):
     print(f"CREATING COMPARISON PLOT")
     print(f"{'='*70}\n")
     
-    fig, ax = plt.subplots(figsize=(16, 8))
+    fig, ax = plt.subplots(figsize=(18, 8))
     
     # Algorithm colors and styles
     colors = {
@@ -141,13 +168,16 @@ def create_comparison_plot(aggregated, metadata, output_path, window=50):
         'WVF': '-'
     }
     
-    # Get training episodes (should be same for all)
-    training_episodes = list(aggregated.values())[0]['training_episodes']
-    total_episodes = len(list(aggregated.values())[0]['mean'])
-    eval_episodes = total_episodes - training_episodes
+    # Get episode counts (should be same for all)
+    first_algo = list(aggregated.values())[0]
+    training_episodes = first_algo['training_episodes']
+    primitive_eval_episodes = first_algo['primitive_eval_episodes']
+    comp_eval_episodes = first_algo['comp_eval_episodes']
+    total_episodes = len(first_algo['mean'])
     
     print(f"Training episodes: {training_episodes}")
-    print(f"Eval episodes: {eval_episodes}")
+    print(f"Primitive eval episodes: {primitive_eval_episodes}")
+    print(f"Compositional eval episodes: {comp_eval_episodes}")
     print(f"Total episodes: {total_episodes}")
     print(f"Smoothing window: {window}\n")
     
@@ -190,39 +220,66 @@ def create_comparison_plot(aggregated, metadata, output_path, window=50):
     
     # Add vertical line at training/eval boundary
     ax.axvline(x=training_episodes, color='black', linestyle='--', 
-               linewidth=2, alpha=0.7, label='Start Evaluation')
+               linewidth=2, alpha=0.7, label='Start Primitive Eval')
     
-    # Add task labels above the graph
+    # Add vertical line at primitive/compositional eval boundary (if primitive eval exists)
+    if primitive_eval_episodes > 0:
+        prim_eval_end = training_episodes + primitive_eval_episodes
+        ax.axvline(x=prim_eval_end, color='darkgray', linestyle='--', 
+                   linewidth=2, alpha=0.7, label='Start Compositional Eval')
+    
+    # Task definitions
+    primitive_tasks = ['red', 'blue', 'box', 'sphere']
     compositional_tasks = ['blue_sphere', 'red_sphere', 'blue_box', 'red_box']
-    eval_episodes_per_task = eval_episodes // len(compositional_tasks)
     
     # Create a second x-axis on top for task labels
     ax2 = ax.twiny()
     ax2.set_xlim(ax.get_xlim())
     
-    # Position ticks at the middle of each task's evaluation period
     task_positions = []
-    for i, task in enumerate(compositional_tasks):
-        start_ep = training_episodes + i * eval_episodes_per_task
-        end_ep = training_episodes + (i + 1) * eval_episodes_per_task
-        mid_ep = (start_ep + end_ep) / 2
-        task_positions.append(mid_ep)
+    task_labels = []
+    
+    # Add primitive eval task labels (if exists)
+    if primitive_eval_episodes > 0:
+        prim_eval_per_task = primitive_eval_episodes // len(primitive_tasks)
+        for i, task in enumerate(primitive_tasks):
+            start_ep = training_episodes + i * prim_eval_per_task
+            end_ep = training_episodes + (i + 1) * prim_eval_per_task
+            mid_ep = (start_ep + end_ep) / 2
+            task_positions.append(mid_ep)
+            task_labels.append(f"[P] {task}")
+        
+        # Add vertical lines between primitive tasks
+        for i in range(1, len(primitive_tasks)):
+            boundary = training_episodes + i * prim_eval_per_task
+            ax.axvline(x=boundary, color='gray', linestyle=':', linewidth=1, alpha=0.3)
+    
+    # Add compositional eval task labels
+    if comp_eval_episodes > 0:
+        comp_eval_start = training_episodes + primitive_eval_episodes
+        comp_eval_per_task = comp_eval_episodes // len(compositional_tasks)
+        for i, task in enumerate(compositional_tasks):
+            start_ep = comp_eval_start + i * comp_eval_per_task
+            end_ep = comp_eval_start + (i + 1) * comp_eval_per_task
+            mid_ep = (start_ep + end_ep) / 2
+            task_positions.append(mid_ep)
+            task_labels.append(f"[C] {task}")
+        
+        # Add vertical lines between compositional tasks
+        for i in range(1, len(compositional_tasks)):
+            boundary = comp_eval_start + i * comp_eval_per_task
+            ax.axvline(x=boundary, color='gray', linestyle=':', linewidth=1, alpha=0.3)
     
     ax2.set_xticks(task_positions)
-    ax2.set_xticklabels(compositional_tasks, fontsize=11, fontweight='bold')
-    ax2.set_xlabel('Compositional Task (Evaluation)', fontsize=12, fontweight='bold')
-    
-    # Add vertical lines between tasks (lighter)
-    for i in range(1, len(compositional_tasks)):
-        boundary = training_episodes + i * eval_episodes_per_task
-        ax.axvline(x=boundary, color='gray', linestyle=':', linewidth=1, alpha=0.4)
+    ax2.set_xticklabels(task_labels, fontsize=9, fontweight='bold', rotation=45, ha='left')
+    ax2.set_xlabel('Evaluation Tasks ([P]=Primitive, [C]=Compositional)', fontsize=11, fontweight='bold')
     
     # Main axis labels
     ax.set_xlabel('Episode', fontsize=13, fontweight='bold')
     ax.set_ylabel('Reward (Smoothed)', fontsize=13, fontweight='bold')
     ax.set_title(f'Algorithm Comparison: Compositional RL\n' +
-                 f'Training on Random Primitive Tasks → Zero-Shot Compositional Evaluation\n' +
-                 f'(Smoothing window={window}, {aggregated[list(aggregated.keys())[0]]["num_seeds"]} seeds)',
+                 f'Training → Primitive Eval → Compositional Eval (Zero-Shot)\n' +
+                 f'(Smoothing window={window}, {first_algo["num_seeds"]} seeds)',
                  fontsize=14, fontweight='bold', pad=20)
     
     # Set y-limits
@@ -230,7 +287,7 @@ def create_comparison_plot(aggregated, metadata, output_path, window=50):
     ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1, alpha=0.3)
     
     # Legend
-    ax.legend(loc='lower right', fontsize=12, framealpha=0.9)
+    ax.legend(loc='lower right', fontsize=11, framealpha=0.9)
     
     # Grid
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
@@ -262,6 +319,8 @@ def create_summary_statistics(aggregated, output_path):
             std_rewards = data['std']
             num_seeds = data['num_seeds']
             training_episodes = data['training_episodes']
+            primitive_eval_episodes = data['primitive_eval_episodes']
+            comp_eval_episodes = data['comp_eval_episodes']
             
             # Training statistics
             train_mean = mean_rewards[:training_episodes].mean()
@@ -269,29 +328,111 @@ def create_summary_statistics(aggregated, output_path):
             train_final = mean_rewards[training_episodes - 1]
             train_final_std = std_rewards[training_episodes - 1]
             
-            # Eval statistics
-            eval_mean = mean_rewards[training_episodes:].mean()
-            eval_std = std_rewards[training_episodes:].mean()
-            eval_final = mean_rewards[-1]
-            eval_final_std = std_rewards[-1]
-            
             f.write(f"{algorithm}:\n")
             f.write(f"  Number of seeds: {num_seeds}\n")
             f.write(f"  Training episodes: {training_episodes}\n")
-            f.write(f"  Eval episodes: {len(mean_rewards) - training_episodes}\n")
+            f.write(f"  Primitive eval episodes: {primitive_eval_episodes}\n")
+            f.write(f"  Compositional eval episodes: {comp_eval_episodes}\n")
             f.write(f"\n")
             f.write(f"  Training phase:\n")
             f.write(f"    Average reward: {train_mean:.4f} ± {train_std:.4f}\n")
             f.write(f"    Final episode: {train_final:.4f} ± {train_final_std:.4f}\n")
             f.write(f"\n")
-            f.write(f"  Evaluation phase (compositional):\n")
-            f.write(f"    Average reward: {eval_mean:.4f} ± {eval_std:.4f}\n")
-            f.write(f"    Final episode: {eval_final:.4f} ± {eval_final_std:.4f}\n")
-            f.write(f"\n")
-            f.write(f"  Generalization gap: {train_final - eval_mean:.4f}\n")
-            f.write(f"\n" + "-"*80 + "\n\n")
+            
+            # Primitive eval statistics
+            if primitive_eval_episodes > 0:
+                prim_start = training_episodes
+                prim_end = training_episodes + primitive_eval_episodes
+                prim_mean = mean_rewards[prim_start:prim_end].mean()
+                prim_std = std_rewards[prim_start:prim_end].mean()
+                
+                f.write(f"  Primitive evaluation phase:\n")
+                f.write(f"    Average reward: {prim_mean:.4f} ± {prim_std:.4f}\n")
+                f.write(f"    Train→Prim gap: {train_final - prim_mean:.4f}\n")
+                f.write(f"\n")
+                
+                # Per-task primitive breakdown
+                primitive_tasks = ['red', 'blue', 'box', 'sphere']
+                prim_per_task = primitive_eval_episodes // len(primitive_tasks)
+                f.write(f"    Per-task breakdown:\n")
+                for i, task in enumerate(primitive_tasks):
+                    task_start = prim_start + i * prim_per_task
+                    task_end = prim_start + (i + 1) * prim_per_task
+                    task_mean = mean_rewards[task_start:task_end].mean()
+                    task_std = std_rewards[task_start:task_end].mean()
+                    f.write(f"      {task}: {task_mean:.4f} ± {task_std:.4f}\n")
+                f.write(f"\n")
+            
+            # Compositional eval statistics
+            if comp_eval_episodes > 0:
+                comp_start = training_episodes + primitive_eval_episodes
+                comp_mean = mean_rewards[comp_start:].mean()
+                comp_std = std_rewards[comp_start:].mean()
+                comp_final = mean_rewards[-1]
+                comp_final_std = std_rewards[-1]
+                
+                f.write(f"  Compositional evaluation phase (zero-shot):\n")
+                f.write(f"    Average reward: {comp_mean:.4f} ± {comp_std:.4f}\n")
+                f.write(f"    Final episode: {comp_final:.4f} ± {comp_final_std:.4f}\n")
+                
+                if primitive_eval_episodes > 0:
+                    f.write(f"    Prim→Comp gap: {prim_mean - comp_mean:.4f}\n")
+                f.write(f"    Train→Comp gap: {train_final - comp_mean:.4f}\n")
+                f.write(f"\n")
+                
+                # Per-task compositional breakdown
+                compositional_tasks = ['blue_sphere', 'red_sphere', 'blue_box', 'red_box']
+                comp_per_task = comp_eval_episodes // len(compositional_tasks)
+                f.write(f"    Per-task breakdown:\n")
+                for i, task in enumerate(compositional_tasks):
+                    task_start = comp_start + i * comp_per_task
+                    task_end = comp_start + (i + 1) * comp_per_task
+                    task_mean = mean_rewards[task_start:task_end].mean()
+                    task_std = std_rewards[task_start:task_end].mean()
+                    f.write(f"      {task}: {task_mean:.4f} ± {task_std:.4f}\n")
+                f.write(f"\n")
+            
+            f.write("-"*80 + "\n\n")
         
+        # Summary comparison table
         f.write("="*80 + "\n")
+        f.write("COMPARISON TABLE\n")
+        f.write("="*80 + "\n\n")
+        f.write(f"{'Algorithm':<10} {'Train':>12} {'Prim Eval':>12} {'Comp Eval':>12} {'Prim Gap':>12} {'Comp Gap':>12}\n")
+        f.write("-"*70 + "\n")
+        
+        for algorithm in ['SR', 'DQN', 'LSTM', 'WVF']:
+            if algorithm not in aggregated:
+                continue
+            
+            data = aggregated[algorithm]
+            mean_rewards = data['mean']
+            training_episodes = data['training_episodes']
+            primitive_eval_episodes = data['primitive_eval_episodes']
+            comp_eval_episodes = data['comp_eval_episodes']
+            
+            train_final = mean_rewards[training_episodes - 1]
+            
+            if primitive_eval_episodes > 0:
+                prim_start = training_episodes
+                prim_end = training_episodes + primitive_eval_episodes
+                prim_mean = mean_rewards[prim_start:prim_end].mean()
+                prim_gap = train_final - prim_mean
+            else:
+                prim_mean = float('nan')
+                prim_gap = float('nan')
+            
+            if comp_eval_episodes > 0:
+                comp_start = training_episodes + primitive_eval_episodes
+                comp_mean = mean_rewards[comp_start:].mean()
+                comp_gap = train_final - comp_mean
+            else:
+                comp_mean = float('nan')
+                comp_gap = float('nan')
+            
+            f.write(f"{algorithm:<10} {train_final:>12.4f} {prim_mean:>12.4f} {comp_mean:>12.4f} {prim_gap:>12.4f} {comp_gap:>12.4f}\n")
+        
+        f.write("\n" + "="*80 + "\n")
     
     print(f"✓ Summary statistics saved to: {output_path}")
 

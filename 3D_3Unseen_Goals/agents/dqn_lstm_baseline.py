@@ -1,11 +1,11 @@
 """
-Unified LSTM-DQN Agent with Goal Tiling for Task Conditioning
+Unified LSTM-DQN Agent with Extended Task Conditioning
 
 Key Changes from Original:
-1. Task information encoded as additional channels (goal tiling)
-2. Single model trains on all 4 primitive tasks
-3. Uniform task sampling per episode to prevent catastrophic forgetting
-4. Task-aware replay buffer with balanced sampling
+1. Task space now includes green: [red, blue, green, box, sphere]
+2. Input shape: (k*3 + 5, H, W) - stacked RGB frames + 5 task channels
+3. Green never appears during training, only evaluation
+4. Compositional task encoding for zero-shot generalization testing
 """
 
 import numpy as np
@@ -20,7 +20,7 @@ import random
 class FrameStack:
     """
     Stack the last k frames to give the agent short-term memory.
-    Now also handles task channel appending.
+    Now also handles task channel appending with 5-dim task space.
     """
     
     def __init__(self, k=4):
@@ -59,17 +59,19 @@ class FrameStack:
 
 class UnifiedHybridLSTM_DQN3D(nn.Module):
     """
-    Unified Hybrid architecture with Goal Tiling
+    Unified Hybrid architecture with Extended Goal Tiling (5-dim task space)
     
     Flow:
-    1. Stacked frames + task channels (12+4, 60, 80) → CNN → features
+    1. Stacked frames + task channels (12+5, 60, 80) → CNN → features
     2. Features → LSTM (128 hidden) → temporal embedding
     3. Temporal embedding → FC layers → Q-values
     
-    The task is encoded as 4 additional binary channels (one-hot).
+    The task is encoded as 5 additional binary channels (one-hot).
+    Task space: [red, blue, green, box, sphere]
+    NOTE: Green is reserved for zero-shot evaluation only!
     """
     
-    def __init__(self, input_shape=(16, 60, 80), action_size=3, 
+    def __init__(self, input_shape=(17, 60, 80), action_size=3, 
                  hidden_size=256, lstm_size=128):
         super(UnifiedHybridLSTM_DQN3D, self).__init__()
         
@@ -78,7 +80,7 @@ class UnifiedHybridLSTM_DQN3D(nn.Module):
         self.lstm_size = lstm_size
         
         # CNN processes stacked frames + task channels
-        # Input: (16, 60, 80) if k=4 stacking + 4 task channels
+        # Input: (17, 60, 80) if k=4 stacking + 5 task channels
         self.conv = nn.Sequential(
             nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4, padding=0),
             nn.ReLU(),
@@ -180,10 +182,11 @@ class UnifiedHybridLSTM_DQN3D(nn.Module):
 
 class DuelingUnifiedHybridLSTM_DQN3D(nn.Module):
     """
-    Dueling version of the Unified Hybrid LSTM-DQN with goal tiling.
+    Dueling version of the Unified Hybrid LSTM-DQN with extended goal tiling.
+    Task space: [red, blue, green, box, sphere] (5 dimensions)
     """
     
-    def __init__(self, input_shape=(16, 60, 80), action_size=3, 
+    def __init__(self, input_shape=(17, 60, 80), action_size=3, 
                  hidden_size=256, lstm_size=128):
         super(DuelingUnifiedHybridLSTM_DQN3D, self).__init__()
         
@@ -290,6 +293,8 @@ class TaskAwareEpisodeReplayBuffer:
     1. Track task distribution in the buffer
     2. Sample balanced batches across tasks
     3. Monitor per-task replay frequency
+    
+    NOTE: Only tracks training tasks (red, blue, box, sphere) - NOT green!
     """
     
     def __init__(self, capacity=5000):
@@ -298,7 +303,7 @@ class TaskAwareEpisodeReplayBuffer:
         self.current_episode = []
         self.current_task = None
         
-        # Track task distribution
+        # Track task distribution (training tasks only)
         self.task_counts = {'red': 0, 'blue': 0, 'box': 0, 'sphere': 0}
     
     def start_episode(self, task_name):
@@ -320,7 +325,8 @@ class TaskAwareEpisodeReplayBuffer:
                 'task': self.current_task,
                 'transitions': self.current_episode
             })
-            self.task_counts[self.current_task] += 1
+            if self.current_task in self.task_counts:
+                self.task_counts[self.current_task] += 1
             self.current_episode = []
             self.current_task = None
     
@@ -336,7 +342,9 @@ class TaskAwareEpisodeReplayBuffer:
         # Group episodes by task
         task_episodes = {'red': [], 'blue': [], 'box': [], 'sphere': []}
         for ep_data in self.episodes:
-            task_episodes[ep_data['task']].append(ep_data['transitions'])
+            task = ep_data['task']
+            if task in task_episodes:
+                task_episodes[task].append(ep_data['transitions'])
         
         # Calculate samples per task (roughly equal)
         sequences_per_task = batch_size // 4
@@ -395,22 +403,32 @@ class TaskAwareEpisodeReplayBuffer:
 
 class UnifiedLSTMDQNAgent3D:
     """
-    Unified LSTM-DQN Agent that handles all 4 primitive tasks.
+    Unified LSTM-DQN Agent with Extended Task Conditioning.
     
     Key features:
-    1. Goal tiling: Task encoded as 4 additional channels
-    2. Single model trained on all tasks with uniform sampling
-    3. Task-aware replay buffer with balanced sampling
-    4. Per-task performance tracking
+    1. Goal tiling with 5-dim task space: [red, blue, green, box, sphere]
+    2. Green is NEVER used during training - reserved for zero-shot evaluation
+    3. Compositional task encoding for testing generalization
+    4. Single model trained on all tasks with uniform sampling
+    5. Task-aware replay buffer with balanced sampling
+    6. Per-task performance tracking
+    
+    IMPORTANT: This allows fair comparison with UnifiedDQNAgent for:
+    - Compositional generalization (combining learned primitives)
+    - Zero-shot generalization (unseen green objects)
     """
     
-    # Task encoding: one-hot over [red, blue, box, sphere]
-    TASK_ENCODING = {
-        'red': 0,
-        'blue': 1,
-        'box': 2,
-        'sphere': 3
+    # Task encoding: one-hot vectors for [red, blue, green, box, sphere]
+    # NOTE: Green (index 2) is NEVER used during training!
+    TASK_ENCODINGS = {
+        'red': [1.0, 0.0, 0.0, 0.0, 0.0],
+        'blue': [0.0, 1.0, 0.0, 0.0, 0.0],
+        'green': [0.0, 0.0, 1.0, 0.0, 0.0],  # NEVER used in training!
+        'box': [0.0, 0.0, 0.0, 1.0, 0.0],
+        'sphere': [0.0, 0.0, 0.0, 0.0, 1.0],
     }
+    
+    NUM_TASKS = 5  # Extended to include green
     
     def __init__(self, env, k_frames=4, learning_rate=0.0001, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.999,
@@ -422,7 +440,7 @@ class UnifiedLSTMDQNAgent3D:
         self.action_dim = 3
         self.k_frames = k_frames
         self.seq_len = seq_len
-        self.num_tasks = 4
+        self.num_tasks = self.NUM_TASKS
         
         # Hyperparameters
         self.gamma = gamma
@@ -442,7 +460,8 @@ class UnifiedLSTMDQNAgent3D:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Unified LSTM-DQN Agent using device: {self.device}")
         print(f"Frame stacking: k={k_frames}, LSTM size: {lstm_size}")
-        print(f"Task encoding: Goal tiling with {self.num_tasks} additional channels")
+        print(f"Task space: [red, blue, green, box, sphere] (5 dimensions)")
+        print(f"NOTE: Green reserved for zero-shot evaluation only!")
         
         # Get observation shape
         sample_obs = env.reset()[0]
@@ -458,7 +477,7 @@ class UnifiedLSTMDQNAgent3D:
             self.single_frame_shape = (3, sample_img.shape[0], sample_img.shape[1])
         
         # Stacked observation shape WITH task channels
-        # k frames * 3 channels + 4 task channels
+        # k frames * 3 channels + 5 task channels
         self.obs_shape = (
             k_frames * 3 + self.num_tasks,
             self.single_frame_shape[1],
@@ -508,33 +527,92 @@ class UnifiedLSTMDQNAgent3D:
         self.update_counter = 0
         self.training_steps = 0
         
-        # Per-task performance tracking
-        self.task_success_rates = {t: deque(maxlen=100) for t in self.TASK_ENCODING}
+        # Per-task performance tracking (training tasks only)
+        self.task_success_rates = {t: deque(maxlen=100) for t in ['red', 'blue', 'box', 'sphere']}
         
         # Calculate total parameters
         total_params = sum(p.numel() for p in self.q_network.parameters())
         print(f"Total network parameters: {total_params:,}")
     
-    def create_task_channels(self, task_name):
+    def encode_task(self, task_name):
+        """Convert task name to one-hot encoding."""
+        if task_name not in self.TASK_ENCODINGS:
+            raise ValueError(f"Unknown task: {task_name}. Must be one of {list(self.TASK_ENCODINGS.keys())}")
+        return self.TASK_ENCODINGS[task_name]
+    
+    def encode_compositional_task(self, features, method='superposition'):
         """
-        Create task encoding channels (one-hot) to append to frames.
+        Encode compositional task with multiple features.
+        
+        This is the KEY to zero-shot generalization:
+        - Trained on: ['red', 'box'], ['blue', 'sphere'], etc.
+        - Can compose: ['green', 'box'] without ever seeing it!
+        
+        Args:
+            features: list of feature names (e.g., ['green', 'box'])
+            method: 'superposition' (average) or 'max'
+        
+        Returns:
+            encoding: list of floats (5-dim)
+        """
+        encoding = np.zeros(self.num_tasks, dtype=np.float32)
+        
+        for feature in features:
+            if feature not in self.TASK_ENCODINGS:
+                raise ValueError(f"Unknown feature: {feature}")
+            feature_encoding = np.array(self.TASK_ENCODINGS[feature], dtype=np.float32)
+            
+            if method == 'superposition':
+                encoding += feature_encoding
+            elif method == 'max':
+                encoding = np.maximum(encoding, feature_encoding)
+            else:
+                raise ValueError(f"Unknown method: {method}")
+        
+        if method == 'superposition' and len(features) > 1:
+            encoding = encoding / len(features)
+        
+        return encoding.tolist()
+    
+    def create_task_channels(self, task_identifier):
+        """
+        Create task encoding channels to append to frames.
+        
+        Args:
+            task_identifier: str (like 'red') OR list of features (['green', 'box'])
         
         Returns: (num_tasks, H, W) array of task channels
         """
         H, W = self.single_frame_shape[1], self.single_frame_shape[2]
-        task_channels = np.zeros((self.num_tasks, H, W), dtype=np.float32)
         
-        if task_name in self.TASK_ENCODING:
-            task_idx = self.TASK_ENCODING[task_name]
-            task_channels[task_idx, :, :] = 1.0
+        # Get encoding based on task type
+        if isinstance(task_identifier, list):
+            # Compositional task
+            encoding = self.encode_compositional_task(task_identifier, method='superposition')
+        else:
+            # Simple task
+            encoding = self.encode_task(task_identifier)
+        
+        # Tile encoding across spatial dimensions
+        task_channels = np.zeros((self.num_tasks, H, W), dtype=np.float32)
+        for i, val in enumerate(encoding):
+            task_channels[i, :, :] = val
         
         return task_channels
     
-    def set_task(self, task_name):
-        """Set the current task for the episode"""
-        self.current_task = task_name
-        self.current_task_channels = self.create_task_channels(task_name)
-        self.memory.start_episode(task_name)
+    def set_task(self, task_identifier):
+        """
+        Set the current task for the episode.
+        
+        Args:
+            task_identifier: str (like 'red') OR list of features (['green', 'box'])
+        """
+        self.current_task = task_identifier
+        self.current_task_channels = self.create_task_channels(task_identifier)
+        
+        # Only start episode in replay buffer for training tasks
+        if isinstance(task_identifier, str) and task_identifier in ['red', 'blue', 'box', 'sphere']:
+            self.memory.start_episode(task_identifier)
     
     def soft_update_target_network(self):
         """Soft update target network using Polyak averaging"""
@@ -572,15 +650,19 @@ class UnifiedLSTMDQNAgent3D:
         
         return img
     
-    def reset_episode(self, obs, task_name):
+    def reset_episode(self, obs, task_identifier):
         """
         Reset for a new episode with specified task.
+        
+        Args:
+            obs: initial observation
+            task_identifier: str (like 'red') OR list of features (['green', 'box'])
         
         Returns:
             stacked_obs: Frame-stacked observation with task channels
         """
         # Set task
-        self.set_task(task_name)
+        self.set_task(task_identifier)
         
         # Preprocess and stack frames
         frame = self.preprocess_frame(obs)
@@ -763,7 +845,7 @@ class UnifiedLSTMDQNAgent3D:
         self.epsilon = self.epsilon_start
     
     def update_task_success(self, task_name, success):
-        """Track per-task success rates"""
+        """Track per-task success rates (training tasks only)"""
         if task_name in self.task_success_rates:
             self.task_success_rates[task_name].append(1 if success else 0)
     
@@ -800,3 +882,10 @@ class UnifiedLSTMDQNAgent3D:
         self.epsilon = checkpoint['epsilon']
         self.training_steps = checkpoint.get('training_steps', 0)
         print(f"Model loaded from {filepath}")
+    
+    def get_q_values(self, stacked_obs):
+        """Get Q-values for debugging."""
+        state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            q_values, _ = self.q_network(state, self.current_hidden)
+            return q_values.squeeze().cpu().numpy()
