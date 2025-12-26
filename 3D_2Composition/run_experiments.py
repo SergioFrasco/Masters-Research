@@ -23,6 +23,9 @@ import time
 import numpy as np
 import torch
 
+# Delay between job submissions (seconds) to avoid race conditions
+SUBMISSION_DELAY = 5
+
 # ============================================================================
 # EXPERIMENT CONFIGURATION
 # ============================================================================
@@ -35,7 +38,7 @@ ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
 
 # Retry configuration
 MAX_RETRIES = 5  # Maximum number of times to retry a failed job
-RETRY_DELAY = 10  # Seconds to wait before resubmitting
+RETRY_DELAY = 30  # Seconds to wait before resubmitting
 
 # Training configuration
 TRAINING_CONFIG = {
@@ -314,6 +317,9 @@ class JobManager:
                 job = self.submit_job(algorithm, seed, config, output_dir)
                 pending_jobs[job.job_id] = (job, algorithm, seed)
                 print(f"  ✓ Submitted: {algorithm} (seed={seed}) - Job ID: {job.job_id}")
+                
+                # Stagger submissions to avoid race conditions during initialization
+                time.sleep(SUBMISSION_DELAY)
         
         print(f"\nMonitoring {len(pending_jobs)} jobs...")
         print("(Ctrl+C to exit - but jobs will continue running)\n")
@@ -409,6 +415,7 @@ def main():
     print(f"Seeds: {list(range(NUM_SEEDS))}")
     print(f"Total jobs: {len(ALGORITHMS) * NUM_SEEDS}")
     print(f"Max retries per job: {MAX_RETRIES}")
+    print(f"Submission delay: {SUBMISSION_DELAY} seconds between jobs")
     print(f"Output directory: {EXPERIMENT_DIR}")
     print(f"{'='*80}\n")
     
