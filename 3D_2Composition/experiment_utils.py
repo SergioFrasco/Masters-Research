@@ -6,17 +6,17 @@ All algorithms trained uniformly (random primitive tasks) and evaluated on compo
 """
 
 import os
+if "DISPLAY" in os.environ:
+    del os.environ["DISPLAY"]
+os.environ["PYGLET_HEADLESS"] = "True"
 
 # Set environment variables for headless mode
 os.environ["MINIWORLD_HEADLESS"] = "1"
-os.environ["PYGLET_HEADLESS"] = "True"
 os.environ["PYOPENGL_PLATFORM"] = "osmesa"
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["MUJOCO_GL"] = "osmesa"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-if "DISPLAY" in os.environ:
-    del os.environ["DISPLAY"]
 
 import numpy as np
 import torch
@@ -37,6 +37,93 @@ from torchvision import transforms
 from PIL import Image
 
 
+
+"""
+Experiment Utilities Wrapper
+
+This module ensures environment variables are set BEFORE any graphics libraries are imported.
+This is critical for running on headless cluster nodes.
+
+Usage:
+    Instead of: from experiment_utils import ...
+    Use: from experiment_utils_safe import ...
+"""
+
+import os
+import sys
+
+# ============================================================================
+# SET ENVIRONMENT VARIABLES FIRST - BEFORE ANY OTHER IMPORTS
+# ============================================================================
+
+def _setup_headless_environment():
+    """
+    Configure environment for headless rendering.
+    
+    This must be called before importing any graphics-related libraries
+    like pyglet, OpenGL, miniworld, etc.
+    """
+    # Remove DISPLAY first to prevent X11 attempts
+    if "DISPLAY" in os.environ:
+        del os.environ["DISPLAY"]
+    
+    # Set headless flags
+    os.environ["MINIWORLD_HEADLESS"] = "1"
+    os.environ["PYGLET_HEADLESS"] = "True"
+    
+    # Try multiple rendering backends
+    # osmesa is software rendering, egl is hardware-accelerated headless
+    os.environ["PYOPENGL_PLATFORM"] = "osmesa"  # Primary choice
+    
+    # Fallback options
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+    os.environ["MUJOCO_GL"] = "osmesa"
+    
+    # Limit threads to avoid conflicts
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    
+    # Try to configure pyglet before it initializes
+    try:
+        # This forces pyglet to use headless mode
+        import pyglet
+        pyglet.options['headless'] = True
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+# Run setup immediately when this module is imported
+_setup_headless_environment()
+
+# ============================================================================
+# NOW IMPORT THE ACTUAL UTILITIES
+# ============================================================================
+
+# Only after environment is configured, import the rest
+from experiment_utils import (
+    PRIMITIVE_TASKS,
+    COMPOSITIONAL_TASKS,
+    check_task_satisfaction,
+    load_cube_detector,
+    detect_cube,
+    train_sr_agent,
+    train_unified_dqn,
+    train_unified_lstm_dqn,
+    train_unified_wvf,
+)
+
+__all__ = [
+    'PRIMITIVE_TASKS',
+    'COMPOSITIONAL_TASKS', 
+    'check_task_satisfaction',
+    'load_cube_detector',
+    'detect_cube',
+    'train_sr_agent',
+    'train_unified_dqn',
+    'train_unified_lstm_dqn',
+    'train_unified_wvf',
+]
 # ============================================================================
 # TASK DEFINITIONS (shared across all algorithms)
 # ============================================================================
