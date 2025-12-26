@@ -6,6 +6,12 @@ Key modifications:
 2. Evaluation on UNSEEN green objects using compositional encoding
 3. Tests true zero-shot compositional generalization
 4. TIMELINE PLOTTING with clear phase demarcation
+
+FIXES:
+- Proper environment mode switching between training/eval phases
+- Environment reset every episode during evaluation
+- Correct task encoding (simple vs compositional)
+- Green objects only appear during unseen evaluation phase
 """
 
 import os
@@ -137,6 +143,9 @@ def train_unified_dqn(env, episodes=8000, max_steps=200,
     print(f"  EXCLUDED: All green objects")
     print(f"  Epsilon: {epsilon_start} -> {epsilon_end} (decay={epsilon_decay})")
     print(f"{'='*60}")
+    
+    # Ensure environment is in training mode
+    env.set_training_mode(True)
     
     # Create unified agent
     agent = UnifiedDQNAgent(
@@ -271,7 +280,7 @@ def train_unified_dqn(env, episodes=8000, max_steps=200,
         "task_counts": dict(task_counts),
         "final_epsilon": agent.epsilon,
         "final_success_rate": final_success,
-        "per_task_final_success": per_task_final_success,  # Added for plotting
+        "per_task_final_success": per_task_final_success,
         "model_path": model_path
     }
 
@@ -284,25 +293,33 @@ def evaluate_agent_on_task(env, agent, task, episodes=100, max_steps=200):
     """
     Evaluate agent on a single task.
     Returns both summary stats AND per-episode rewards for timeline plotting.
+    
+    FIXED: 
+    - Reset environment every episode
+    - Use simple encoding for simple tasks, compositional for compositional tasks
     """
     
     task_name = task['name']
     features = task.get('features', [task_name])
+    task_type = task.get('type', 'simple')
     
     env.set_task(task)
     
     successes = []
     lengths = []
-    episode_rewards = []  # NEW: Track each episode for timeline plot
+    episode_rewards = []
     
-    for _ in range(episodes):
+    for ep in range(episodes):
+        # RESET EVERY EPISODE (just like training)
         obs, info = env.reset()
         
         for step in range(max_steps):
-            # Use compositional encoding if multiple features
+            # Use correct encoding based on task type
             if len(features) > 1:
+                # Compositional task - use compositional encoding
                 action = agent.select_action(obs, features, epsilon=0.0)
             else:
+                # Simple task - use simple encoding (task name)
                 action = agent.select_action(obs, task_name, epsilon=0.0)
             
             obs, _, terminated, truncated, info = env.step(action)
@@ -310,25 +327,25 @@ def evaluate_agent_on_task(env, agent, task, episodes=100, max_steps=200):
             if check_task_satisfaction(info, task):
                 successes.append(1)
                 lengths.append(step + 1)
-                episode_rewards.append(1.0)  # Success
+                episode_rewards.append(1.0)
                 break
             
             if terminated or truncated:
                 successes.append(0)
                 lengths.append(step + 1)
-                episode_rewards.append(0.0)  # Failure
+                episode_rewards.append(0.0)
                 break
         else:
             successes.append(0)
             lengths.append(max_steps)
-            episode_rewards.append(0.0)  # Timeout
+            episode_rewards.append(0.0)
     
     return {
         "success_rate": np.mean(successes),
         "mean_length": np.mean(lengths),
         "std_length": np.std(lengths),
         "features": features,
-        "episode_rewards": episode_rewards  # NEW: For timeline plotting
+        "episode_rewards": episode_rewards
     }
 
 
@@ -360,7 +377,8 @@ def run_experiment_with_unseen_goals(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     
-    env = DiscreteMiniWorldWrapper(size=env_size, render_mode="rgb_array")
+    # Create environment in TRAINING mode (red/blue only)
+    env = DiscreteMiniWorldWrapper(size=env_size, render_mode="rgb_array", training_mode=True)
     
     # ===== PHASE 1: TRAINING (NO GREEN) =====
     print("\n" + "="*60)
@@ -379,10 +397,15 @@ def run_experiment_with_unseen_goals(
         verbose=True
     )
     
-    # ===== PHASE 2: EVALUATE ON SEEN TASKS =====
+    # ===== PHASE 2: EVALUATE ON SEEN TASKS (STILL RED/BLUE ONLY) =====
     print("\n" + "="*60)
     print("PHASE 2: EVALUATING ON SEEN TASKS (RED/BLUE)")
     print("="*60)
+    print("Environment: Training mode (red/blue only) - same as training")
+    print("="*60)
+    
+    # Keep training mode for seen tasks (no green objects)
+    env.set_training_mode(True)
     
     seen_simple_results = {}
     for task in TRAINING_TASKS:
@@ -407,6 +430,13 @@ def run_experiment_with_unseen_goals(
     print("="*60)
     print("NOTE: Model has NEVER seen green objects during training!")
     print("Testing if learned representations generalize to novel color")
+    print("="*60)
+    
+    # NOW switch to evaluation mode (spawn green objects)
+    print("Switching environment to EVALUATION mode (spawning green objects)...")
+    env.set_training_mode(False)
+    obs, info = env.reset()  # Reset to regenerate world with green objects
+    print(f"Objects now in environment: {[k for k in info.keys() if 'distance_to' in k]}")
     print("="*60)
     
     unseen_simple_results = {}
@@ -507,8 +537,8 @@ def run_experiment_with_unseen_goals(
 if __name__ == "__main__":
     results, agent = run_experiment_with_unseen_goals(
         env_size=10,
-        total_episodes=3000,
-        eval_episodes=400,
+        total_episodes=3500,
+        eval_episodes=300,
         max_steps=200,
         learning_rate=0.0001,
         gamma=0.99,
