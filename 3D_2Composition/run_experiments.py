@@ -55,7 +55,7 @@ NUM_SEEDS = 3
 
 # Algorithms to compare
 # ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
-ALGORITHMS = ["WVF"]
+ALGORITHMS = ["SR","WVF"]
 
 # Training configuration
 TRAINING_CONFIG = {

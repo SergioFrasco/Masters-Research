@@ -10,7 +10,7 @@ import os
 # Set environment variables for headless mode
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
-os.environ["PYOPENGL_PLATFORM"] = "osmesa"  # Removed duplicate
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["MUJOCO_GL"] = "osmesa"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -161,11 +161,7 @@ def detect_cube(model, obs, device, transform, pos_mean=0.0, pos_std=1.0):
 
 def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
                    sr_freeze_episode, output_dir):
-    """
-    Train Successor Representation agent.
-    
-    CRITICAL: Freeze SR matrix at sr_freeze_episode (3000), continue training with frozen SR.
-    """
+    """Train Successor Representation agent."""
     
     print(f"\n{'='*70}")
     print(f"TRAINING SR AGENT (Seed={seed})")
@@ -175,16 +171,13 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
     print(f"Eval episodes per task: {eval_episodes_per_task}")
     print(f"{'='*70}\n")
     
-    # Set seeds
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
     
-    # Create environment and agent
     env = DiscreteMiniWorldWrapper(size=env_size, render_mode="rgb_array")
     agent = SuccessorAgent(env)
     
-    # Load cube detector
     cube_model, device, pos_mean, pos_std = load_cube_detector(force_cpu=False)
     transform = transforms.Compose([
         transforms.Resize((128, 128)),
@@ -192,9 +185,8 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    # Tracking
-    all_rewards = []  # All episodes (training + eval)
-    episode_labels = []  # Which task each episode
+    all_rewards = []
+    episode_labels = []
     
     epsilon = 1.0
     epsilon_end = 0.05
@@ -203,11 +195,9 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
     sr_frozen = False
     frozen_sr_matrix = None
     
-    # ===== TRAINING PHASE =====
     print("Starting training phase...")
     
     for episode in tqdm(range(training_episodes), desc="Training SR"):
-        # Randomly sample primitive task
         current_task = random.choice(PRIMITIVE_TASKS)
         env.set_task(current_task)
         
@@ -220,30 +210,24 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
         episode_reward = 0
         
         for step in range(max_steps):
-            # Detection
             detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
             detected_objects = detection_result['detected_objects']
             positions = detection_result['positions']
             
-            # Update feature map
             agent.update_feature_map(detected_objects, positions)
             agent.compose_reward_map(current_task)
             agent.compute_wvf()
             
-            # Step environment
             obs, env_reward, terminated, truncated, info = env.step(current_action)
             
-            # Check task satisfaction
             task_satisfied = check_task_satisfaction(info, current_task)
             if task_satisfied:
                 episode_reward += env_reward
             
-            # Get next state
             next_state = agent.get_state_index()
             next_action = agent.sample_action_with_wvf(obs, epsilon=epsilon)
             done = terminated or truncated
             
-            # Update SR ONLY if not frozen
             if not sr_frozen:
                 agent.update_sr(current_state, current_action, next_state, next_action, done)
             
@@ -253,61 +237,45 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
             if done:
                 break
         
-        # FREEZE SR at specified episode
-        if episode == sr_freeze_episode - 1:  # -1 because 0-indexed
+        if episode == sr_freeze_episode - 1:
             print(f"\n⚠️  FREEZING SR MATRIX at episode {episode + 1}")
             frozen_sr_matrix = agent.M.copy()
             sr_frozen = True
-            
-            # Save frozen SR
             sr_save_path = output_dir / "frozen_sr_matrix.npy"
             np.save(sr_save_path, frozen_sr_matrix)
             print(f"✓ Frozen SR saved to: {sr_save_path}\n")
         
         all_rewards.append(episode_reward)
         episode_labels.append(current_task['name'])
-        
         epsilon = max(epsilon_end, epsilon * epsilon_decay)
     
-    # Load frozen SR for evaluation
     if frozen_sr_matrix is not None:
         agent.M = frozen_sr_matrix.copy()
     
-    # ===== PRIMITIVE EVALUATION PHASE =====
-    print(f"\nStarting PRIMITIVE evaluation phase (using frozen SR from episode {sr_freeze_episode})...")
-    
+    # PRIMITIVE EVALUATION
+    print(f"\nStarting PRIMITIVE evaluation phase...")
     primitive_eval_labels = []
     
     for prim_task in PRIMITIVE_TASKS:
         env.set_task(prim_task)
         task_name = prim_task['name']
-        
         print(f"Evaluating primitive task: {task_name}...")
         
         for ep in range(eval_episodes_per_task):
             obs, info = env.reset()
             agent.reset()
-            
             episode_reward = 0
             
             for step in range(max_steps):
-                # Detection
                 detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
-                detected_objects = detection_result['detected_objects']
-                positions = detection_result['positions']
-                
-                # Update feature map and compose
-                agent.update_feature_map(detected_objects, positions)
+                agent.update_feature_map(detection_result['detected_objects'], detection_result['positions'])
                 agent.compose_reward_map(prim_task)
                 agent.compute_wvf()
                 
-                # Select action
-                action = agent.sample_action_with_wvf(obs, epsilon=0.0)  # Greedy
-                
+                action = agent.sample_action_with_wvf(obs, epsilon=0.0)
                 obs, env_reward, terminated, truncated, info = env.step(action)
                 
-                task_satisfied = check_task_satisfaction(info, prim_task)
-                if task_satisfied:
+                if check_task_satisfaction(info, prim_task):
                     episode_reward += env_reward
                 
                 if terminated or truncated:
@@ -316,41 +284,30 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
             all_rewards.append(episode_reward)
             primitive_eval_labels.append(f"eval_primitive_{task_name}")
     
-    # ===== COMPOSITIONAL EVALUATION PHASE =====
+    # COMPOSITIONAL EVALUATION
     print(f"\nStarting COMPOSITIONAL evaluation phase...")
-    
     comp_eval_labels = []
     
     for comp_task in COMPOSITIONAL_TASKS:
         env.set_task(comp_task)
         task_name = comp_task['name']
-        
         print(f"Evaluating compositional task: {task_name}...")
         
         for ep in range(eval_episodes_per_task):
             obs, info = env.reset()
             agent.reset()
-            
             episode_reward = 0
             
             for step in range(max_steps):
-                # Detection
                 detection_result = detect_cube(cube_model, obs, device, transform, pos_mean, pos_std)
-                detected_objects = detection_result['detected_objects']
-                positions = detection_result['positions']
-                
-                # Update feature map and compose
-                agent.update_feature_map(detected_objects, positions)
+                agent.update_feature_map(detection_result['detected_objects'], detection_result['positions'])
                 agent.compose_reward_map(comp_task)
                 agent.compute_wvf()
                 
-                # Select action
-                action = agent.sample_action_with_wvf(obs, epsilon=0.0)  # Greedy
-                
+                action = agent.sample_action_with_wvf(obs, epsilon=0.0)
                 obs, env_reward, terminated, truncated, info = env.step(action)
                 
-                task_satisfied = check_task_satisfaction(info, comp_task)
-                if task_satisfied:
+                if check_task_satisfaction(info, comp_task):
                     episode_reward += env_reward
                 
                 if terminated or truncated:
@@ -359,14 +316,9 @@ def train_sr_agent(seed, training_episodes, eval_episodes_per_task, max_steps, e
             all_rewards.append(episode_reward)
             comp_eval_labels.append(f"eval_comp_{task_name}")
     
-    # Combine labels
     all_labels = episode_labels + primitive_eval_labels + comp_eval_labels
     
     print(f"\n✓ SR Agent training complete (seed={seed})")
-    print(f"  Training episodes: {training_episodes}")
-    print(f"  Primitive eval episodes: {len(primitive_eval_labels)}")
-    print(f"  Compositional eval episodes: {len(comp_eval_labels)}")
-    print(f"  SR frozen at episode: {sr_freeze_episode}")
     
     return {
         "algorithm": "SR",
@@ -417,7 +369,6 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
     all_rewards = []
     episode_labels = []
     
-    # ===== TRAINING =====
     print("Starting training phase...")
     
     for episode in tqdm(range(training_episodes), desc="Training DQN"):
@@ -435,8 +386,7 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
             reward = 1.0 if task_satisfied else (-0.1 if info.get('contacted_object') else -0.005)
             
             agent.remember(obs, task['name'], action, reward, next_obs, terminated or truncated)
-            
-            loss = agent.train_step()
+            agent.train_step()
             
             if task_satisfied:
                 episode_reward = 1.0
@@ -450,13 +400,11 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
         all_rewards.append(episode_reward)
         episode_labels.append(task['name'])
     
-    # Save model
     model_path = output_dir / "model.pt"
     agent.save_model(str(model_path))
     
-    # ===== PRIMITIVE EVALUATION =====
+    # PRIMITIVE EVALUATION
     print("\nStarting PRIMITIVE evaluation phase...")
-    
     primitive_eval_labels = []
     
     for prim_task in PRIMITIVE_TASKS:
@@ -469,7 +417,6 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
             episode_reward = 0
             
             for step in range(max_steps):
-                # Use single feature encoding for primitive tasks
                 action = agent.select_action(obs, prim_task['features'], epsilon=0.0)
                 obs, _, terminated, truncated, info = env.step(action)
                 
@@ -483,9 +430,8 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
             all_rewards.append(episode_reward)
             primitive_eval_labels.append(f"eval_primitive_{task_name}")
     
-    # ===== COMPOSITIONAL EVALUATION =====
+    # COMPOSITIONAL EVALUATION
     print("\nStarting COMPOSITIONAL evaluation phase...")
-    
     comp_eval_labels = []
     
     for comp_task in COMPOSITIONAL_TASKS:
@@ -498,7 +444,6 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
             episode_reward = 0
             
             for step in range(max_steps):
-                # Use compositional encoding
                 action = agent.select_action(obs, comp_task['features'], epsilon=0.0)
                 obs, _, terminated, truncated, info = env.step(action)
                 
@@ -515,9 +460,6 @@ def train_unified_dqn(seed, training_episodes, eval_episodes_per_task, max_steps
     all_labels = episode_labels + primitive_eval_labels + comp_eval_labels
     
     print(f"\n✓ DQN training complete (seed={seed})")
-    print(f"  Training episodes: {training_episodes}")
-    print(f"  Primitive eval episodes: {len(primitive_eval_labels)}")
-    print(f"  Compositional eval episodes: {len(comp_eval_labels)}")
     
     return {
         "algorithm": "DQN",
@@ -570,7 +512,6 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
     all_rewards = []
     episode_labels = []
     
-    # ===== TRAINING =====
     print("Starting training phase...")
     
     for episode in tqdm(range(training_episodes), desc="Training LSTM-DQN"):
@@ -609,13 +550,11 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
         all_rewards.append(episode_reward)
         episode_labels.append(task['name'])
     
-    # Save model
     model_path = output_dir / "model.pt"
     agent.save_model(str(model_path))
     
-    # ===== PRIMITIVE EVALUATION =====
+    # PRIMITIVE EVALUATION
     print("\nStarting PRIMITIVE evaluation phase...")
-    
     primitive_eval_labels = []
     
     for prim_task in PRIMITIVE_TASKS:
@@ -643,9 +582,8 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
             all_rewards.append(episode_reward)
             primitive_eval_labels.append(f"eval_primitive_{task_name}")
     
-    # ===== COMPOSITIONAL EVALUATION =====
+    # COMPOSITIONAL EVALUATION
     print("\nStarting COMPOSITIONAL evaluation phase...")
-    
     comp_eval_labels = []
     
     for comp_task in COMPOSITIONAL_TASKS:
@@ -676,9 +614,6 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
     all_labels = episode_labels + primitive_eval_labels + comp_eval_labels
     
     print(f"\n✓ LSTM-DQN training complete (seed={seed})")
-    print(f"  Training episodes: {training_episodes}")
-    print(f"  Primitive eval episodes: {len(primitive_eval_labels)}")
-    print(f"  Compositional eval episodes: {len(comp_eval_labels)}")
     
     return {
         "algorithm": "LSTM",
@@ -690,29 +625,28 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
         "comp_eval_episodes": len(comp_eval_labels),
     }
 
-# ============================================================================
-# UNIFIED WVF AGENT
-# ============================================================================
 
+# ============================================================================
+# UNIFIED WVF AGENT (Option A - Pure Task Conditioning)
+# ============================================================================
 
 def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps, env_size,
                       learning_rate, gamma, epsilon_decay, output_dir):
     """
-    Train CORRECTED WVF agent using Extended Value Functions.
+    Train Unified WVF agent (Option A - Pure Task Conditioning).
     
-    Key differences from wrong implementation:
-    1. Learn Q̄(s, g, a) for EACH goal, not Q(s, a, task)
-    2. Use extended reward R̄_MIN when reaching wrong goal
-    3. Update Q̄ for ALL goals every step
-    4. Composition via min over task Q-values, then max over goals
+    Key approach:
+    1. Learn Q(s, a, task) for each primitive task
+    2. Simple reward: +1 for valid object, -0.1 for wrong, small step penalty
+    3. Composition via min(Q_task1, Q_task2) for AND operations
+    4. Uses target network for stable evaluation
     """
     
-    # Import here to avoid circular imports
     from env import DiscreteMiniWorldWrapper
     
     print(f"\n{'='*70}")
-    print(f"TRAINING CORRECTED WVF (Seed={seed})")
-    print(f"Using Extended Value Functions - Q̄(s, g, a) for each goal")
+    print(f"TRAINING UNIFIED WVF - OPTION A (Seed={seed})")
+    print(f"Pure Task Conditioning (No Goal Conditioning)")
     print(f"{'='*70}\n")
     
     np.random.seed(seed)
@@ -732,30 +666,25 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         memory_size=2000,
         batch_size=16,
         seq_len=4,
-        hidden_size=256,
-        lstm_size=128,
+        hidden_size=128,
+        lstm_size=64,
         tau=0.005,
         grad_clip=10.0,
         r_correct=1.0,
         r_wrong=-0.1,
-        step_penalty=-0.005,
-        r_bar_min=-10.0  # Critical: R̄_MIN penalty for wrong goals
+        step_penalty=-0.005
     )
     
     all_rewards = []
     episode_labels = []
     
-    # ===== TRAINING PHASE =====
     print("Starting training phase...")
-    print("Training on primitive tasks: red, blue, box, sphere")
-    print("Learning Q̄(s, g, a) for ALL 4 goals with extended rewards\n")
+    print("Training on primitive tasks: red, blue, box, sphere\n")
     
     for episode in tqdm(range(training_episodes), desc="Training WVF"):
-        # Sample random primitive task
-        current_task = agent.sample_task()  # Returns task name like 'blue'
-        agent.current_task = current_task
+        current_task = agent.sample_task()
+        task_idx = agent.TASK_TO_IDX[current_task]
         
-        # Create task config for environment
         task_config = {"name": current_task, "features": [current_task], "type": "primitive"}
         env.set_task(task_config)
         
@@ -763,55 +692,42 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         stacked_obs = agent.reset_episode(obs, current_task)
         
         episode_reward = 0
-        task_success = False
         
         for step in range(max_steps):
-            # Select action based on task's Q-values
-            action = agent.select_action(stacked_obs)
+            action = agent.select_action(stacked_obs, task_idx)
             
             next_obs, _, terminated, truncated, info = env.step(action)
             next_stacked_obs = agent.step_episode(next_obs)
             
-            # Compute EXTENDED rewards for ALL goals
-            rewards_per_goal, dones_per_goal, step_success = agent.compute_extended_rewards(
-                info, current_task
-            )
+            reward, goal_reached = agent.compute_reward(info, current_task)
             
-            if step_success:
-                task_success = True
+            if reward > 0:
                 episode_reward = 1.0
             
-            # Store transition with extended rewards for all goals
-            agent.remember_extended(
-                stacked_obs, action, rewards_per_goal, next_stacked_obs, dones_per_goal
-            )
+            done = goal_reached or terminated or truncated
+            agent.remember(stacked_obs, task_idx, action, reward, next_stacked_obs, done)
             
-            # Train periodically
             if step % 4 == 0 and len(agent.memory) >= agent.batch_size:
                 agent.train_step()
             
             stacked_obs = next_stacked_obs
             
-            # Check if episode is done (any goal reached)
-            if any(dones_per_goal) or terminated or truncated:
+            if done:
                 break
         
         agent.decay_epsilon()
         all_rewards.append(episode_reward)
         episode_labels.append(current_task)
         
-        # Periodic logging
         if (episode + 1) % 500 == 0:
             recent_rewards = all_rewards[-500:]
             print(f"  Episode {episode+1}: Recent success rate = {np.mean(recent_rewards):.2%}")
     
-    # Save model
     model_path = output_dir / "model.pt"
     agent.save_model(str(model_path))
     
-    # ===== PRIMITIVE EVALUATION PHASE =====
+    # PRIMITIVE EVALUATION
     print(f"\nStarting PRIMITIVE evaluation phase...")
-    print("Evaluating on the same primitive tasks used during training")
     print("Using target network for stable Q-estimates\n")
     
     primitive_eval_labels = []
@@ -830,13 +746,11 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
             episode_reward = 0
             
             for step in range(max_steps):
-                # Use primitive action selection with target network
                 action = agent.select_action_primitive(stacked_obs, task_name, use_target=True)
                 
                 obs, _, terminated, truncated, info = env.step(action)
                 stacked_obs = agent.step_episode(obs)
                 
-                # Check if we satisfied the primitive task
                 if check_task_satisfaction(info, prim_task):
                     episode_reward = 1.0
                     task_successes += 1
@@ -851,20 +765,18 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
         success_rate = task_successes / eval_episodes_per_task
         print(f"  {task_name}: {success_rate:.1%} success rate ({task_successes}/{eval_episodes_per_task})")
     
-    # ===== COMPOSITIONAL EVALUATION PHASE =====
+    # COMPOSITIONAL EVALUATION
     print(f"\nStarting COMPOSITIONAL evaluation phase...")
-    print("Evaluating on compositional tasks using CORRECT composition:")
-    print("Finding goals in intersection of task goal sets")
-    print("Using target network for stable Q-estimates\n")
+    print("Using min(Q_task1, Q_task2) composition with target network\n")
     
     comp_eval_labels = []
     
     for comp_task in COMPOSITIONAL_TASKS:
         env.set_task(comp_task)
         task_name = comp_task['name']
-        features = comp_task['features']  # e.g., ['blue', 'sphere']
+        features = comp_task['features']
         
-        print(f"Evaluating {task_name} = {features[0]} AND {features[1]}")
+        print(f"Evaluating {task_name} = min(Q_{features[0]}, Q_{features[1]})")
         
         task_successes = 0
         
@@ -874,13 +786,11 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
             episode_reward = 0
             
             for step in range(max_steps):
-                # Use CORRECT composition with target network
                 action = agent.select_action_composed(stacked_obs, features, use_target=True)
                 
                 obs, _, terminated, truncated, info = env.step(action)
                 stacked_obs = agent.step_episode(obs)
                 
-                # Check if we satisfied the compositional task
                 if check_task_satisfaction(info, comp_task):
                     episode_reward = 1.0
                     task_successes += 1
@@ -897,7 +807,7 @@ def train_unified_wvf(seed, training_episodes, eval_episodes_per_task, max_steps
     
     all_labels = episode_labels + primitive_eval_labels + comp_eval_labels
     
-    print(f"\n✓ CORRECTED WVF training complete (seed={seed})")
+    print(f"\n✓ WVF (Option A) training complete (seed={seed})")
     print(f"  Training episodes: {training_episodes}")
     print(f"  Primitive eval episodes: {len(primitive_eval_labels)}")
     print(f"  Compositional eval episodes: {len(comp_eval_labels)}")
