@@ -51,7 +51,7 @@ from experiment_utils import (
 # ============================================================================
 
 # Easily adjustable number of seeds
-NUM_SEEDS = 2
+NUM_SEEDS = 1
 
 # Algorithms to compare
 ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
