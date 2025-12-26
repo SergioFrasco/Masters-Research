@@ -3,7 +3,7 @@ import os
 # Set environment variables for headless mode
 os.environ["MINIWORLD_HEADLESS"] = "1"
 os.environ["PYGLET_HEADLESS"] = "True"
-os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+os.environ["PYOPENGL_PLATFORM"] = "osmesa"  # Removed duplicate
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["MUJOCO_GL"] = "osmesa"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -23,20 +23,25 @@ class DiscreteMiniWorldWrapper(OneRoom):
         self,
         size=10,
         max_steps: int | None = None,
-        forward_step=1.0,
-        turn_step=90,
-        grid_size=1.0,
+        forward_step=1.0,      # Custom forward step size
+        turn_step=90,          # Custom turn step (90 degrees)
+        grid_size=1.0,         # Grid discretization size (separate from room size)
         **kwargs,
     ):
         if max_steps is None:
             max_steps = 10000
             
+        # Store custom step sizes
         self.custom_forward_step = forward_step
         self.custom_turn_step = turn_step
         self.grid_size = grid_size
+
         self.current_task = None
 
         super().__init__(size=size, max_episode_steps=max_steps, **kwargs)
+        
+        
+        # Override the max_forward_step (this affects forward/backward movement)
         self.max_forward_step = forward_step
         
     def move_agent(self, forward_step, fwd_drift=0.0):
@@ -45,86 +50,89 @@ class DiscreteMiniWorldWrapper(OneRoom):
         
     def turn_agent(self, angle_delta):
         """Override turn_agent to use custom turn step"""
-        if angle_delta > 0:
+        if angle_delta > 0:  # Turning right
             custom_angle = self.custom_turn_step
-        elif angle_delta < 0:
+        elif angle_delta < 0:  # Turning left
             custom_angle = -self.custom_turn_step
-        else:
+        else:  # No turn
             custom_angle = 0
             
         return super().turn_agent(custom_angle)
     
     def near(self, ent0, ent1=None):
-        """Check if entities are on the same grid cell"""
+        """
+        Override near to check if entities are on the same grid cell
+        """
         if ent1 is None:
             ent1 = self.agent
         
+        # Get grid positions
         grid_x0 = int(round(ent0.pos[0] / self.grid_size))
         grid_z0 = int(round(ent0.pos[2] / self.grid_size))
         
         grid_x1 = int(round(ent1.pos[0] / self.grid_size))
         grid_z1 = int(round(ent1.pos[2] / self.grid_size))
         
+        # Check if on same grid cell
         return grid_x0 == grid_x1 and grid_z0 == grid_z1
                               
     def step(self, action):
-        """
-        FIXED: Episodes now terminate on ANY collision (theory-compliant)
-        
-        This matches Nangue Tasse's assumption:
-        - Reaching ANY goal g ∈ G terminates the episode
-        - Extended reward R̄(s, g, a) handles which goal was reached
-        - The Q̄ function learns "value of reaching g from s"
-        """
+        # Call the grandparent step method (MiniWorldEnv), skipping OneRoom's step
         obs, reward, termination, truncation, info = MiniWorldEnv.step(self, action)
         
+        # Track which object was contacted (if any)
         contacted_object = None
 
-        # Check collisions
+        # Check collision with red sphere
         if self.near(self.sphere_red):
             contacted_object = "red_sphere"
+
+        # Check collision with blue sphere 
         elif self.near(self.sphere_blue):
             contacted_object = "blue_sphere"
+
+        # Check collision with red box
         elif self.near(self.box_red):
             contacted_object = "red_box"
+        
+        # Check collision with blue box
         elif self.near(self.box_blue):
             contacted_object = "blue_box"
 
-        # CRITICAL FIX: Terminate on ANY collision (theory requirement!)
+        # Only terminate and reward if task is satisfied
         if contacted_object is not None:
-            termination = True  # ANY goal reached terminates episode
-            
-            # Only give task reward if it's the RIGHT goal for current task
             if self._check_task_satisfaction(contacted_object):
                 reward += self._reward()
-            # Wrong goal: no extra reward, just termination
-            # (R̄_MIN penalty will be applied in agent.compute_extended_rewards)
+                termination = True
         
         # Calculate distances for info
         agent_pos = self.agent.pos
         
+        # Calculate distance to red sphere
         sphere_red_pos = self.sphere_red.pos
-        distance_to_sphere_red = np.sqrt((agent_pos[0] - sphere_red_pos[0])**2 + 
-                                        (agent_pos[2] - sphere_red_pos[2])**2)
+        distance_to_sphere_red = np.sqrt((agent_pos[0] - sphere_red_pos[0])**2 + (agent_pos[2] - sphere_red_pos[2])**2)
 
+        # Calculate distance to blue sphere
         sphere_blue_pos = self.sphere_blue.pos
-        distance_to_sphere_blue = np.sqrt((agent_pos[0] - sphere_blue_pos[0])**2 + 
-                                         (agent_pos[2] - sphere_blue_pos[2])**2)
+        distance_to_sphere_blue = np.sqrt((agent_pos[0] - sphere_blue_pos[0])**2 + (agent_pos[2] - sphere_blue_pos[2])**2)
 
+        # Calculate distance to red box
         box_red_pos = self.box_red.pos
-        distance_to_box_red = np.sqrt((agent_pos[0] - box_red_pos[0])**2 + 
-                                      (agent_pos[2] - box_red_pos[2])**2)
+        distance_to_box_red = np.sqrt((agent_pos[0] - box_red_pos[0])**2 + (agent_pos[2] - box_red_pos[2])**2)
         
+        # Calculate distance to blue box
         box_blue_pos = self.box_blue.pos
-        distance_to_box_blue = np.sqrt((agent_pos[0] - box_blue_pos[0])**2 + 
-                                       (agent_pos[2] - box_blue_pos[2])**2)
+        distance_to_box_blue = np.sqrt((agent_pos[0] - box_blue_pos[0])**2 + (agent_pos[2] - box_blue_pos[2])**2)
         
+        # Add distances to info dictionary
         info['distance_to_box_red'] = distance_to_box_red
         info['distance_to_box_blue'] = distance_to_box_blue
         info['distance_to_sphere_red'] = distance_to_sphere_red
         info['distance_to_sphere_blue'] = distance_to_sphere_blue
         info['distance_to_goal'] = min(distance_to_box_red, distance_to_box_blue, 
                                         distance_to_sphere_red, distance_to_sphere_blue)
+        
+        # NEW: Add contacted object to info
         info['contacted_object'] = contacted_object
         
         return obs, reward, termination, truncation, info
@@ -132,7 +140,8 @@ class DiscreteMiniWorldWrapper(OneRoom):
     def _check_task_satisfaction(self, contacted_object):
         """Check if the contacted object satisfies the current task"""
         if self.current_task is None:
-            print('Warning: No current task set in DiscreteMiniWorldWrapper.')
+            # No task set - terminate on any contact (backward compatible)
+            print('Warning: No current task set in DiscreteMiniWorldWrapper. Terminating on any contact.')
             return True
         
         features = self.current_task.get("features", [])
@@ -170,29 +179,50 @@ class DiscreteMiniWorldWrapper(OneRoom):
         self.add_rect_room(min_x=-1, max_x=self.size, min_z=-1, max_z=self.size)
     
         self.sphere_red = self.place_entity(Ball(color="red", size=1))
-        self.sphere_red.radius = 0
+        self.sphere_red.radius = 0  # No collision during placement
 
-        self.sphere_blue = self.place_entity(Ball(color="blue", size=1))
-        self.sphere_blue.radius = 0
+        self.sphere_blue = self.place_entity(Ball(color="blue", size= 1))
+        self.sphere_blue.radius = 0  # No collision during placement
 
         self.box_red = self.place_entity(Box(color="red"))
-        self.box_red.radius = 0
+        self.box_red.radius = 0  # No collision
 
-        self.box_blue = self.place_entity(Box(color="blue"))
-        self.box_blue.radius = 0
-        
+        self.box_blue = self.place_entity(Box(color="blue"))  #
+        self.box_blue.radius = 0  # No collision
         self.place_agent()
 
-    def place_agent(self, room=None, pos=None, dir=None, min_x=None, max_x=None, 
-                    min_z=None, max_z=None):
-        """Place agent at discrete grid positions with random cardinal directions"""
-        return self.place_entity(
-            self.agent, room=room, pos=pos, dir=dir,
-            min_x=min_x, max_x=max_x, min_z=min_z, max_z=max_z,
-        )
+# ================= Override placement methods to enforce discrete agent placement =======================
+    def place_agent(
+            self,
+            room=None,
+            pos=None,
+            dir=None,
+            min_x=None,
+            max_x=None,
+            min_z=None,
+            max_z=None,
+        ):
+            """
+            Override place_agent to randomly place agent at discrete grid positions
+            with random cardinal directions
+            """
+            # Let place_entity handle random placement (pos=None, dir=None)
+            # This will snap to grid and use cardinal directions
+            return self.place_entity(
+                self.agent,
+                room=room,
+                pos=pos,  # None by default, triggers random placement
+                dir=dir,  # None by default, triggers random cardinal direction
+                min_x=min_x,
+                max_x=max_x,
+                min_z=min_z,
+                max_z=max_z,
+            )
 
+# ================ Helper methods for discrete placement =======================
     def snap_to_grid(self, pos):
         """Snap a continuous position to discrete grid coordinates"""
+        # Use self.grid_size instead of self.size
         snapped_x = round(pos[0] / self.grid_size) * self.grid_size
         snapped_z = round(pos[2] / self.grid_size) * self.grid_size
         return np.array([snapped_x, pos[1], snapped_z])
@@ -202,17 +232,28 @@ class DiscreteMiniWorldWrapper(OneRoom):
         degrees = math.degrees(direction) % 360
         
         if degrees < 45 or degrees >= 315:
-            return 0.0
+            return 0.0  # 0°
         elif 45 <= degrees < 135:
-            return math.pi / 2
+            return math.pi / 2  # 90°
         elif 135 <= degrees < 225:
-            return math.pi
+            return math.pi  # 180°
         else:
-            return 3 * math.pi / 2
+            return 3 * math.pi / 2  # 270°
         
-    def place_entity(self, ent, room=None, pos=None, dir=None, min_x=None, max_x=None, 
-                    min_z=None, max_z=None):
-        """Place entity at discrete grid locations"""
+    def place_entity(
+        self,
+        ent,
+        room=None,
+        pos=None,
+        dir=None,
+        min_x=None,
+        max_x=None,
+        min_z=None,
+        max_z=None,
+    ):
+        """
+        Override place_entity to snap positions to discrete grid locations
+        """
         assert len(self.rooms) > 0, "create rooms before calling place_entity"
         assert ent.radius is not None, "entity must have physical size defined"
 
@@ -236,14 +277,20 @@ class DiscreteMiniWorldWrapper(OneRoom):
         while attempts < max_attempts:
             attempts += 1
             
-            r = (room if room else list(self.rooms)[
-                self.np_random.choice(len(list(self.rooms)), p=self.room_probs)])
+            r = (
+                room
+                if room
+                else list(self.rooms)[
+                    self.np_random.choice(len(list(self.rooms)), p=self.room_probs)
+                ]
+            )
 
             lx = r.min_x if min_x is None else min_x
             hx = r.max_x if max_x is None else max_x
             lz = r.min_z if min_z is None else min_z
             hz = r.max_z if max_z is None else max_z
             
+            # Use self.grid_size instead of self.size
             min_grid_x = max(0, int((lx + ent.radius) // self.grid_size))
             max_grid_x = math.floor((hx - ent.radius) / self.grid_size)
             min_grid_z = max(0, int((lz + ent.radius) // self.grid_size))
@@ -255,7 +302,11 @@ class DiscreteMiniWorldWrapper(OneRoom):
             grid_x = self.np_random.integers(min_grid_x, max_grid_x + 1)
             grid_z = self.np_random.integers(min_grid_z, max_grid_z + 1)
             
-            pos = np.array([grid_x * self.grid_size, 0, grid_z * self.grid_size])
+            pos = np.array([
+                grid_x * self.grid_size,
+                0,
+                grid_z * self.grid_size
+            ])
 
             if not r.point_inside(pos):
                 continue
@@ -272,30 +323,34 @@ class DiscreteMiniWorldWrapper(OneRoom):
             ent.dir = d
             break
         else:
-            raise RuntimeError(f"Could not find valid discrete position after {max_attempts} attempts")
+            raise RuntimeError(f"Could not find valid discrete position for entity after {max_attempts} attempts")
 
         self.entities.append(ent)
         return ent
     
     def intersect(self, ent, pos, radius=None):
-        """Check walls but allow agent to pass through boxes"""
+        """
+        Override to check walls but allow agent to pass through boxes
+        """
         if radius is None:
             radius = ent.radius
         
+        # Ignore the Y position
         px, _, pz = pos
         pos = np.array([px, 0, pz])
 
-        # Check for intersection with walls
+        # Check for intersection with walls (keep this from base class)
         if intersect_circle_segs(pos, radius, self.wall_segs):
             return True
 
         # Check for entity intersection
         for ent2 in self.entities:
+            # Entities can't intersect with themselves
             if ent2 is ent:
                 continue
             
-            # Skip collision check with boxes/balls
-            if isinstance(ent2, (Box, Ball)):
+            # Skip collision check with boxes - THIS IS THE KEY ADDITION
+            if isinstance(ent2, (Box,Ball)):
                 continue
 
             px, _, pz = ent2.pos

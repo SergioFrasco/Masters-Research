@@ -51,11 +51,11 @@ from experiment_utils import (
 # ============================================================================
 
 # Easily adjustable number of seeds
-NUM_SEEDS = 3
+NUM_SEEDS = 2
 
 # Algorithms to compare
-# ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
-ALGORITHMS = ["WVF"]
+ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
+# ALGORITHMS = ["WVF"]
 
 # Training configuration
 TRAINING_CONFIG = {
