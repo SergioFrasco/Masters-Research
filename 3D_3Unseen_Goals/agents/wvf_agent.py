@@ -1,19 +1,13 @@
 """
 Unified World Value Functions (WVF) Agent for Compositional RL
 
-OPTION A REWRITE - Pure Task Conditioning (No Goal Conditioning)
+UPDATED FOR UNSEEN GOAL EVALUATION
 
-Key insight from WVF theory (Nangue Tasse et al.):
-- Learn Q(s, a, task) for each primitive task
-- Primitive tasks: red, blue, box, sphere
-- Composition: Q_composed(s, a) = min(Q(s, a, task1), Q(s, a, task2))
-  - min = AND (pessimistic: action must be good for BOTH tasks)
-
-This is simpler and matches the WVF theory more closely:
-- No goal conditioning needed
-- Task tells you WHAT to look for (color or shape)
-- Reward is +1 for reaching ANY object satisfying the task
-- Composition naturally emerges from min over task Q-values
+Key changes:
+- Task space now includes 'green': ['red', 'blue', 'green', 'box', 'sphere']
+- During training: only sample from ['red', 'blue', 'box', 'sphere']
+- During evaluation: can use 'green' task index for zero-shot generalization
+- Same Option A approach: Q(s, a, task) with min() composition
 
 Based on Nangue Tasse et al.'s Boolean Task Algebra (NeurIPS 2020)
 """
@@ -51,17 +45,15 @@ class TaskConditionedLSTMNetwork(nn.Module):
     """
     Task-Conditioned Q-Network with LSTM.
     
-    NO goal conditioning - only task conditioning.
-    This matches WVF theory: learn Q(s, a, task) for primitive tasks,
-    then compose via min for AND.
+    Updated to support 5 tasks: [red, blue, green, box, sphere]
     
     Architecture:
-        [Image (12 ch) | Task Tiled (4 ch)] -> CNN -> LSTM -> Dueling Q
+        [Image (12 ch) | Task Tiled (5 ch)] -> CNN -> LSTM -> Dueling Q
         
-    Input: (batch, 12 + 4, H, W) = (batch, 16, 60, 80)
+    Input: (batch, 12 + 5, H, W) = (batch, 17, 60, 80)
     """
     
-    def __init__(self, input_shape=(12, 60, 80), num_tasks=4, action_size=3,
+    def __init__(self, input_shape=(12, 60, 80), num_tasks=5, action_size=3,
                  hidden_size=128, lstm_size=64):
         super(TaskConditionedLSTMNetwork, self).__init__()
         
@@ -70,8 +62,8 @@ class TaskConditionedLSTMNetwork(nn.Module):
         self.action_size = action_size
         self.lstm_size = lstm_size
         
-        # CNN input channels = image channels + task channels (NO goal channels)
-        cnn_input_channels = input_shape[0] + num_tasks  # 12 + 4 = 16
+        # CNN input channels = image channels + task channels
+        cnn_input_channels = input_shape[0] + num_tasks  # 12 + 5 = 17
         
         # CNN backbone
         self.conv = nn.Sequential(
@@ -174,7 +166,7 @@ class TaskConditionedLSTMNetwork(nn.Module):
         batch_size = state.size(0)
         
         # Tile task and concatenate with state
-        combined = self.tile_task(state, task)  # (batch, C+4, H, W)
+        combined = self.tile_task(state, task)  # (batch, C+5, H, W)
         
         # CNN features
         conv_features = self.conv(combined)
@@ -255,43 +247,44 @@ class UnifiedWorldValueFunctionAgent:
     """
     UNIFIED World Value Function (WVF) Agent - OPTION A
     
-    Pure Task Conditioning (No Goal Conditioning)
+    UPDATED FOR UNSEEN GOAL EVALUATION
+    
+    Task space: ['red', 'blue', 'green', 'box', 'sphere'] (5 tasks)
+    - During training: only sample from ['red', 'blue', 'box', 'sphere']
+    - During evaluation: can use 'green' for zero-shot generalization
     
     Theory:
-    - Learn Q(s, a, task) for primitive tasks: red, blue, box, sphere
+    - Learn Q(s, a, task) for primitive tasks
     - Each task defines a reward function: +1 for ANY object satisfying the task
     - Composition via min: Q_AND(s, a) = min(Q(s,a,task1), Q(s,a,task2))
     
-    Example:
-    - Q(s, a, task=blue) = expected return for reaching any blue object
-    - Q(s, a, task=sphere) = expected return for reaching any sphere
-    - Q_blue_sphere(s, a) = min(Q_blue, Q_sphere) = value for reaching blue AND sphere
-    
-    This matches WVF theory exactly.
-    
-    Tasks: [red, blue, box, sphere]
     Valid objects per task:
         red -> {red_box, red_sphere}
         blue -> {blue_box, blue_sphere}  
-        box -> {red_box, blue_box}
-        sphere -> {red_sphere, blue_sphere}
+        green -> {green_box, green_sphere}  (UNSEEN during training!)
+        box -> {red_box, blue_box, green_box}
+        sphere -> {red_sphere, blue_sphere, green_sphere}
     """
     
-    # Primitive tasks
-    PRIMITIVES = ['red', 'blue', 'box', 'sphere']
+    # Primitive tasks (including green for zero-shot)
+    PRIMITIVES = ['red', 'blue', 'green', 'box', 'sphere']
     TASK_TO_IDX = {t: i for i, t in enumerate(PRIMITIVES)}
     IDX_TO_TASK = {i: t for i, t in enumerate(PRIMITIVES)}
+    
+    # Training tasks (exclude green)
+    TRAINING_TASKS = ['red', 'blue', 'box', 'sphere']
     
     # Which objects satisfy each task
     VALID_OBJECTS = {
         'red': ['red_box', 'red_sphere'],
         'blue': ['blue_box', 'blue_sphere'],
-        'box': ['red_box', 'blue_box'],
-        'sphere': ['red_sphere', 'blue_sphere'],
+        'green': ['green_box', 'green_sphere'],  # UNSEEN during training
+        'box': ['red_box', 'blue_box', 'green_box'],
+        'sphere': ['red_sphere', 'blue_sphere', 'green_sphere'],
     }
     
     # All possible objects
-    ALL_OBJECTS = ['red_box', 'blue_box', 'red_sphere', 'blue_sphere']
+    ALL_OBJECTS = ['red_box', 'blue_box', 'green_box', 'red_sphere', 'blue_sphere', 'green_sphere']
     
     def __init__(self, env, k_frames=4, learning_rate=0.0001, gamma=0.99,
                  epsilon_start=1.0, epsilon_end=0.05, epsilon_decay=0.9995,
@@ -303,13 +296,13 @@ class UnifiedWorldValueFunctionAgent:
         self.env = env
         self.action_dim = 3
         self.k_frames = k_frames
-        self.num_tasks = len(self.PRIMITIVES)
+        self.num_tasks = len(self.PRIMITIVES)  # 5 tasks now
         self.seq_len = seq_len
         
         # Reward parameters
-        self.r_correct = r_correct    # Reward for reaching valid object
-        self.r_wrong = r_wrong        # Penalty for reaching wrong object
-        self.step_penalty = step_penalty  # Small step penalty
+        self.r_correct = r_correct
+        self.r_wrong = r_wrong
+        self.step_penalty = step_penalty
         
         # Hyperparameters
         self.gamma = gamma
@@ -327,7 +320,7 @@ class UnifiedWorldValueFunctionAgent:
         
         # Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"UnifiedWorldValueFunctionAgent (Option A) using device: {self.device}")
+        print(f"UnifiedWorldValueFunctionAgent (5-task encoding) using device: {self.device}")
         
         # Get observation shape
         sample_obs = env.reset()[0]
@@ -346,7 +339,8 @@ class UnifiedWorldValueFunctionAgent:
         print(f"Observation shape: {self.obs_shape}")
         print(f"Task conditioning: Tiled as {self.num_tasks} extra channels")
         print(f"CNN input shape: ({self.obs_shape[0] + self.num_tasks}, {self.obs_shape[1]}, {self.obs_shape[2]})")
-        print(f"NO goal conditioning - pure WVF approach")
+        print(f"Task space: {self.PRIMITIVES}")
+        print(f"Training tasks: {self.TRAINING_TASKS} (green reserved for zero-shot)")
         
         # Frame stacker
         self.frame_stack = FrameStack(k=k_frames)
@@ -385,8 +379,8 @@ class UnifiedWorldValueFunctionAgent:
         print(f"  Task-conditioned network parameters: {total_params:,}")
     
     def sample_task(self):
-        """Randomly sample a primitive task for this episode."""
-        return random.choice(self.PRIMITIVES)
+        """Randomly sample a TRAINING task (excludes green)."""
+        return random.choice(self.TRAINING_TASKS)
     
     def get_task_one_hot(self, task_idx, batch_size=1):
         """Convert task index to one-hot tensor."""
@@ -405,12 +399,12 @@ class UnifiedWorldValueFunctionAgent:
         
         Simple WVF reward:
         - +1 for reaching ANY object that satisfies the current task
-        - -0.1 for reaching wrong object
+        - penalty for reaching wrong object
         - small step penalty otherwise
         
         Args:
             info: Environment info dict with 'contacted_object'
-            current_task: Current primitive task name (e.g., 'blue')
+            current_task: Current primitive task name (e.g., 'blue', 'green')
             
         Returns:
             reward: float
@@ -511,21 +505,55 @@ class UnifiedWorldValueFunctionAgent:
                                    self.current_hidden[1].detach())
             return q_values.argmax().item()
     
-    def select_action_composed(self, stacked_obs, features):
+    def select_action_primitive(self, stacked_obs, task_name, use_target=True):
+        """
+        Select action for a PRIMITIVE task during evaluation.
+        
+        Uses the target network for more stable Q-estimates during eval.
+        
+        Args:
+            stacked_obs: Current stacked observation
+            task_name: Primitive task name (e.g., 'blue', 'green', 'box', 'sphere')
+            use_target: Whether to use target network (more stable for eval)
+            
+        Returns:
+            action: The greedy action for this primitive task
+        """
+        state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
+        task_idx = self.TASK_TO_IDX[task_name]
+        task_one_hot = self.get_task_one_hot(task_idx)
+        
+        with torch.no_grad():
+            # Use target network for eval (more stable)
+            network = self.target_network if use_target else self.q_network
+            q_values, new_hidden = network(state, task_one_hot, self.current_hidden)
+            
+            # Update hidden state
+            self.current_hidden = (new_hidden[0].detach(), new_hidden[1].detach())
+            
+            return q_values.argmax().item()
+    
+    def select_action_composed(self, stacked_obs, features, use_target=True):
         """
         Select action using Boolean composition (min over task Q-values).
         
         This is the core WVF composition:
         Q_AND(s, a) = min(Q(s, a, task1), Q(s, a, task2))
         
+        Uses target network for more stable Q-estimates during evaluation.
+        
         Args:
             stacked_obs: Current stacked observation
-            features: List of primitive tasks to compose (e.g., ['blue', 'sphere'])
+            features: List of primitive tasks to compose (e.g., ['green', 'sphere'])
+            use_target: Whether to use target network (more stable for eval)
             
         Returns:
             action: The action that maximizes the composed Q-value
         """
         state = torch.FloatTensor(stacked_obs).unsqueeze(0).to(self.device)
+        
+        # Select which network to use
+        network = self.target_network if use_target else self.q_network
         
         q_values_per_task = []
         
@@ -536,7 +564,7 @@ class UnifiedWorldValueFunctionAgent:
                 task_one_hot = self.get_task_one_hot(task_idx)
                 
                 # Use current hidden state for temporal context
-                q_vals, _ = self.q_network(state, task_one_hot, self.current_hidden)
+                q_vals, _ = network(state, task_one_hot, self.current_hidden)
                 q_values_per_task.append(q_vals)
             
             # Boolean AND = min over Q-values (pessimistic composition)
@@ -548,7 +576,7 @@ class UnifiedWorldValueFunctionAgent:
             # This maintains temporal context across steps
             first_task_idx = self.TASK_TO_IDX[features[0]]
             first_task_one_hot = self.get_task_one_hot(first_task_idx)
-            _, new_hidden = self.q_network(state, first_task_one_hot, self.current_hidden)
+            _, new_hidden = network(state, first_task_one_hot, self.current_hidden)
             self.current_hidden = (new_hidden[0].detach(), new_hidden[1].detach())
             
             return best_action
@@ -705,7 +733,7 @@ class UnifiedWorldValueFunctionAgent:
             'optimizer_state': self.optimizer.state_dict(),
         }
         torch.save(checkpoint, filepath)
-        print(f"WVF model (Option A) saved to {filepath}")
+        print(f"WVF model (5-task encoding) saved to {filepath}")
     
     def load_model(self, filepath):
         """Load model checkpoint."""
@@ -717,4 +745,4 @@ class UnifiedWorldValueFunctionAgent:
         self.target_network.load_state_dict(checkpoint['target_network_state'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state'])
         
-        print(f"WVF model (Option A) loaded from {filepath}")
+        print(f"WVF model (5-task encoding) loaded from {filepath}")

@@ -8,4 +8,4 @@
 
 source ~/.bashrc
 conda activate compneuro
-python dqn_lstm_baseline.py
+python wvf_baseline.py

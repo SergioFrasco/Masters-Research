@@ -1,0 +1,82 @@
+{
+  "architecture": "Unified WVF (Option A) - Pure Task Conditioning",
+  "training": {
+    "total_episodes": 1,
+    "final_success_rate": 0.0,
+    "training_tasks": [
+      "red",
+      "blue",
+      "box",
+      "sphere"
+    ],
+    "per_task_final_success": {
+      "red": 0.0
+    },
+    "model_path": "results/current/12_27_2025/1/wvf_no_green_model.pt"
+  },
+  "evaluation_seen_simple": {
+    "red": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    },
+    "blue": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    },
+    "box": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    },
+    "sphere": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    }
+  },
+  "evaluation_seen_compositional": {
+    "red_box": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    },
+    "red_sphere": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    },
+    "blue_box": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    },
+    "blue_sphere": {
+      "success_rate": 0.0,
+      "mean_length": 200.0
+    }
+  },
+  "evaluation_unseen_simple": {
+    "green": {
+      "success_rate": 0.0,
+      "mean_length": 200.0,
+      "note": "ZERO-SHOT: Never saw green during training"
+    }
+  },
+  "evaluation_unseen_compositional": {
+    "green_box": {
+      "success_rate": 0.0,
+      "mean_length": 200.0,
+      "note": "ZERO-SHOT: Novel green+shape composition via min()"
+    },
+    "green_sphere": {
+      "success_rate": 0.0,
+      "mean_length": 200.0,
+      "note": "ZERO-SHOT: Novel green+shape composition via min()"
+    }
+  },
+  "summary": {
+    "avg_seen_simple": 0.0,
+    "avg_seen_comp": 0.0,
+    "avg_unseen_simple": 0.0,
+    "avg_unseen_comp": 0.0
+  },
+  "plots": {
+    "timeline": "results/current/12_27_2025/1/wvf_experiment_timeline.png",
+    "summary": "results/current/12_27_2025/1/wvf_comprehensive_summary.png"
+  }
+}
