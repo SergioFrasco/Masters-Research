@@ -1,0 +1,30 @@
+submitit INFO (2025-12-26 22:46:25,868) - Starting with JobEnvironment(job_id=171804, hostname=mscluster67.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-26 22:46:25,869) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_2Composition/experiment_results/comparison_20251226_224604/slurm_logs/171804_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=LSTM, Seed=0
+Node: mscluster67
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED LSTM-DQN (Seed=0)
+======================================================================
+
+Unified LSTM-DQN Agent using device: cuda
+Frame stacking: k=4, LSTM size: 64
+Task encoding: Goal tiling with 4 additional channels
+Single frame shape: (3, 60, 80)
+Stacked observation shape (with task): (16, 60, 80)
+Total network parameters: 529,828
+Starting training phase...
+Training LSTM-DQN:   0%|          | 0/20000 [00:00<?, ?it/s]Training LSTM-DQN:   0%|          | 1/20000 [00:00<54:11,  6.15it/s]Training LSTM-DQN:   0%|          | 2/20000 [00:00<1:13:23,  4.54it/s]Training LSTM-DQN:   0%|          | 4/20000 [00:00<46:43,  7.13it/s]  Training LSTM-DQN:   0%|          | 6/20000 [00:00<40:24,  8.25it/s]Training LSTM-DQN:   0%|          | 7/20000 [00:00<42:14,  7.89it/s]Training LSTM-DQN:   0%|          | 9/20000 [00:01<39:50,  8.36it/s]Training LSTM-DQN:   0%|          | 11/20000 [00:01<37:27,  8.89it/s]Training LSTM-DQN:   0%|          | 12/20000 [00:01<39:22,  8.46it/s]Training LSTM-DQN:   0%|          | 13/20000 [00:01<41:06,  8.10it/s]Training LSTM-DQN:   0%|          | 14/20000 [00:01<42:51,  7.77it/s]Training LSTM-DQN:   0%|          | 15/20000 [00:01<44:18,  7.52it/s]Training LSTM-DQN:   0%|          | 17/20000 [00:02<35:44,  9.32it/s]Training LSTM-DQN:   0%|          | 18/20000 [00:02<38:33,  8.64it/s]Training LSTM-DQN:   0%|          | 19/20000 [00:02<39:24,  8.45it/s]Training LSTM-DQN:   0%|          | 21/20000 [00:02<36:57,  9.01it/s]Training LSTM-DQN:   0%|          | 23/20000 [00:02<35:31,  9.37it/s]Training LSTM-DQN:   0%|          | 25/20000 [00:02<29:15, 11.38it/s]Training LSTM-DQN:   0%|          | 27/20000 [00:02<26:47, 12.43it/s]Training LSTM-DQN:   0%|          | 29/20000 [00:03<31:25, 10.59it/s]Training LSTM-DQN:   0%|          | 31/20000 [00:03<29:42, 11.20it/s]Training LSTM-DQN:   0%|          | 33/20000 [00:03<35:17,  9.43it/s]Training LSTM-DQN:   0%|          | 35/20000 [00:03<37:12,  8.94it/s]Training LSTM-DQN:   0%|          | 36/20000 [00:04<44:51,  7.42it/s]Training LSTM-DQN:   0%|          | 37/20000 [00:05<2:16:28,  2.44it/s]Training LSTM-DQN:   0%|          | 38/20000 [00:07<4:01:11,  1.38it/s]srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+submitit WARNING (2025-12-26 22:46:41,317) - Bypassing signal SIGCONT
+submitit WARNING (2025-12-26 22:46:41,317) - Bypassing signal SIGCONT
+srun: got SIGCONT
+slurmstepd-mscluster67: error: *** STEP 171804.0 ON mscluster67 CANCELLED AT 2025-12-26T22:46:41 ***
+submitit WARNING (2025-12-26 22:46:41,328) - Bypassing signal SIGTERM
+submitit WARNING (2025-12-26 22:46:41,328) - Bypassing signal SIGTERM
+slurmstepd-mscluster67: error: *** JOB 171804 ON mscluster67 CANCELLED AT 2025-12-26T22:46:41 ***
+srun: forcing job termination
+Training LSTM-DQN:   0%|          | 39/20000 [00:08<4:12:48,  1.32it/s]Training LSTM-DQN:   0%|          | 40/20000 [00:10<5:45:15,  1.04s/it]Training LSTM-DQN:   0%|          | 41/20000 [00:10<5:19:37,  1.04it/s]Training LSTM-DQN:   0%|          | 42/20000 [00:12<6:37:25,  1.19s/it]Training LSTM-DQN:   0%|          | 43/20000 [00:14<7:34:26,  1.37s/it]Training LSTM-DQN:   0%|          | 44/20000 [00:16<8:17:23,  1.50s/it]Training LSTM-DQN:   0%|          | 45/20000 [00:16<6:09:13,  1.11s/it]Training LSTM-DQN:   0%|          | 46/20000 [00:16<4:31:43,  1.22it/s]Training LSTM-DQN:   0%|          | 47/20000 [00:16<3:40:00,  1.51it/s]Training LSTM-DQN:   0%|          | 48/20000 [00:17<3:22:04,  1.65it/s]Training LSTM-DQN:   0%|          | 49/20000 [00:19<5:24:01,  1.03it/s]Training LSTM-DQN:   0%|          | 50/20000 [00:20<5:26:56,  1.02it/s]Training LSTM-DQN:   0%|          | 51/20000 [00:22<6:53:42,  1.24s/it]Training LSTM-DQN:   0%|          | 53/20000 [00:23<6:03:50,  1.09s/it]Training LSTM-DQN:   0%|          | 54/20000 [00:25<6:30:59,  1.18s/it]Training LSTM-DQN:   0%|          | 56/20000 [00:27<5:55:23,  1.07s/it]Training LSTM-DQN:   0%|          | 57/20000 [00:27<4:45:13,  1.17it/s]Training LSTM-DQN:   0%|          | 58/20000 [00:29<6:04:11,  1.10s/it]Training LSTM-DQN:   0%|          | 59/20000 [00:29<5:14:41,  1.06it/s]Training LSTM-DQN:   0%|          | 60/20000 [00:31<6:17:18,  1.14s/it]Training LSTM-DQN:   0%|          | 61/20000 [00:32<6:41:24,  1.21s/it]Training LSTM-DQN:   0%|          | 63/20000 [00:34<6:03:15,  1.09s/it]Training LSTM-DQN:   0%|          | 64/20000 [00:36<7:00:31,  1.27s/it]srun: error: mscluster67: task 0: Killed

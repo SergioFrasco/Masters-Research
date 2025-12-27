@@ -1,0 +1,42 @@
+[
+  {
+    "job_id": "171748",
+    "algorithm": "SR",
+    "seed": 0
+  },
+  {
+    "job_id": "171749",
+    "algorithm": "SR",
+    "seed": 1
+  },
+  {
+    "job_id": "171750",
+    "algorithm": "DQN",
+    "seed": 0
+  },
+  {
+    "job_id": "171751",
+    "algorithm": "DQN",
+    "seed": 1
+  },
+  {
+    "job_id": "171752",
+    "algorithm": "LSTM",
+    "seed": 0
+  },
+  {
+    "job_id": "171753",
+    "algorithm": "LSTM",
+    "seed": 1
+  },
+  {
+    "job_id": "171754",
+    "algorithm": "WVF",
+    "seed": 0
+  },
+  {
+    "job_id": "171755",
+    "algorithm": "WVF",
+    "seed": 1
+  }
+]

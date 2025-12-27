@@ -1,0 +1,17 @@
+{
+  "algorithm": "DQN",
+  "seed": 1,
+  "config": {
+    "training_episodes": 6000,
+    "eval_episodes_per_task": 500,
+    "max_steps": 200,
+    "env_size": 10,
+    "sr_freeze_episode": 3000,
+    "learning_rate": 0.0001,
+    "gamma": 0.99,
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay": 0.9995
+  },
+  "timestamp": "2025-12-26T09:17:33.060583"
+}

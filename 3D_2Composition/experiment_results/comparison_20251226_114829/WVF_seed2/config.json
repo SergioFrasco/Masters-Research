@@ -1,0 +1,17 @@
+{
+  "algorithm": "WVF",
+  "seed": 2,
+  "config": {
+    "training_episodes": 8000,
+    "eval_episodes_per_task": 400,
+    "max_steps": 200,
+    "env_size": 10,
+    "sr_freeze_episode": 3000,
+    "learning_rate": 0.0001,
+    "gamma": 0.99,
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay": 0.9995
+  },
+  "timestamp": "2025-12-26T11:48:38.275628"
+}

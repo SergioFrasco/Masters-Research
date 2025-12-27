@@ -1,0 +1,82 @@
+================================================================================
+EXPERIMENT SUMMARY STATISTICS
+================================================================================
+
+SR:
+  Number of seeds: 3
+  Training episodes: 20000
+  Primitive eval episodes: 2000
+  Compositional eval episodes: 2000
+
+  Training phase:
+    Average reward: 0.9354 ± 0.0834
+    Final episode: 0.9997 ± 0.0001
+
+  Primitive evaluation phase:
+    Average reward: 0.8484 ± 0.1813
+    Train→Prim gap: 0.1513
+
+    Per-task breakdown:
+      red: 0.8478 ± 0.1848
+      blue: 0.8678 ± 0.1603
+      box: 0.8318 ± 0.1914
+      sphere: 0.8464 ± 0.1886
+
+  Compositional evaluation phase (zero-shot):
+    Average reward: 0.8029 ± 0.2249
+    Final episode: 0.6665 ± 0.4713
+    Prim→Comp gap: 0.0456
+    Train→Comp gap: 0.1968
+
+    Per-task breakdown:
+      blue_sphere: 0.7917 ± 0.2405
+      red_sphere: 0.8357 ± 0.2009
+      blue_box: 0.8331 ± 0.1924
+      red_box: 0.7511 ± 0.2659
+
+--------------------------------------------------------------------------------
+
+WVF:
+  Number of seeds: 3
+  Training episodes: 20000
+  Primitive eval episodes: 2000
+  Compositional eval episodes: 2000
+
+  Training phase:
+    Average reward: 0.8996 ± 0.1103
+    Final episode: 1.0000 ± 0.0000
+
+  Primitive evaluation phase:
+    Average reward: 0.8902 ± 0.1365
+    Train→Prim gap: 0.1098
+
+    Per-task breakdown:
+      red: 0.9107 ± 0.1122
+      blue: 0.8993 ± 0.1339
+      box: 0.8580 ± 0.1640
+      sphere: 0.8927 ± 0.1358
+
+  Compositional evaluation phase (zero-shot):
+    Average reward: 0.7132 ± 0.3008
+    Final episode: 1.0000 ± 0.0000
+    Prim→Comp gap: 0.1770
+    Train→Comp gap: 0.2868
+
+    Per-task breakdown:
+      blue_sphere: 0.7173 ± 0.2913
+      red_sphere: 0.7173 ± 0.3102
+      blue_box: 0.7160 ± 0.2942
+      red_box: 0.7020 ± 0.3074
+
+--------------------------------------------------------------------------------
+
+================================================================================
+COMPARISON TABLE
+================================================================================
+
+Algorithm         Train    Prim Eval    Comp Eval     Prim Gap     Comp Gap
+----------------------------------------------------------------------
+SR               0.9997       0.8484       0.8029       0.1513       0.1968
+WVF              1.0000       0.8902       0.7132       0.1098       0.2868
+
+================================================================================

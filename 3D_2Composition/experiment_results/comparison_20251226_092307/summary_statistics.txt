@@ -1,0 +1,73 @@
+================================================================================
+EXPERIMENT SUMMARY STATISTICS
+================================================================================
+
+SR:
+  Number of seeds: 1
+  Training episodes: 6000
+  Eval episodes: 2000
+
+  Training phase:
+    Average reward: 0.9316 ± 0.0000
+    Final episode: 0.9997 ± 0.0000
+
+  Evaluation phase (compositional):
+    Average reward: 0.8007 ± 0.0000
+    Final episode: 0.9997 ± 0.0000
+
+  Generalization gap: 0.1991
+
+--------------------------------------------------------------------------------
+
+DQN:
+  Number of seeds: 1
+  Training episodes: 6000
+  Eval episodes: 2000
+
+  Training phase:
+    Average reward: 0.8325 ± 0.0000
+    Final episode: 0.0000 ± 0.0000
+
+  Evaluation phase (compositional):
+    Average reward: 0.0260 ± 0.0000
+    Final episode: 0.0000 ± 0.0000
+
+  Generalization gap: -0.0260
+
+--------------------------------------------------------------------------------
+
+LSTM:
+  Number of seeds: 1
+  Training episodes: 6000
+  Eval episodes: 2000
+
+  Training phase:
+    Average reward: 0.9263 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+
+  Evaluation phase (compositional):
+    Average reward: 0.3360 ± 0.0000
+    Final episode: 0.0000 ± 0.0000
+
+  Generalization gap: 0.6640
+
+--------------------------------------------------------------------------------
+
+WVF:
+  Number of seeds: 1
+  Training episodes: 6000
+  Eval episodes: 2000
+
+  Training phase:
+    Average reward: 0.7085 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+
+  Evaluation phase (compositional):
+    Average reward: 0.2785 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+
+  Generalization gap: 0.7215
+
+--------------------------------------------------------------------------------
+
+================================================================================

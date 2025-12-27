@@ -1,0 +1,152 @@
+================================================================================
+EXPERIMENT SUMMARY STATISTICS
+================================================================================
+
+SR:
+  Number of seeds: 1
+  Training episodes: 20000
+  Primitive eval episodes: 4000
+  Compositional eval episodes: 4000
+
+  Training phase:
+    Average reward: 0.9338 ± 0.0000
+    Final episode: 0.9997 ± 0.0000
+
+  Primitive evaluation phase:
+    Average reward: 0.8460 ± 0.0000
+    Train→Prim gap: 0.1537
+
+    Per-task breakdown:
+      red: 0.8618 ± 0.0000
+      blue: 0.8508 ± 0.0000
+      box: 0.8218 ± 0.0000
+      sphere: 0.8497 ± 0.0000
+
+  Compositional evaluation phase (zero-shot):
+    Average reward: 0.7962 ± 0.0000
+    Final episode: 0.9999 ± 0.0000
+    Prim→Comp gap: 0.0498
+    Train→Comp gap: 0.2035
+
+    Per-task breakdown:
+      blue_sphere: 0.7907 ± 0.0000
+      red_sphere: 0.8087 ± 0.0000
+      blue_box: 0.8247 ± 0.0000
+      red_box: 0.7607 ± 0.0000
+
+--------------------------------------------------------------------------------
+
+DQN:
+  Number of seeds: 1
+  Training episodes: 20000
+  Primitive eval episodes: 4000
+  Compositional eval episodes: 4000
+
+  Training phase:
+    Average reward: 0.7480 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+
+  Primitive evaluation phase:
+    Average reward: 0.3113 ± 0.0000
+    Train→Prim gap: 0.6887
+
+    Per-task breakdown:
+      red: 0.3240 ± 0.0000
+      blue: 0.3310 ± 0.0000
+      box: 0.2900 ± 0.0000
+      sphere: 0.3000 ± 0.0000
+
+  Compositional evaluation phase (zero-shot):
+    Average reward: 0.0215 ± 0.0000
+    Final episode: 0.0000 ± 0.0000
+    Prim→Comp gap: 0.2898
+    Train→Comp gap: 0.9785
+
+    Per-task breakdown:
+      blue_sphere: 0.0540 ± 0.0000
+      red_sphere: 0.0100 ± 0.0000
+      blue_box: 0.0140 ± 0.0000
+      red_box: 0.0080 ± 0.0000
+
+--------------------------------------------------------------------------------
+
+LSTM:
+  Number of seeds: 1
+  Training episodes: 20000
+  Primitive eval episodes: 4000
+  Compositional eval episodes: 4000
+
+  Training phase:
+    Average reward: 0.9715 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+
+  Primitive evaluation phase:
+    Average reward: 0.8710 ± 0.0000
+    Train→Prim gap: 0.1290
+
+    Per-task breakdown:
+      red: 0.8280 ± 0.0000
+      blue: 0.9230 ± 0.0000
+      box: 0.8010 ± 0.0000
+      sphere: 0.9320 ± 0.0000
+
+  Compositional evaluation phase (zero-shot):
+    Average reward: 0.3900 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+    Prim→Comp gap: 0.4810
+    Train→Comp gap: 0.6100
+
+    Per-task breakdown:
+      blue_sphere: 0.4480 ± 0.0000
+      red_sphere: 0.6200 ± 0.0000
+      blue_box: 0.0250 ± 0.0000
+      red_box: 0.4670 ± 0.0000
+
+--------------------------------------------------------------------------------
+
+WVF:
+  Number of seeds: 1
+  Training episodes: 20000
+  Primitive eval episodes: 4000
+  Compositional eval episodes: 4000
+
+  Training phase:
+    Average reward: 0.9098 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+
+  Primitive evaluation phase:
+    Average reward: 0.8658 ± 0.0000
+    Train→Prim gap: 0.1342
+
+    Per-task breakdown:
+      red: 0.8790 ± 0.0000
+      blue: 0.9070 ± 0.0000
+      box: 0.9010 ± 0.0000
+      sphere: 0.7760 ± 0.0000
+
+  Compositional evaluation phase (zero-shot):
+    Average reward: 0.6498 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+    Prim→Comp gap: 0.2160
+    Train→Comp gap: 0.3502
+
+    Per-task breakdown:
+      blue_sphere: 0.6760 ± 0.0000
+      red_sphere: 0.5930 ± 0.0000
+      blue_box: 0.6610 ± 0.0000
+      red_box: 0.6690 ± 0.0000
+
+--------------------------------------------------------------------------------
+
+================================================================================
+COMPARISON TABLE
+================================================================================
+
+Algorithm         Train    Prim Eval    Comp Eval     Prim Gap     Comp Gap
+----------------------------------------------------------------------
+SR               0.9997       0.8460       0.7962       0.1537       0.2035
+DQN              1.0000       0.3113       0.0215       0.6887       0.9785
+LSTM             1.0000       0.8710       0.3900       0.1290       0.6100
+WVF              1.0000       0.8658       0.6498       0.1342       0.3502
+
+================================================================================

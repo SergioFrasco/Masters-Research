@@ -1,0 +1,17 @@
+[
+  {
+    "job_id": "171736",
+    "algorithm": "WVF",
+    "seed": 0
+  },
+  {
+    "job_id": "171737",
+    "algorithm": "WVF",
+    "seed": 1
+  },
+  {
+    "job_id": "171738",
+    "algorithm": "WVF",
+    "seed": 2
+  }
+]

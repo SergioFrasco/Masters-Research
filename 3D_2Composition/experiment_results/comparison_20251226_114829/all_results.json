@@ -1,0 +1,23 @@
+[
+  {
+    "algorithm": "WVF",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_114829/WVF_seed0",
+    "results_file": "experiment_results/comparison_20251226_114829/WVF_seed0/results.json"
+  },
+  {
+    "algorithm": "WVF",
+    "seed": 1,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_114829/WVF_seed1",
+    "results_file": "experiment_results/comparison_20251226_114829/WVF_seed1/results.json"
+  },
+  {
+    "algorithm": "WVF",
+    "seed": 2,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_114829/WVF_seed2",
+    "results_file": "experiment_results/comparison_20251226_114829/WVF_seed2/results.json"
+  }
+]

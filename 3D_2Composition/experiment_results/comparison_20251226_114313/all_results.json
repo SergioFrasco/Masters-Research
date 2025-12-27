@@ -1,0 +1,9 @@
+[
+  {
+    "algorithm": "WVF",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_114313/WVF_seed0",
+    "results_file": "experiment_results/comparison_20251226_114313/WVF_seed0/results.json"
+  }
+]

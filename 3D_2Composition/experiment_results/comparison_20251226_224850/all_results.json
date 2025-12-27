@@ -1,0 +1,30 @@
+[
+  {
+    "algorithm": "SR",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_224850/SR_seed0",
+    "results_file": "experiment_results/comparison_20251226_224850/SR_seed0/results.json"
+  },
+  {
+    "algorithm": "LSTM",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_224850/LSTM_seed0",
+    "results_file": "experiment_results/comparison_20251226_224850/LSTM_seed0/results.json"
+  },
+  {
+    "algorithm": "WVF",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_224850/WVF_seed0",
+    "results_file": "experiment_results/comparison_20251226_224850/WVF_seed0/results.json"
+  },
+  {
+    "algorithm": "DQN",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results/comparison_20251226_224850/DQN_seed0",
+    "results_file": "experiment_results/comparison_20251226_224850/DQN_seed0/results.json"
+  }
+]

@@ -1,0 +1,30 @@
+submitit INFO (2025-12-26 22:46:15,950) - Starting with JobEnvironment(job_id=171802, hostname=mscluster65.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-26 22:46:15,951) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_2Composition/experiment_results/comparison_20251226_224604/slurm_logs/171802_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=DQN, Seed=0
+Node: mscluster65
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED DQN (Seed=0)
+======================================================================
+
+Unified DQN Agent using device: cuda
+Task conditioning: Goal tiling with one-hot encoding
+Stability settings: tau=0.005, double_dqn=True, grad_clip=10.0
+Image shape: (3, 60, 80)
+Task-conditioned input shape: (7, 60, 80) (3 RGB + 4 task channels)
+Total network parameters: 872,100
+Starting training phase...
+Training DQN:   0%|          | 0/20000 [00:00<?, ?it/s]Training DQN:   0%|          | 2/20000 [00:02<6:42:16,  1.21s/it]Training DQN:   0%|          | 3/20000 [00:03<6:46:36,  1.22s/it]Training DQN:   0%|          | 4/20000 [00:05<8:42:26,  1.57s/it]Training DQN:   0%|          | 5/20000 [00:07<9:50:58,  1.77s/it]Training DQN:   0%|          | 6/20000 [00:09<10:11:09,  1.83s/it]Training DQN:   0%|          | 7/20000 [00:12<10:46:58,  1.94s/it]Training DQN:   0%|          | 8/20000 [00:14<11:12:18,  2.02s/it]Training DQN:   0%|          | 9/20000 [00:16<11:29:43,  2.07s/it]srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: got SIGCONT
+submitit WARNING (2025-12-26 22:46:41,323) - Bypassing signal SIGCONT
+submitit WARNING (2025-12-26 22:46:41,323) - Bypassing signal SIGCONT
+slurmstepd-mscluster65: error: *** JOB 171802 ON mscluster65 CANCELLED AT 2025-12-26T22:46:41 ***
+srun: forcing job termination
+slurmstepd-mscluster65: error: *** STEP 171802.0 ON mscluster65 CANCELLED AT 2025-12-26T22:46:41 ***
+submitit WARNING (2025-12-26 22:46:41,334) - Bypassing signal SIGTERM
+submitit WARNING (2025-12-26 22:46:41,334) - Bypassing signal SIGTERM
+Training DQN:   0%|          | 10/20000 [00:18<11:46:10,  2.12s/it]Training DQN:   0%|          | 11/20000 [00:20<11:51:08,  2.13s/it]Training DQN:   0%|          | 12/20000 [00:23<11:55:08,  2.15s/it]Training DQN:   0%|          | 13/20000 [00:25<11:58:44,  2.16s/it]Training DQN:   0%|          | 14/20000 [00:27<12:01:09,  2.16s/it]Training DQN:   0%|          | 15/20000 [00:29<12:04:08,  2.17s/it]Training DQN:   0%|          | 16/20000 [00:31<11:58:32,  2.16s/it]Training DQN:   0%|          | 17/20000 [00:32<9:46:50,  1.76s/it] Training DQN:   0%|          | 18/20000 [00:34<10:27:41,  1.88s/it]Training DQN:   0%|          | 19/20000 [00:35<7:56:19,  1.43s/it] Training DQN:   0%|          | 20/20000 [00:36<8:43:15,  1.57s/it]Training DQN:   0%|          | 23/20000 [00:39<6:06:50,  1.10s/it]Training DQN:   0%|          | 24/20000 [00:40<6:48:47,  1.23s/it]Training DQN:   0%|          | 25/20000 [00:43<8:05:24,  1.46s/it]Training DQN:   0%|          | 26/20000 [00:43<6:30:01,  1.17s/it]Training DQN:   0%|          | 27/20000 [00:45<7:52:25,  1.42s/it]srun: error: mscluster65: task 0: Killed

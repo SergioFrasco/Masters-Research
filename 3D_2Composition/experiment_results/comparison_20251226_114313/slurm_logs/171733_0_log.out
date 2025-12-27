@@ -1,0 +1,66 @@
+submitit INFO (2025-12-26 11:43:16,009) - Starting with JobEnvironment(job_id=171733, hostname=mscluster58.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-26 11:43:16,009) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_2Composition/experiment_results/comparison_20251226_114313/slurm_logs/171733_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=WVF, Seed=0
+======================================================================
+
+
+======================================================================
+TRAINING CORRECTED WVF (Seed=0)
+Using Extended Value Functions - Q̄(s, g, a) for each goal
+======================================================================
+
+UnifiedWorldValueFunctionAgent (CORRECTED EVF) using device: cuda
+Observation shape: (12, 60, 80)
+Number of goals: 4
+Goals: ['red_box', 'blue_box', 'red_sphere', 'blue_sphere']
+R̄_MIN penalty: -10.0
+Learning Q̄(s, g, a) for each goal - CORRECT WVF approach
+  Goal-conditioned EVF network parameters: 1,082,540
+Starting training phase...
+Training on primitive tasks: red, blue, box, sphere
+Learning Q̄(s, g, a) for ALL 4 goals with extended rewards
+
+Training WVF:   0%|          | 0/1 [00:00<?, ?it/s]Training WVF: 100%|██████████| 1/1 [00:00<00:00, 35.08it/s]
+WVF model (CORRECTED EVF) saved to experiment_results/comparison_20251226_114313/WVF_seed0/model.pt
+
+Starting PRIMITIVE evaluation phase...
+Evaluating on the same primitive tasks used during training
+Using target network for stable Q-estimates
+
+Evaluating primitive task: red
+  red: 0.0% success rate (0/1)
+Evaluating primitive task: blue
+  blue: 100.0% success rate (1/1)
+Evaluating primitive task: box
+  box: 0.0% success rate (0/1)
+Evaluating primitive task: sphere
+  sphere: 0.0% success rate (0/1)
+
+Starting COMPOSITIONAL evaluation phase...
+Evaluating on compositional tasks using CORRECT composition:
+Finding goals in intersection of task goal sets
+Using target network for stable Q-estimates
+
+Evaluating blue_sphere = blue AND sphere
+  blue_sphere: 0.0% success rate (0/1)
+Evaluating red_sphere = red AND sphere
+  red_sphere: 0.0% success rate (0/1)
+Evaluating blue_box = blue AND box
+  blue_box: 0.0% success rate (0/1)
+Evaluating red_box = red AND box
+  red_box: 0.0% success rate (0/1)
+
+✓ CORRECTED WVF training complete (seed=0)
+  Training episodes: 1
+  Primitive eval episodes: 4
+  Compositional eval episodes: 4
+
+======================================================================
+JOB COMPLETE: Algorithm=WVF, Seed=0
+Results saved to: experiment_results/comparison_20251226_114313/WVF_seed0/results.json
+======================================================================
+
+submitit INFO (2025-12-26 11:43:25,894) - Job completed successfully
+submitit INFO (2025-12-26 11:43:25,896) - Exiting after successful completion

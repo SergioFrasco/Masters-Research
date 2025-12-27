@@ -1,0 +1,30 @@
+submitit INFO (2025-12-26 22:46:20,880) - Starting with JobEnvironment(job_id=171803, hostname=mscluster66.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-26 22:46:20,881) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_2Composition/experiment_results/comparison_20251226_224604/slurm_logs/171803_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=DQN, Seed=1
+Node: mscluster66
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED DQN (Seed=1)
+======================================================================
+
+Unified DQN Agent using device: cuda
+Task conditioning: Goal tiling with one-hot encoding
+Stability settings: tau=0.005, double_dqn=True, grad_clip=10.0
+Image shape: (3, 60, 80)
+Task-conditioned input shape: (7, 60, 80) (3 RGB + 4 task channels)
+Total network parameters: 872,100
+Starting training phase...
+Training DQN:   0%|          | 0/20000 [00:00<?, ?it/s]Training DQN:   0%|          | 2/20000 [00:02<6:40:19,  1.20s/it]Training DQN:   0%|          | 3/20000 [00:02<4:28:07,  1.24it/s]Training DQN:   0%|          | 4/20000 [00:03<4:51:24,  1.14it/s]Training DQN:   0%|          | 5/20000 [00:05<7:22:25,  1.33s/it]Training DQN:   0%|          | 6/20000 [00:08<8:57:24,  1.61s/it]Training DQN:   0%|          | 7/20000 [00:09<8:21:51,  1.51s/it]Training DQN:   0%|          | 8/20000 [00:09<6:14:41,  1.12s/it]Training DQN:   0%|          | 9/20000 [00:11<8:02:06,  1.45s/it]srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+srun: got SIGCONT
+submitit WARNING (2025-12-26 22:46:41,320) - Bypassing signal SIGCONT
+submitit WARNING (2025-12-26 22:46:41,320) - Bypassing signal SIGCONT
+slurmstepd-mscluster66: error: *** JOB 171803 ON mscluster66 CANCELLED AT 2025-12-26T22:46:41 ***
+slurmstepd-mscluster66: error: *** STEP 171803.0 ON mscluster66 CANCELLED AT 2025-12-26T22:46:41 ***
+srun: forcing job termination
+submitit WARNING (2025-12-26 22:46:41,332) - Bypassing signal SIGTERM
+submitit WARNING (2025-12-26 22:46:41,332) - Bypassing signal SIGTERM
+Training DQN:   0%|          | 10/20000 [00:13<9:19:32,  1.68s/it]Training DQN:   0%|          | 11/20000 [00:15<9:53:52,  1.78s/it]Training DQN:   0%|          | 12/20000 [00:16<7:07:00,  1.28s/it]Training DQN:   0%|          | 13/20000 [00:18<8:37:53,  1.55s/it]Training DQN:   0%|          | 14/20000 [00:18<6:33:25,  1.18s/it]Training DQN:   0%|          | 15/20000 [00:19<6:00:22,  1.08s/it]Training DQN:   0%|          | 16/20000 [00:20<6:38:40,  1.20s/it]Training DQN:   0%|          | 17/20000 [00:21<4:56:21,  1.12it/s]Training DQN:   0%|          | 18/20000 [00:21<4:17:17,  1.29it/s]Training DQN:   0%|          | 19/20000 [00:23<6:41:07,  1.20s/it]Training DQN:   0%|          | 20/20000 [00:25<7:15:13,  1.31s/it]Training DQN:   0%|          | 21/20000 [00:27<8:44:22,  1.57s/it]Training DQN:   0%|          | 22/20000 [00:29<9:45:34,  1.76s/it]Training DQN:   0%|          | 23/20000 [00:31<9:36:30,  1.73s/it]Training DQN:   0%|          | 24/20000 [00:33<10:08:24,  1.83s/it]Training DQN:   0%|          | 25/20000 [00:34<8:32:50,  1.54s/it] Training DQN:   0%|          | 26/20000 [00:36<9:37:33,  1.73s/it]Training DQN:   0%|          | 27/20000 [00:38<10:22:34,  1.87s/it]Training DQN:   0%|          | 28/20000 [00:40<10:54:35,  1.97s/it]srun: error: mscluster66: task 0: Killed

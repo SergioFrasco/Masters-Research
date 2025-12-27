@@ -1,0 +1,51 @@
+submitit INFO (2025-12-26 09:20:21,245) - Starting with JobEnvironment(job_id=171723, hostname=mscluster68.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-26 09:20:21,245) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_2Composition/experiment_results/comparison_20251226_092014/slurm_logs/171723_submitted.pkl
+libEGL warning: failed to open /dev/dri/renderD128: Permission denied
+
+libEGL warning: failed to open /dev/dri/renderD128: Permission denied
+
+submitit ERROR (2025-12-26 09:20:23,527) - Submitted job triggered an exception
+submitit ERROR (2025-12-26 09:20:23,527) - Submitted job triggered an exception
+Traceback (most recent call last):
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/_submit.py", line 11, in <module>
+    submitit_main()
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/submission.py", line 76, in submitit_main
+    process_job(args.folder)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/submission.py", line 69, in process_job
+    raise error
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/submission.py", line 52, in process_job
+    delayed = utils.DelayedSubmission.load(paths.submitted_pickle)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/utils.py", line 153, in load
+    obj = pickle_load(filepath)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/utils.py", line 232, in pickle_load
+    return pickle.load(ifile)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_2Composition/experiment_utils.py", line 28, in <module>
+    from env import DiscreteMiniWorldWrapper
+  File "/home-mscluster/sfrasco/Masters-Research/3D_2Composition/env/__init__.py", line 15, in <module>
+    from .discrete_miniworld_wrapper import DiscreteMiniWorldWrapper
+  File "/home-mscluster/sfrasco/Masters-Research/3D_2Composition/env/discrete_miniworld_wrapper.py", line 14, in <module>
+    from miniworld.envs.oneroom import OneRoom
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/miniworld/__init__.py", line 1, in <module>
+    from miniworld import envs, miniworld
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/miniworld/envs/__init__.py", line 3, in <module>
+    from miniworld.envs.collecthealth import CollectHealth
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/miniworld/envs/collecthealth.py", line 3, in <module>
+    from miniworld.entity import MeshEnt
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/miniworld/entity.py", line 6, in <module>
+    from pyglet.gl import (
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/pyglet/gl/__init__.py", line 232, in <module>
+    import pyglet.window
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/pyglet/window/__init__.py", line 1919, in <module>
+    gl._create_shadow_window()
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/pyglet/gl/__init__.py", line 206, in _create_shadow_window
+    _shadow_window = Window(width=1, height=1, visible=False)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/pyglet/window/headless/__init__.py", line 60, in __init__
+    super().__init__(*args, **kwargs)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/pyglet/window/__init__.py", line 606, in __init__
+    raise NoSuchConfigException('No standard config is available.')
+pyglet.window.NoSuchConfigException: No standard config is available.
+srun: error: mscluster68: task 0: Exited with exit code 1

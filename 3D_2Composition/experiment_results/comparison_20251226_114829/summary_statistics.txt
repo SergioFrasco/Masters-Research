@@ -1,0 +1,47 @@
+================================================================================
+EXPERIMENT SUMMARY STATISTICS
+================================================================================
+
+WVF:
+  Number of seeds: 3
+  Training episodes: 8000
+  Primitive eval episodes: 1600
+  Compositional eval episodes: 1600
+
+  Training phase:
+    Average reward: 0.7183 ± 0.2494
+    Final episode: 1.0000 ± 0.0000
+
+  Primitive evaluation phase:
+    Average reward: 0.5604 ± 0.3415
+    Train→Prim gap: 0.4396
+
+    Per-task breakdown:
+      red: 0.5783 ± 0.3382
+      blue: 0.6050 ± 0.3253
+      box: 0.5033 ± 0.3488
+      sphere: 0.5550 ± 0.3536
+
+  Compositional evaluation phase (zero-shot):
+    Average reward: 0.3094 ± 0.3002
+    Final episode: 0.0000 ± 0.0000
+    Prim→Comp gap: 0.2510
+    Train→Comp gap: 0.6906
+
+    Per-task breakdown:
+      blue_sphere: 0.3100 ± 0.3111
+      red_sphere: 0.3175 ± 0.3076
+      blue_box: 0.3092 ± 0.2899
+      red_box: 0.3008 ± 0.2923
+
+--------------------------------------------------------------------------------
+
+================================================================================
+COMPARISON TABLE
+================================================================================
+
+Algorithm         Train    Prim Eval    Comp Eval     Prim Gap     Comp Gap
+----------------------------------------------------------------------
+WVF              1.0000       0.5604       0.3094       0.4396       0.6906
+
+================================================================================

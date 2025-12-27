@@ -1,0 +1,32 @@
+submitit INFO (2025-12-26 19:05:05,303) - Starting with JobEnvironment(job_id=171766, hostname=mscluster70.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-26 19:05:05,303) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_2Composition/experiment_results/comparison_20251226_190500/slurm_logs/171766_submitted.pkl
+
+======================================================================
+STARTING JOB: Algorithm=WVF, Seed=1
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED WVF - OPTION A (Seed=1)
+Pure Task Conditioning (No Goal Conditioning)
+======================================================================
+
+UnifiedWorldValueFunctionAgent (Option A) using device: cuda
+Observation shape: (12, 60, 80)
+Task conditioning: Tiled as 4 extra channels
+CNN input shape: (16, 60, 80)
+NO goal conditioning - pure WVF approach
+  Task-conditioned network parameters: 529,828
+Starting training phase...
+Training on primitive tasks: red, blue, box, sphere
+
+Training WVF:   0%|          | 0/20000 [00:00<?, ?it/s]Training WVF:   0%|          | 3/20000 [00:00<18:32, 17.97it/s]Training WVF:   0%|          | 5/20000 [00:00<21:12, 15.71it/s]Training WVF:   0%|          | 7/20000 [00:00<24:27, 13.63it/s]Training WVF:   0%|          | 9/20000 [00:00<29:06, 11.45it/s]Training WVF:   0%|          | 11/20000 [00:00<34:07,  9.76it/s]Training WVF:   0%|          | 13/20000 [00:01<31:38, 10.53it/s]Training WVF:   0%|          | 15/20000 [00:01<28:58, 11.49it/s]Training WVF:   0%|          | 17/20000 [00:01<32:25, 10.27it/s]Training WVF:   0%|          | 19/20000 [00:01<33:42,  9.88it/s]Training WVF:   0%|          | 21/20000 [00:01<30:28, 10.93it/s]Training WVF:   0%|          | 23/20000 [00:02<29:01, 11.47it/s]Training WVF:   0%|          | 25/20000 [00:03<1:42:58,  3.23it/s]Training WVF:   0%|          | 26/20000 [00:05<3:23:07,  1.64it/s]Training WVF:   0%|          | 27/20000 [00:05<2:55:23,  1.90it/s]Training WVF:   0%|          | 28/20000 [00:07<4:01:12,  1.38it/s]Training WVF:   0%|          | 29/20000 [00:07<3:22:23,  1.64it/s]Training WVF:   0%|          | 30/20000 [00:08<4:17:52,  1.29it/s]Training WVF:   0%|          | 31/20000 [00:10<5:02:14,  1.10it/s]Training WVF:   0%|          | 32/20000 [00:11<5:18:23,  1.05it/s]Training WVF:   0%|          | 33/20000 [00:13<7:00:49,  1.26s/it]Training WVF:   0%|          | 34/20000 [00:14<7:01:08,  1.27s/it]Training WVF:   0%|          | 35/20000 [00:16<8:08:12,  1.47s/it]Training WVF:   0%|          | 36/20000 [00:18<8:59:45,  1.62s/it]Training WVF:   0%|          | 37/20000 [00:19<8:00:38,  1.44s/it]Training WVF:   0%|          | 38/20000 [00:21<8:53:40,  1.60s/it]Training WVF:   0%|          | 39/20000 [00:23<9:24:58,  1.70s/it]Training WVF:   0%|          | 40/20000 [00:23<7:25:33,  1.34s/it]Training WVF:   0%|          | 41/20000 [00:23<5:25:35,  1.02it/s]Training WVF:   0%|          | 42/20000 [00:25<7:07:12,  1.28s/it]Training WVF:   0%|          | 43/20000 [00:26<6:11:24,  1.12s/it]Training WVF:   0%|          | 44/20000 [00:26<4:36:27,  1.20it/s]Training WVF:   0%|          | 45/20000 [00:28<6:31:44,  1.18s/it]Training WVF:   0%|          | 46/20000 [00:30<6:38:01,  1.20s/it]Training WVF:   0%|          | 47/20000 [00:30<5:15:39,  1.05it/s]Training WVF:   0%|          | 48/20000 [00:31<5:28:26,  1.01it/s]Training WVF:   0%|          | 49/20000 [00:33<7:08:05,  1.29s/it]Training WVF:   0%|          | 50/20000 [00:35<8:16:57,  1.49s/it]Training WVF:   0%|          | 51/20000 [00:35<6:11:49,  1.12s/it]Training WVF:   0%|          | 52/20000 [00:37<7:40:03,  1.38s/it]Training WVF:   0%|          | 53/20000 [00:38<6:41:10,  1.21s/it]Training WVF:   0%|          | 54/20000 [00:40<8:01:05,  1.45s/it]Training WVF:   0%|          | 55/20000 [00:42<8:11:53,  1.48s/it]srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+submitit WARNING (2025-12-26 19:05:56,133) - Bypassing signal SIGCONT
+submitit WARNING (2025-12-26 19:05:56,133) - Bypassing signal SIGCONT
+srun: got SIGCONT
+slurmstepd-mscluster70: error: *** STEP 171766.0 ON mscluster70 CANCELLED AT 2025-12-26T19:05:56 ***
+slurmstepd-mscluster70: error: *** JOB 171766 ON mscluster70 CANCELLED AT 2025-12-26T19:05:56 ***
+srun: forcing job termination
+submitit WARNING (2025-12-26 19:05:56,154) - Bypassing signal SIGTERM
+submitit WARNING (2025-12-26 19:05:56,154) - Bypassing signal SIGTERM
+Training WVF:   0%|          | 56/20000 [00:42<6:00:35,  1.08s/it]Training WVF:   0%|          | 57/20000 [00:42<4:24:27,  1.26it/s]Training WVF:   0%|          | 58/20000 [00:44<6:25:01,  1.16s/it]Training WVF:   0%|          | 60/20000 [00:46<6:04:41,  1.10s/it]Training WVF:   0%|          | 61/20000 [00:47<5:54:13,  1.07s/it]Training WVF:   0%|          | 62/20000 [00:48<5:52:22,  1.06s/it]Training WVF:   0%|          | 63/20000 [00:48<4:37:54,  1.20it/s]Training WVF:   0%|          | 64/20000 [00:50<6:26:54,  1.16s/it]Training WVF:   0%|          | 65/20000 [00:51<6:04:15,  1.10s/it]Training WVF:   0%|          | 66/20000 [00:52<5:08:11,  1.08it/s]Training WVF:   0%|          | 68/20000 [00:52<3:03:44,  1.81it/s]Training WVF:   0%|          | 69/20000 [00:53<3:30:45,  1.58it/s]Training WVF:   0%|          | 70/20000 [00:55<5:29:07,  1.01it/s]Training WVF:   0%|          | 71/20000 [00:56<6:38:57,  1.20s/it]Training WVF:   0%|          | 72/20000 [00:58<6:25:11,  1.16s/it]Training WVF:   0%|          | 73/20000 [00:59<6:22:23,  1.15s/it]Training WVF:   0%|          | 74/20000 [01:01<7:45:00,  1.40s/it]Training WVF:   0%|          | 75/20000 [01:03<8:44:30,  1.58s/it]Training WVF:   0%|          | 77/20000 [01:03<5:10:12,  1.07it/s]Training WVF:   0%|          | 78/20000 [01:05<6:39:35,  1.20s/it]Training WVF:   0%|          | 79/20000 [01:07<7:20:46,  1.33s/it]Training WVF:   0%|          | 80/20000 [01:08<6:37:48,  1.20s/it]Training WVF:   0%|          | 81/20000 [01:08<5:39:25,  1.02s/it]Training WVF:   0%|          | 82/20000 [01:08<4:29:39,  1.23it/s]Training WVF:   0%|          | 83/20000 [01:09<3:24:23,  1.62it/s]Training WVF:   0%|          | 84/20000 [01:11<5:37:45,  1.02s/it]srun: error: mscluster70: task 0: Killed
