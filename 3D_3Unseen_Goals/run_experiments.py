@@ -42,8 +42,8 @@ RETRY_DELAY = 30  # Seconds to wait before resubmitting
 
 # Training configuration
 TRAINING_CONFIG = {
-    "training_episodes": 1,
-    "eval_episodes_per_task": 1,  # Per task: 4 primitives + 4 seen comp + 1 green + 2 green comp = 11k eval episodes
+    "training_episodes": 20000,
+    "eval_episodes_per_task": 1000,  # Per task: 4 primitives + 4 seen comp + 1 green + 2 green comp = 11k eval episodes
     "max_steps": 200,
     "env_size": 10,
     "sr_freeze_episode": 3000,
