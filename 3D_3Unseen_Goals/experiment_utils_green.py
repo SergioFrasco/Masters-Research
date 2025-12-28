@@ -750,11 +750,12 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
     for comp_task in SEEN_COMPOSITIONAL_TASKS:
         env.set_task(comp_task)
         task_name = comp_task['name']
+        features = comp_task['features']  # Use features list for compositional tasks
         print(f"Evaluating seen compositional task: {task_name}...")
         
         for ep in range(eval_episodes_per_task):
             obs, info = env.reset()
-            stacked_obs = agent.reset_episode(obs, comp_task['name'])
+            stacked_obs = agent.reset_episode(obs, features)  # Pass features list
             episode_reward = 0
             
             for step in range(max_steps):
@@ -779,12 +780,12 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
     
     for green_task in GREEN_SIMPLE_TASKS:
         env.set_task(green_task)
-        task_name = green_task['name']
+        task_name = green_task['name']  # 'green'
         print(f"Evaluating green simple task: {task_name} (UNSEEN)...")
         
         for ep in range(eval_episodes_per_task):
             obs, info = env.reset()
-            stacked_obs = agent.reset_episode(obs, green_task['name'])
+            stacked_obs = agent.reset_episode(obs, task_name)  # Pass task name for simple task
             episode_reward = 0
             
             for step in range(max_steps):
@@ -809,11 +810,12 @@ def train_unified_lstm_dqn(seed, training_episodes, eval_episodes_per_task, max_
     for green_comp_task in GREEN_COMPOSITIONAL_TASKS:
         env.set_task(green_comp_task)
         task_name = green_comp_task['name']
+        features = green_comp_task['features']  # Use features list for compositional
         print(f"Evaluating green compositional task: {task_name} (UNSEEN)...")
         
         for ep in range(eval_episodes_per_task):
             obs, info = env.reset()
-            stacked_obs = agent.reset_episode(obs, green_comp_task['name'])
+            stacked_obs = agent.reset_episode(obs, features)  # Pass features list
             episode_reward = 0
             
             for step in range(max_steps):
