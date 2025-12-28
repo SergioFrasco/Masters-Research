@@ -1,0 +1,85 @@
+{
+  "architecture": "Unified WVF (Option A) - Pure Task Conditioning",
+  "training": {
+    "total_episodes": 20000,
+    "final_success_rate": 0.97,
+    "training_tasks": [
+      "red",
+      "blue",
+      "box",
+      "sphere"
+    ],
+    "per_task_final_success": {
+      "red": 0.96,
+      "blue": 0.98,
+      "box": 0.91,
+      "sphere": 0.98
+    },
+    "model_path": "results/current/12_27_2025/2/wvf_no_green_model.pt"
+  },
+  "evaluation_seen_simple": {
+    "red": {
+      "success_rate": 0.9,
+      "mean_length": 28.302
+    },
+    "blue": {
+      "success_rate": 0.831,
+      "mean_length": 42.692
+    },
+    "box": {
+      "success_rate": 0.903,
+      "mean_length": 30.234
+    },
+    "sphere": {
+      "success_rate": 0.908,
+      "mean_length": 28.625
+    }
+  },
+  "evaluation_seen_compositional": {
+    "red_box": {
+      "success_rate": 0.716,
+      "mean_length": 68.023
+    },
+    "red_sphere": {
+      "success_rate": 0.764,
+      "mean_length": 59.28
+    },
+    "blue_box": {
+      "success_rate": 0.713,
+      "mean_length": 69.42
+    },
+    "blue_sphere": {
+      "success_rate": 0.798,
+      "mean_length": 54.379
+    }
+  },
+  "evaluation_unseen_simple": {
+    "green": {
+      "success_rate": 0.453,
+      "mean_length": 119.724,
+      "note": "ZERO-SHOT: Never saw green during training"
+    }
+  },
+  "evaluation_unseen_compositional": {
+    "green_box": {
+      "success_rate": 0.189,
+      "mean_length": 166.526,
+      "note": "ZERO-SHOT: Novel green+shape composition via min()"
+    },
+    "green_sphere": {
+      "success_rate": 0.242,
+      "mean_length": 157.763,
+      "note": "ZERO-SHOT: Novel green+shape composition via min()"
+    }
+  },
+  "summary": {
+    "avg_seen_simple": 0.8855,
+    "avg_seen_comp": 0.74775,
+    "avg_unseen_simple": 0.453,
+    "avg_unseen_comp": 0.2155
+  },
+  "plots": {
+    "timeline": "results/current/12_27_2025/2/wvf_experiment_timeline.png",
+    "summary": "results/current/12_27_2025/2/wvf_comprehensive_summary.png"
+  }
+}

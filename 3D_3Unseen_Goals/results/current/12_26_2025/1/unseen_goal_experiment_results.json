@@ -1,0 +1,83 @@
+{
+  "training": {
+    "total_episodes": 3500,
+    "final_success_rate": 0.86,
+    "training_tasks": [
+      "red",
+      "blue",
+      "box",
+      "sphere"
+    ],
+    "per_task_final_success": {
+      "red": 0.92,
+      "blue": 0.9,
+      "box": 0.89,
+      "sphere": 0.88
+    },
+    "model_path": "results/current/12_26_2025/1/unified_dqn_no_green_model.pt"
+  },
+  "evaluation_seen_simple": {
+    "red": {
+      "success_rate": 0.3233333333333333,
+      "mean_length": 137.15666666666667
+    },
+    "blue": {
+      "success_rate": 0.3,
+      "mean_length": 141.79333333333332
+    },
+    "box": {
+      "success_rate": 0.3466666666666667,
+      "mean_length": 132.83333333333334
+    },
+    "sphere": {
+      "success_rate": 0.29,
+      "mean_length": 143.98
+    }
+  },
+  "evaluation_seen_compositional": {
+    "red_box": {
+      "success_rate": 0.043333333333333335,
+      "mean_length": 191.44666666666666
+    },
+    "red_sphere": {
+      "success_rate": 0.13333333333333333,
+      "mean_length": 174.15666666666667
+    },
+    "blue_box": {
+      "success_rate": 0.09,
+      "mean_length": 182.38666666666666
+    },
+    "blue_sphere": {
+      "success_rate": 0.03666666666666667,
+      "mean_length": 192.76
+    }
+  },
+  "evaluation_unseen_simple": {
+    "green": {
+      "success_rate": 0.06,
+      "mean_length": 188.15,
+      "note": "ZERO-SHOT: Never saw green during training"
+    }
+  },
+  "evaluation_unseen_compositional": {
+    "green_box": {
+      "success_rate": 0.03,
+      "mean_length": 194.07333333333332,
+      "note": "ZERO-SHOT: Novel green+shape composition"
+    },
+    "green_sphere": {
+      "success_rate": 0.05,
+      "mean_length": 190.3,
+      "note": "ZERO-SHOT: Novel green+shape composition"
+    }
+  },
+  "summary": {
+    "avg_seen_simple": 0.315,
+    "avg_seen_comp": 0.07583333333333334,
+    "avg_unseen_simple": 0.06,
+    "avg_unseen_comp": 0.04
+  },
+  "plots": {
+    "timeline": "results/current/12_26_2025/1/complete_experiment_timeline.png"
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "architecture": "Unified LSTM-DQN with Frame Stacking + Goal Tiling",
+  "training": {
+    "total_episodes": 8000,
+    "final_success_rate": 1.0,
+    "training_tasks": [
+      "red",
+      "blue",
+      "box",
+      "sphere"
+    ],
+    "per_task_final_success": {
+      "red": 1.0,
+      "blue": 1.0,
+      "box": 0.98,
+      "sphere": 1.0
+    },
+    "model_path": "results/current/12_26_2025/2/unified_lstm_dqn_no_green_model.pt"
+  },
+  "evaluation_seen_simple": {
+    "red": {
+      "success_rate": 0.8975,
+      "mean_length": 29.425
+    },
+    "blue": {
+      "success_rate": 0.8475,
+      "mean_length": 39.395
+    },
+    "box": {
+      "success_rate": 0.8025,
+      "mean_length": 48.38
+    },
+    "sphere": {
+      "success_rate": 0.7925,
+      "mean_length": 48.5125
+    }
+  },
+  "evaluation_seen_compositional": {
+    "red_box": {
+      "success_rate": 0.5975,
+      "mean_length": 88.625
+    },
+    "red_sphere": {
+      "success_rate": 0.645,
+      "mean_length": 79.9975
+    },
+    "blue_box": {
+      "success_rate": 0.5675,
+      "mean_length": 94.095
+    },
+    "blue_sphere": {
+      "success_rate": 0.655,
+      "mean_length": 78.3425
+    }
+  },
+  "evaluation_unseen_simple": {
+    "green": {
+      "success_rate": 0.105,
+      "mean_length": 179.83,
+      "note": "ZERO-SHOT: Never saw green during training"
+    }
+  },
+  "evaluation_unseen_compositional": {
+    "green_box": {
+      "success_rate": 0.0475,
+      "mean_length": 190.9275,
+      "note": "ZERO-SHOT: Novel green+shape composition"
+    },
+    "green_sphere": {
+      "success_rate": 0.055,
+      "mean_length": 189.45,
+      "note": "ZERO-SHOT: Novel green+shape composition"
+    }
+  },
+  "summary": {
+    "avg_seen_simple": 0.8350000000000001,
+    "avg_seen_comp": 0.61625,
+    "avg_unseen_simple": 0.105,
+    "avg_unseen_comp": 0.051250000000000004
+  },
+  "plots": {
+    "timeline": "results/current/12_26_2025/2/lstm_dqn_experiment_timeline.png",
+    "summary": "results/current/12_26_2025/2/lstm_dqn_comprehensive_summary.png"
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "training": {
+    "total_episodes": 3000,
+    "final_success_rate": 0.87,
+    "training_tasks": [
+      "red",
+      "blue",
+      "box",
+      "sphere"
+    ],
+    "per_task_final_success": {
+      "red": 0.85,
+      "blue": 0.87,
+      "box": 0.9,
+      "sphere": 0.92
+    },
+    "model_path": "results/current/12_25_2025/1/unified_dqn_no_green_model.pt"
+  },
+  "evaluation_seen_simple": {
+    "red": {
+      "success_rate": 0.3325,
+      "mean_length": 135.365
+    },
+    "blue": {
+      "success_rate": 0.3375,
+      "mean_length": 134.5125
+    },
+    "box": {
+      "success_rate": 0.295,
+      "mean_length": 142.6225
+    },
+    "sphere": {
+      "success_rate": 0.275,
+      "mean_length": 146.435
+    }
+  },
+  "evaluation_seen_compositional": {
+    "red_box": {
+      "success_rate": 0.0125,
+      "mean_length": 197.5125
+    },
+    "red_sphere": {
+      "success_rate": 0.0375,
+      "mean_length": 192.6125
+    },
+    "blue_box": {
+      "success_rate": 0.12,
+      "mean_length": 176.5175
+    },
+    "blue_sphere": {
+      "success_rate": 0.05,
+      "mean_length": 190.1225
+    }
+  },
+  "evaluation_unseen_simple": {
+    "green": {
+      "success_rate": 0.0,
+      "mean_length": 200.0,
+      "note": "ZERO-SHOT: Never saw green during training"
+    }
+  },
+  "evaluation_unseen_compositional": {
+    "green_box": {
+      "success_rate": 0.0,
+      "mean_length": 200.0,
+      "note": "ZERO-SHOT: Novel green+shape composition"
+    },
+    "green_sphere": {
+      "success_rate": 0.0,
+      "mean_length": 200.0,
+      "note": "ZERO-SHOT: Novel green+shape composition"
+    }
+  },
+  "summary": {
+    "avg_seen_simple": 0.31000000000000005,
+    "avg_seen_comp": 0.05499999999999999,
+    "avg_unseen_simple": 0.0,
+    "avg_unseen_comp": 0.0
+  },
+  "plots": {
+    "timeline": "results/current/12_25_2025/1/complete_experiment_timeline.png"
+  }
+}
