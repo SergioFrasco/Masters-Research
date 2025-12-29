@@ -31,7 +31,7 @@ SUBMISSION_DELAY = 5
 # ============================================================================
 
 # Easily adjustable number of seeds
-NUM_SEEDS = 3
+NUM_SEEDS = 2
 
 # Algorithms to compare
 ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
