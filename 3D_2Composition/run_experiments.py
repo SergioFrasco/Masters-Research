@@ -24,14 +24,14 @@ import numpy as np
 import torch
 
 # Delay between job submissions (seconds) to avoid race conditions
-SUBMISSION_DELAY = 5
+SUBMISSION_DELAY = 3
 
 # ============================================================================
 # EXPERIMENT CONFIGURATION
 # ============================================================================
 
 # Easily adjustable number of seeds
-NUM_SEEDS = 1
+NUM_SEEDS = 2
 
 # Algorithms to compare
 ALGORITHMS = ["SR", "DQN", "LSTM", "WVF"]
@@ -43,7 +43,7 @@ RETRY_DELAY = 30  # Seconds to wait before resubmitting
 # Training configuration
 TRAINING_CONFIG = {
     "training_episodes": 20000,
-    "eval_episodes_per_task": 1000,
+    "eval_episodes_per_task": 1500,
     "max_steps": 200,
     "env_size": 10,
     "sr_freeze_episode": 3000,
