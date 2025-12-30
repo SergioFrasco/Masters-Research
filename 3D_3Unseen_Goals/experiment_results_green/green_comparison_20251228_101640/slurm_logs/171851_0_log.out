@@ -1,0 +1,54 @@
+submitit INFO (2025-12-28 10:17:00,295) - Starting with JobEnvironment(job_id=171851, hostname=mscluster59.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-28 10:17:00,296) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/experiment_results_green/green_comparison_20251228_101640/slurm_logs/171851_submitted.pkl
+
+======================================================================
+STARTING GREEN EXPERIMENT JOB: Algorithm=WVF, Seed=0
+Node: mscluster59
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED WVF (Seed=0)
+======================================================================
+
+UnifiedWorldValueFunctionAgent (5-task encoding) using device: cuda
+Observation shape: (12, 60, 80)
+Task conditioning: Tiled as 5 extra channels
+CNN input shape: (17, 60, 80)
+Task space: ['red', 'blue', 'green', 'box', 'sphere']
+Training tasks: ['red', 'blue', 'box', 'sphere'] (green reserved for zero-shot)
+  Task-conditioned network parameters: 531,876
+Starting training phase (red/blue only)...
+Training WVF:   0%|          | 0/1 [00:00<?, ?it/s]Training WVF: 100%|██████████| 1/1 [00:00<00:00, 13.41it/s]
+WVF model (5-task encoding) saved to experiment_results_green/green_comparison_20251228_101640/WVF_seed0/model.pt
+
+Starting PRIMITIVE evaluation phase (seen)...
+Environment mode: TRAINING (red/blue only)
+Evaluating primitive task: red...
+Evaluating primitive task: blue...
+Evaluating primitive task: box...
+Evaluating primitive task: sphere...
+
+Starting SEEN COMPOSITIONAL evaluation phase...
+Evaluating seen compositional task: blue_sphere...
+Evaluating seen compositional task: red_sphere...
+Evaluating seen compositional task: blue_box...
+Evaluating seen compositional task: red_box...
+
+Starting GREEN SIMPLE evaluation phase (UNSEEN)...
+Environment mode: EVALUATION (all colors)
+Evaluating green simple task: green (UNSEEN)...
+
+Starting GREEN COMPOSITIONAL evaluation phase (UNSEEN)...
+Evaluating green compositional task: green_box (UNSEEN)...
+Evaluating green compositional task: green_sphere (UNSEEN)...
+
+✓ WVF training complete (seed=0)
+
+======================================================================
+GREEN EXPERIMENT JOB COMPLETE: Algorithm=WVF, Seed=0
+Results saved to: experiment_results_green/green_comparison_20251228_101640/WVF_seed0/results.json
+======================================================================
+
+submitit INFO (2025-12-28 10:17:17,722) - Job completed successfully
+submitit INFO (2025-12-28 10:17:17,728) - Exiting after successful completion

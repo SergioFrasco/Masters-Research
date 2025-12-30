@@ -1,0 +1,20 @@
+Algorithm: LSTM
+Seed: 0
+Node: mscluster53
+Error: Unknown task: blue_sphere. Must be one of ['red', 'blue', 'green', 'box', 'sphere']
+
+Traceback:
+Traceback (most recent call last):
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/run_experiments.py", line 172, in run_single_experiment
+    results = train_unified_lstm_dqn(
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/experiment_utils_green.py", line 757, in train_unified_lstm_dqn
+    stacked_obs = agent.reset_episode(obs, comp_task['name'])
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 665, in reset_episode
+    self.set_task(task_identifier)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 611, in set_task
+    self.current_task_channels = self.create_task_channels(task_identifier)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 594, in create_task_channels
+    encoding = self.encode_task(task_identifier)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 540, in encode_task
+    raise ValueError(f"Unknown task: {task_name}. Must be one of {list(self.TASK_ENCODINGS.keys())}")
+ValueError: Unknown task: blue_sphere. Must be one of ['red', 'blue', 'green', 'box', 'sphere']

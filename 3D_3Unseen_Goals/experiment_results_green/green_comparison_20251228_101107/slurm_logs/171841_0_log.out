@@ -1,0 +1,70 @@
+submitit INFO (2025-12-28 10:11:18,802) - Starting with JobEnvironment(job_id=171841, hostname=mscluster58.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-28 10:11:18,802) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/experiment_results_green/green_comparison_20251228_101107/slurm_logs/171841_submitted.pkl
+
+======================================================================
+STARTING GREEN EXPERIMENT JOB: Algorithm=LSTM, Seed=0
+Node: mscluster58
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED LSTM-DQN (Seed=0)
+======================================================================
+
+Unified LSTM-DQN Agent using device: cuda
+Frame stacking: k=4, LSTM size: 64
+Task space: [red, blue, green, box, sphere] (5 dimensions)
+NOTE: Green reserved for zero-shot evaluation only!
+Single frame shape: (3, 60, 80)
+Stacked observation shape (with task): (17, 60, 80)
+Total network parameters: 531,876
+Starting training phase (red/blue only)...
+Training LSTM-DQN:   0%|          | 0/1 [00:00<?, ?it/s]Training LSTM-DQN: 100%|██████████| 1/1 [00:00<00:00,  6.77it/s]Training LSTM-DQN: 100%|██████████| 1/1 [00:00<00:00,  6.76it/s]
+Model saved to experiment_results_green/green_comparison_20251228_101107/LSTM_seed0/model.pt
+
+Starting PRIMITIVE evaluation phase (seen)...
+Environment mode: TRAINING (red/blue only)
+Evaluating primitive task: red...
+Evaluating primitive task: blue...
+Evaluating primitive task: box...
+Evaluating primitive task: sphere...
+
+Starting SEEN COMPOSITIONAL evaluation phase...
+Evaluating seen compositional task: blue_sphere...
+
+======================================================================
+GREEN EXPERIMENT JOB FAILED: Algorithm=LSTM, Seed=0
+Error: Unknown task: blue_sphere. Must be one of ['red', 'blue', 'green', 'box', 'sphere']
+======================================================================
+
+submitit ERROR (2025-12-28 10:11:27,546) - Submitted job triggered an exception
+submitit ERROR (2025-12-28 10:11:27,546) - Submitted job triggered an exception
+Traceback (most recent call last):
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/_submit.py", line 11, in <module>
+    submitit_main()
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/submission.py", line 76, in submitit_main
+    process_job(args.folder)
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/submission.py", line 69, in process_job
+    raise error
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/submission.py", line 55, in process_job
+    result = delayed.result()
+  File "/home-mscluster/sfrasco/miniconda3/envs/compneuro/lib/python3.10/site-packages/submitit/core/utils.py", line 137, in result
+    self._result = self.function(*self.args, **self.kwargs)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/run_experiments.py", line 172, in run_single_experiment
+    results = train_unified_lstm_dqn(
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/experiment_utils_green.py", line 757, in train_unified_lstm_dqn
+    stacked_obs = agent.reset_episode(obs, comp_task['name'])
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 665, in reset_episode
+    self.set_task(task_identifier)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 611, in set_task
+    self.current_task_channels = self.create_task_channels(task_identifier)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 594, in create_task_channels
+    encoding = self.encode_task(task_identifier)
+  File "/home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/agents/dqn_lstm_baseline.py", line 540, in encode_task
+    raise ValueError(f"Unknown task: {task_name}. Must be one of {list(self.TASK_ENCODINGS.keys())}")
+ValueError: Unknown task: blue_sphere. Must be one of ['red', 'blue', 'green', 'box', 'sphere']
+srun: error: mscluster58: task 0: Exited with exit code 1

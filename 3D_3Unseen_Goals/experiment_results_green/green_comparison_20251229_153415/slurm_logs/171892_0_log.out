@@ -1,0 +1,30 @@
+submitit INFO (2025-12-29 15:34:32,247) - Starting with JobEnvironment(job_id=171892, hostname=mscluster49.ms.wits.ac.za, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2025-12-29 15:34:32,247) - Loading pickle: /home-mscluster/sfrasco/Masters-Research/3D_3Unseen_Goals/experiment_results_green/green_comparison_20251229_153415/slurm_logs/171892_submitted.pkl
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+submitit WARNING (2025-12-29 15:34:33,186) - Bypassing signal SIGCONT
+submitit WARNING (2025-12-29 15:34:33,186) - Bypassing signal SIGCONT
+srun: got SIGCONT
+slurmstepd-mscluster49: error: *** STEP 171892.0 ON mscluster49 CANCELLED AT 2025-12-29T15:34:33 ***
+submitit WARNING (2025-12-29 15:34:33,198) - Bypassing signal SIGTERM
+submitit WARNING (2025-12-29 15:34:33,198) - Bypassing signal SIGTERM
+slurmstepd-mscluster49: error: *** JOB 171892 ON mscluster49 CANCELLED AT 2025-12-29T15:34:33 ***
+srun: forcing job termination
+
+======================================================================
+STARTING GREEN EXPERIMENT JOB: Algorithm=DQN, Seed=0
+Node: mscluster49
+======================================================================
+
+
+======================================================================
+TRAINING UNIFIED DQN (Seed=0)
+======================================================================
+
+Unified DQN Agent using device: cuda
+Task space: [red, blue, green, box, sphere]
+NOTE: Green reserved for zero-shot evaluation only!
+Image shape: (3, 60, 80)
+Task-conditioned input: (8, 60, 80) (3 RGB + 5 task channels)
+Total network parameters: 874,148
+Starting training phase (red/blue only)...
+Training DQN:   0%|          | 0/20000 [00:00<?, ?it/s]Training DQN:   0%|          | 2/20000 [00:01<5:00:24,  1.11it/s]Training DQN:   0%|          | 3/20000 [00:03<6:33:36,  1.18s/it]Training DQN:   0%|          | 4/20000 [00:04<5:46:47,  1.04s/it]Training DQN:   0%|          | 5/20000 [00:06<8:13:50,  1.48s/it]Training DQN:   0%|          | 6/20000 [00:07<7:03:50,  1.27s/it]Training DQN:   0%|          | 7/20000 [00:09<8:52:10,  1.60s/it]Training DQN:   0%|          | 8/20000 [00:10<7:41:00,  1.38s/it]Training DQN:   0%|          | 9/20000 [00:12<9:12:55,  1.66s/it]Training DQN:   0%|          | 10/20000 [00:15<10:19:21,  1.86s/it]Training DQN:   0%|          | 11/20000 [00:17<11:02:16,  1.99s/it]Training DQN:   0%|          | 12/20000 [00:19<11:00:10,  1.98s/it]Training DQN:   0%|          | 13/20000 [00:20<8:59:26,  1.62s/it] Training DQN:   0%|          | 14/20000 [00:22<10:14:15,  1.84s/it]srun: error: mscluster49: task 0: Killed

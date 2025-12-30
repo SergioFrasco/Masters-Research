@@ -1,0 +1,58 @@
+[
+  {
+    "algorithm": "SR",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/SR_seed0",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/SR_seed0/results.json"
+  },
+  {
+    "algorithm": "SR",
+    "seed": 1,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/SR_seed1",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/SR_seed1/results.json"
+  },
+  {
+    "algorithm": "LSTM",
+    "seed": 1,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/LSTM_seed1",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/LSTM_seed1/results.json"
+  },
+  {
+    "algorithm": "LSTM",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/LSTM_seed0",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/LSTM_seed0/results.json"
+  },
+  {
+    "algorithm": "WVF",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/WVF_seed0",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/WVF_seed0/results.json"
+  },
+  {
+    "algorithm": "WVF",
+    "seed": 1,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/WVF_seed1",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/WVF_seed1/results.json"
+  },
+  {
+    "algorithm": "DQN",
+    "seed": 1,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/DQN_seed1",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/DQN_seed1/results.json"
+  },
+  {
+    "algorithm": "DQN",
+    "seed": 0,
+    "status": "success",
+    "output_dir": "experiment_results_green/green_comparison_20251229_153537/DQN_seed0",
+    "results_file": "experiment_results_green/green_comparison_20251229_153537/DQN_seed0/results.json"
+  }
+]

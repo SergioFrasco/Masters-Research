@@ -1,0 +1,19 @@
+{
+  "algorithm": "WVF",
+  "seed": 0,
+  "config": {
+    "training_episodes": 1,
+    "eval_episodes_per_task": 1,
+    "max_steps": 200,
+    "env_size": 10,
+    "sr_freeze_episode": 3000,
+    "learning_rate": 0.0001,
+    "gamma": 0.99,
+    "epsilon_start": 1.0,
+    "epsilon_end": 0.05,
+    "epsilon_decay": 0.9995
+  },
+  "timestamp": "2025-12-28T10:17:11.514833",
+  "node": "mscluster59",
+  "experiment_type": "green_object_generalization"
+}

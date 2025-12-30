@@ -1,0 +1,37 @@
+{
+  "algorithm": "WVF",
+  "seed": 0,
+  "all_rewards": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+  ],
+  "episode_labels": [
+    "sphere",
+    "eval_primitive_red",
+    "eval_primitive_blue",
+    "eval_primitive_box",
+    "eval_primitive_sphere",
+    "eval_seen_comp_blue_sphere",
+    "eval_seen_comp_red_sphere",
+    "eval_seen_comp_blue_box",
+    "eval_seen_comp_red_box",
+    "eval_green_simple_green",
+    "eval_green_comp_green_box",
+    "eval_green_comp_green_sphere"
+  ],
+  "training_episodes": 1,
+  "primitive_eval_episodes": 4,
+  "seen_comp_eval_episodes": 4,
+  "green_simple_eval_episodes": 1,
+  "green_comp_eval_episodes": 2
+}

@@ -1,0 +1,163 @@
+================================================================================
+GREEN OBJECT GENERALIZATION EXPERIMENT SUMMARY
+================================================================================
+
+EXPERIMENT DESIGN:
+  Training: Random primitive tasks (red, blue, box, sphere)
+  Evaluation Phases:
+    1. Primitive tasks (seen)
+    2. Seen compositional (red/blue + shape)
+    3. GREEN simple (UNSEEN - zero-shot)
+    4. GREEN compositional (UNSEEN - zero-shot)
+
+================================================================================
+
+SR:
+  Number of seeds: 1
+  Training episodes: 1
+
+  TRAINING PHASE (red/blue only):
+    Average reward: 0.0000 ± 0.0000
+    Final episode: 0.0000 ± 0.0000
+
+  EVALUATION - PRIMITIVE TASKS (seen):
+    Episodes: 4
+    Average reward: 0.2497 ± 0.0000
+
+  EVALUATION - SEEN COMPOSITIONAL (red/blue + shape):
+    Episodes: 4
+    Average reward: 0.0000 ± 0.0000
+
+  EVALUATION - GREEN SIMPLE (UNSEEN - zero-shot):
+    Episodes: 1
+    Average reward: 0.0000 ± 0.0000
+    Generalization gap (seen prim → green): +0.2497
+
+  EVALUATION - GREEN COMPOSITIONAL (UNSEEN - zero-shot):
+    Episodes: 2
+    Average reward: 0.0000 ± 0.0000
+    Generalization gap (seen comp → green comp): +0.0000
+
+  ZERO-SHOT GENERALIZATION ANALYSIS:
+    Seen primitives → Unseen green simple: +0.2497
+    Seen compositional → Unseen green comp: +0.0000
+    Overall seen → Overall unseen: +0.1249
+
+--------------------------------------------------------------------------------
+
+DQN:
+  Number of seeds: 1
+  Training episodes: 1
+
+  TRAINING PHASE (red/blue only):
+    Average reward: 0.0000 ± 0.0000
+    Final episode: 0.0000 ± 0.0000
+
+  EVALUATION - PRIMITIVE TASKS (seen):
+    Episodes: 4
+    Average reward: 0.0000 ± 0.0000
+
+  EVALUATION - SEEN COMPOSITIONAL (red/blue + shape):
+    Episodes: 4
+    Average reward: 0.0000 ± 0.0000
+
+  EVALUATION - GREEN SIMPLE (UNSEEN - zero-shot):
+    Episodes: 1
+    Average reward: 0.0000 ± 0.0000
+    Generalization gap (seen prim → green): +0.0000
+
+  EVALUATION - GREEN COMPOSITIONAL (UNSEEN - zero-shot):
+    Episodes: 2
+    Average reward: 0.0000 ± 0.0000
+    Generalization gap (seen comp → green comp): +0.0000
+
+  ZERO-SHOT GENERALIZATION ANALYSIS:
+    Seen primitives → Unseen green simple: +0.0000
+    Seen compositional → Unseen green comp: +0.0000
+    Overall seen → Overall unseen: +0.0000
+
+--------------------------------------------------------------------------------
+
+LSTM:
+  Number of seeds: 1
+  Training episodes: 1
+
+  TRAINING PHASE (red/blue only):
+    Average reward: 0.0000 ± 0.0000
+    Final episode: 0.0000 ± 0.0000
+
+  EVALUATION - PRIMITIVE TASKS (seen):
+    Episodes: 4
+    Average reward: 0.0000 ± 0.0000
+
+  EVALUATION - SEEN COMPOSITIONAL (red/blue + shape):
+    Episodes: 4
+    Average reward: 0.0000 ± 0.0000
+
+  EVALUATION - GREEN SIMPLE (UNSEEN - zero-shot):
+    Episodes: 1
+    Average reward: 0.0000 ± 0.0000
+    Generalization gap (seen prim → green): +0.0000
+
+  EVALUATION - GREEN COMPOSITIONAL (UNSEEN - zero-shot):
+    Episodes: 2
+    Average reward: 0.0000 ± 0.0000
+    Generalization gap (seen comp → green comp): +0.0000
+
+  ZERO-SHOT GENERALIZATION ANALYSIS:
+    Seen primitives → Unseen green simple: +0.0000
+    Seen compositional → Unseen green comp: +0.0000
+    Overall seen → Overall unseen: +0.0000
+
+--------------------------------------------------------------------------------
+
+WVF:
+  Number of seeds: 1
+  Training episodes: 1
+
+  TRAINING PHASE (red/blue only):
+    Average reward: 1.0000 ± 0.0000
+    Final episode: 1.0000 ± 0.0000
+
+  EVALUATION - PRIMITIVE TASKS (seen):
+    Episodes: 4
+    Average reward: 0.0000 ± 0.0000
+
+  EVALUATION - SEEN COMPOSITIONAL (red/blue + shape):
+    Episodes: 4
+    Average reward: 0.0000 ± 0.0000
+
+  EVALUATION - GREEN SIMPLE (UNSEEN - zero-shot):
+    Episodes: 1
+    Average reward: 1.0000 ± 0.0000
+    Generalization gap (seen prim → green): -1.0000
+
+  EVALUATION - GREEN COMPOSITIONAL (UNSEEN - zero-shot):
+    Episodes: 2
+    Average reward: 0.0000 ± 0.0000
+    Generalization gap (seen comp → green comp): +0.0000
+
+  ZERO-SHOT GENERALIZATION ANALYSIS:
+    Seen primitives → Unseen green simple: -1.0000
+    Seen compositional → Unseen green comp: +0.0000
+    Overall seen → Overall unseen: -0.5000
+
+--------------------------------------------------------------------------------
+
+================================================================================
+CROSS-ALGORITHM COMPARISON
+================================================================================
+
+GREEN SIMPLE (UNSEEN) PERFORMANCE:
+  SR    : 0.0000
+  DQN   : 0.0000
+  LSTM  : 0.0000
+  WVF   : 1.0000
+
+GREEN COMPOSITIONAL (UNSEEN) PERFORMANCE:
+  SR    : 0.0000
+  DQN   : 0.0000
+  LSTM  : 0.0000
+  WVF   : 0.0000
+
+================================================================================
