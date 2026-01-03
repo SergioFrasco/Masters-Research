@@ -10,7 +10,7 @@ from agents import (
     SuccessorAgentPartialQLearning, 
     DQNAgentPartial, 
     LSTM_DQN_Agent,
-    LSTM_WVF_Agent  # NEW
+    GoalConditionedLSTMDQN
 )
 from models import Autoencoder
 from utils.plotting import generate_save_path
@@ -966,17 +966,26 @@ class ExperimentRunner:
         }
 
     
-    def run_lstm_wvf_experiment(self, episodes=5000, max_steps=200, seed=42, manual=False):
+    
+    def run_lstm_wvf_experiment(self, episodes=5000, max_steps=200, seed=20, manual=False):
         """
-        Run LSTM-WVF agent experiment - OPTIMIZED VERSION.
+        Run Goal-Conditioned LSTM-DQN experiment (UVF baseline).
         
-        Changes from original:
-        - Single goal storage instead of multi-goal duplication
-        - Reduced visualization frequency
-        - Skips expensive Q-value computation
+        This agent:
+        - Uses VIEW-BASED goal conditioning Q(s, a, g) where g = goal position in 7×7 view
+        - LSTM for memory over partial observations
+        - Frame stacking for visual context
+        - Sequence-based training
+        
+        Handles random goal positions:
+        - Goals spawn at different (x, y) each episode
+        - Agent conditions on RELATIVE position in its 7×7 view
+        - Learns: "when goal at (x,y) in view, take action a"
+        - This generalizes across episodes naturally!
+        
+        Parallels the 3D WVF compositional agent but without task composition.
         """
         
-        # Set seeds
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
@@ -988,9 +997,15 @@ class ExperimentRunner:
         else:
             env = SimpleEnv(size=self.env_size)
         
-        # Initialize LSTM-WVF agent (use the optimized version)
-        agent = LSTM_WVF_Agent(
-            env=env,
+        # Import the agent
+        from agents import GoalConditionedLSTMDQN
+        
+        # Initialize agent
+        agent = GoalConditionedLSTMDQN(
+            env,
+            frame_stack_k=4,
+            sequence_length=16,
+            lstm_hidden_dim=128,
             learning_rate=0.00005,
             gamma=0.99,
             epsilon_start=1.0,
@@ -998,139 +1013,142 @@ class ExperimentRunner:
             epsilon_decay=0.9995,
             memory_size=5000,
             batch_size=16,
-            sequence_length=16,
-            frame_stack_k=4,
-            target_update_freq=100,
-            lstm_hidden_dim=128,
-            trajectory_buffer_size=self.trajectory_buffer_size,
-            reward_threshold=0.5
+            target_update_freq=200
         )
         
-        # Tracking variables
+        # Tracking
         episode_rewards = []
         episode_lengths = []
-        wvf_losses = []
-        rp_losses = []
-        rp_triggers_per_episode = []
+        training_losses = []
         
-        for episode in tqdm(range(episodes), desc=f"LSTM-WVF (seed {seed})"):
+        for episode in tqdm(range(episodes), desc=f"Goal-Conditioned LSTM-DQN (seed {seed})"):
             # Reset environment
             obs, _ = env.reset()
             if isinstance(obs, dict) and 'image' in obs:
                 obs['image'] = obs['image'].T
             
             # Reset agent for new episode
-            agent.reset_episode(obs)
+            stacked_obs = agent.reset_episode(obs)
             
             total_reward = 0
             steps = 0
-            episode_wvf_losses = []
-            episode_rp_losses = []
-            rp_triggers = 0
+            episode_losses = []
             
             for step in range(max_steps):
-                # Store step info for retrospective training
-                agent.store_step_info(obs)
-                
                 # Update frame stack
                 frame = agent._extract_frame(obs)
                 agent.frame_stack.push(frame)
-                
-                # Get current stacked state
-                current_state = agent.get_stacked_state()
-                
-                # Update reward map from predictions
-                agent.update_reward_map_from_prediction(obs)
+                stacked_obs = agent.get_stacked_state()
                 
                 # Select action
                 if manual:
-                    action = self._get_manual_action(agent, obs, episode, step)
+                    print(f"Episode {episode}, Step {step}")
+                    key = getch().lower()
+                    
+                    if key == 'w':
+                        action = 2  # forward
+                    elif key == 'a':
+                        action = 0  # turn left
+                    elif key == 'd':
+                        action = 1  # turn right
+                    elif key == 'q':
+                        manual = False
+                        action = agent.select_action(obs)
+                    elif key == '\r' or key == '\n':
+                        action = agent.select_action(obs)
+                    else:
+                        action = agent.select_action(obs)
                 else:
                     action = agent.select_action(obs)
                 
                 # Take action in environment
                 next_obs, reward, done, truncated, info = env.step(action)
+                
                 if isinstance(next_obs, dict) and 'image' in next_obs:
                     next_obs['image'] = next_obs['image'].T
-                
-                # Update path integration
-                agent.update_internal_state(action)
                 
                 # Update frame stack with next observation
                 next_frame = agent._extract_frame(next_obs)
                 agent.frame_stack.push(next_frame)
-                next_state = agent.get_stacked_state()
+                next_stacked_obs = agent.get_stacked_state()
                 
-                # === OPTIMIZATION: Get SINGLE current goal instead of list ===
-                current_goal = agent.get_current_goal()
+                # Store transition
+                agent.store_transition(stacked_obs, action, reward, next_stacked_obs, done)
                 
-                # === OPTIMIZATION: Store single transition with one goal ===
-                agent.store_transition(current_state, action, reward, next_state, done, current_goal)
-                
-                # === Reward Predictor Training ===
-                target_7x7 = self._create_target_7x7(agent)
-                triggered, rp_loss = agent.train_reward_predictor_online(next_obs, target_7x7)
-                if triggered:
-                    rp_triggers += 1
-                    episode_rp_losses.append(rp_loss)
-                
-                # If goal found, do retrospective training
-                if done and step < max_steps - 1:
-                    reward_pos = tuple(agent.internal_pos)
-                    agent.mark_goal_found(reward_pos)
-                    retro_loss = agent.train_reward_predictor_retrospective(reward_pos)
-                    episode_rp_losses.append(retro_loss)
-                
+                # Update counters
                 total_reward += reward
                 steps += 1
+                
+                # Move to next observation
                 obs = next_obs
+                stacked_obs = next_stacked_obs
                 
                 if done or truncated:
                     break
             
-            # Process episode for replay buffer
+            # Process episode for replay
             agent.process_episode()
             
-            # Train Q-network after episode
+            # Train after episode
             if len(agent.memory) >= agent.batch_size:
-                wvf_loss = agent.train_q_network()
-                episode_wvf_losses.append(wvf_loss)
-                wvf_losses.append(wvf_loss)
+                loss = agent.train()
+                episode_losses.append(loss)
+                training_losses.append(loss)
             else:
-                wvf_losses.append(0.0)
+                training_losses.append(0.0)
             
+            # Decay epsilon
             agent.decay_epsilon()
             
+            # Record statistics
             episode_rewards.append(total_reward)
             episode_lengths.append(steps)
-            rp_triggers_per_episode.append(rp_triggers)
             
-            if len(episode_rp_losses) > 0:
-                rp_losses.append(np.mean(episode_rp_losses))
-            else:
-                rp_losses.append(0.0)
-            
-            # === OPTIMIZATION: Reduced visualization frequency (2000 instead of 1000) ===
-            if episode % 2000 == 0 and episode > 0:
-                self._save_lstm_wvf_visualizations(
-                    agent, episode, wvf_losses, rp_losses, 
-                    episode_rewards, rp_triggers_per_episode
-                )
+            # Periodic visualization
+            if episode % 1000 == 0 and episode > 0:
+                # Loss plot
+                plt.figure(figsize=(10, 5))
+                plt.plot(training_losses, alpha=0.7, label='Training Loss')
+                if len(training_losses) >= 50:
+                    smoothed = np.convolve(training_losses, np.ones(50)/50, mode='valid')
+                    plt.plot(range(25, len(training_losses) - 24), smoothed,
+                            color='red', linewidth=2, label='Smoothed')
+                plt.xlabel('Episode')
+                plt.ylabel('Loss')
+                plt.title(f'Goal-Conditioned LSTM-DQN Loss (up to ep {episode})')
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                plt.savefig(generate_save_path(f'goal_lstm_dqn/loss/loss_ep_{episode}.png'))
+                plt.close()
+                
+                # Reward plot
+                plt.figure(figsize=(10, 5))
+                plt.plot(episode_rewards, alpha=0.7)
+                if len(episode_rewards) >= 50:
+                    smoothed = np.convolve(episode_rewards, np.ones(50)/50, mode='valid')
+                    plt.plot(range(25, len(episode_rewards) - 24), smoothed,
+                            color='green', linewidth=2, label='Smoothed')
+                plt.xlabel('Episode')
+                plt.ylabel('Reward')
+                plt.title(f'Goal-Conditioned LSTM-DQN Learning Curve (up to ep {episode})')
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                plt.tight_layout()
+                plt.savefig(generate_save_path(f'goal_lstm_dqn/rewards/rewards_ep_{episode}.png'))
+                plt.close()
         
-        print(f"\nLSTM-WVF Summary for seed {seed}:")
+        print(f"\nGoal-Conditioned LSTM-DQN Summary for seed {seed}:")
         print(f"Final epsilon: {agent.epsilon:.4f}")
         print(f"Average reward (final 100): {np.mean(episode_rewards[-100:]):.3f}")
         print(f"Average length (final 100): {np.mean(episode_lengths[-100:]):.1f}")
-        print(f"Goals detected: {len(agent.get_goals_from_reward_map())}")
         
         return {
             "rewards": episode_rewards,
             "lengths": episode_lengths,
-            "wvf_losses": wvf_losses,
-            "rp_losses": rp_losses,
-            "rp_triggers": rp_triggers_per_episode,
+            "training_losses": training_losses,
             "final_epsilon": agent.epsilon,
-            "algorithm": "LSTM-WVF"
+            "algorithm": "Goal-Conditioned LSTM-DQN (UVF)"
         }
 
     # ========================================================================
@@ -1686,7 +1704,7 @@ class ExperimentRunner:
 
 
 def main():
-    """Run the experiment comparison with all algorithms including new LSTM-WVF"""
+    """Run the experiment comparison with all algorithms"""
     print("="*60)
     print("Starting comprehensive experiment comparison")
     print("="*60)
@@ -1695,7 +1713,7 @@ def main():
     print("2. Masters Successor Q-Learning")
     print("3. DQN (with path integration & vision)")
     print("4. LSTM-DQN (updated)")
-    print("5. LSTM-WVF (NEW - goal-conditioned learning)")
+    print("5. LSTM-WVF (goal-conditioned learning)")
     print("="*60)
 
     # Initialize experiment runner

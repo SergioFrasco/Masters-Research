@@ -1,510 +1,619 @@
 """
-LSTM-WVF Experiment Runner
+Goal-Conditioned LSTM-DQN Agent (Universal Value Function approach)
 
-Runs training experiments for the LSTM-WVF agent in MiniGrid.
-Follows the same structure as run_lstm_dqn_experiment.py and run_experiment.py.
+This is the 2D baseline that parallels the 3D WVF compositional agent.
 
-Key features:
-- Combines LSTM memory with goal-conditioned learning (WVF)
-- Learns reward locations implicitly (no explicit goal detection)
-- Uses path integration for ego→allo coordinate transformation
-- Retrospective reward predictor training when goals are found
+KEY FEATURE: View-Based Goal Conditioning
+- Agent conditions on goal position WITHIN its 7×7 partial observation
+- When goal is visible: uses its position in the view
+- When goal is NOT visible: uses center position (exploration mode)
+- This handles changing goal positions across episodes naturally!
+
+Why this works:
+- Goals spawn randomly each episode at different absolute positions
+- But relative position in agent's view is consistent and learnable
+- Network learns: "when goal is at (x,y) in my view, take action a"
+- No vision model needed - just uses what's already in the observation
+
+Differences from 3D WVF:
+- Conditions on GOAL POSITION (x, y) instead of task features
+- No composition (2D env has identical goals)  
+- Still uses LSTM for memory and goal conditioning for learning efficiency
+
+Based on:
+- Universal Value Functions (Schaul et al. 2015)
+- World Value Functions (Nangue Tasse et al. 2020) - but simplified to UVF
+
+Architecture:
+    [Image frames (stacked) | Goal position (2D)] -> CNN -> LSTM -> Dueling Q
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-import os
-from collections import deque
-from tqdm import tqdm
-import json
-import time
-import gc
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
-
-# Set environment variables to prevent memory issues
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['MKL_NUM_THREADS'] = '1'
-
-# Import agent and models
-from agents import LSTM_WVF_Agent
-from models import LSTM_WVF, FrameStack, RewardPredictor
-
-from utils import generate_save_path
+from collections import deque
+import random
 
 
-class LSTM_WVF_ExperimentRunner:
-    """Handles running LSTM-WVF experiments with partial observability."""
+class FrameStack:
+    """Stack the last k frames for short-term visual memory."""
     
-    def __init__(self, env_size=10, num_seeds=3):
-        self.env_size = env_size
-        self.num_seeds = num_seeds
-        self.results = {}
-        self.trajectory_buffer_size = 10
+    def __init__(self, k=4):
+        self.k = k
+        self.frames = deque(maxlen=k)
     
-    def run_lstm_wvf_experiment(self, episodes=5000, max_steps=200, seed=42, 
-                                 manual=False, env=None):
-        """
-        Run LSTM-WVF agent experiment.
+    def reset(self, frame):
+        """Reset with initial frame, repeated k times."""
+        for _ in range(self.k):
+            self.frames.append(frame.copy())
+        return self._get_stacked()
+    
+    def push(self, frame):
+        """Add new frame and return stacked."""
+        self.frames.append(frame.copy())
+        return self._get_stacked()
+    
+    def get_stack(self):
+        """Get current stack without modifying."""
+        return self._get_stacked()
+    
+    def _get_stacked(self):
+        """Stack frames along channel dimension."""
+        return np.concatenate(list(self.frames), axis=0)
+
+
+class GoalConditionedLSTMNetwork(nn.Module):
+    """
+    Goal-Conditioned Q-Network with LSTM (UVF approach).
+    
+    Learns Q(s, a, g) where:
+    - s = stacked partial observations (k frames)
+    - a = action
+    - g = goal position (x, y) normalized to [0, 1]
+    
+    Architecture:
+        [Image (k channels) | Goal Tiled (2 channels)] -> CNN -> LSTM -> Dueling Q
+    
+    Input: (batch, k + 2, H, W) where k = frame stack size
+    """
+    
+    def __init__(self, frame_stack_size=4, lstm_hidden_dim=128, 
+                 num_actions=3, input_height=7, input_width=7):
+        super(GoalConditionedLSTMNetwork, self).__init__()
         
-        Args:
-            episodes: Number of training episodes
-            max_steps: Maximum steps per episode
-            seed: Random seed
-            manual: Whether to enable manual control mode
-            env: Optional environment (if None, creates mock env for testing)
-            
-        Returns:
-            Dictionary of results
-        """
-        # Set seeds
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
+        self.frame_stack_size = frame_stack_size
+        self.lstm_hidden_dim = lstm_hidden_dim
+        self.num_actions = num_actions
         
-        # Use provided environment or create mock
-        if env is None:
-            print("WARNING: No environment provided, using mock environment for testing")
-            env = self._create_mock_env()
+        # CNN input = stacked frames + goal position tiled
+        cnn_input_channels = frame_stack_size + 2  # k frames + (x, y)
         
-        # Initialize agent
-        agent = LSTM_WVF_Agent(
-            env=env,
-            learning_rate=0.0001,
-            gamma=0.99,
-            epsilon_start=1.0,
-            epsilon_end=0.05,
-            epsilon_decay=0.9995,
-            memory_size=5000,
-            batch_size=8,
-            sequence_length=16,
-            frame_stack_k=4,
-            target_update_freq=100,
-            lstm_hidden_dim=128,
-            trajectory_buffer_size=self.trajectory_buffer_size,
-            reward_threshold=0.5
+        # CNN backbone for feature extraction
+        self.conv = nn.Sequential(
+            nn.Conv2d(cnn_input_channels, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
         )
         
-        # Tracking variables
-        episode_rewards = []
-        episode_lengths = []
-        wvf_losses = []
-        rp_losses = []
-        rp_triggers_per_episode = []
+        # Calculate flattened size
+        self.conv_output_size = 64 * input_height * input_width
         
-        for episode in tqdm(range(episodes), desc=f"LSTM-WVF (seed {seed})"):
-            # Reset environment
-            obs, _ = env.reset()
-            if isinstance(obs, dict) and 'image' in obs:
-                obs['image'] = obs['image'].T
-            
-            # Reset agent for new episode
-            agent.reset_episode(obs)
-            
-            total_reward = 0
-            steps = 0
-            episode_wvf_losses = []
-            episode_rp_losses = []
-            rp_triggers = 0
-            
-            for step in range(max_steps):
-                # Store step info for retrospective training
-                agent.store_step_info(obs)
-                
-                # Update frame stack
-                frame = agent._extract_frame(obs)
-                agent.frame_stack.push(frame)
-                
-                # Get current stacked state
-                current_state = agent.get_stacked_state()
-                
-                # Update reward map from predictions
-                agent.update_reward_map_from_prediction(obs)
-                
-                # Select action
-                if manual:
-                    action = self._get_manual_action(agent, obs, episode, step)
-                else:
-                    action = agent.select_action(obs)
-                
-                # Take action in environment
-                next_obs, reward, done, truncated, info = env.step(action)
-                if isinstance(next_obs, dict) and 'image' in next_obs:
-                    next_obs['image'] = next_obs['image'].T
-                
-                # Update path integration
-                agent.update_internal_state(action)
-                
-                # Update frame stack with next observation
-                next_frame = agent._extract_frame(next_obs)
-                agent.frame_stack.push(next_frame)
-                next_state = agent.get_stacked_state()
-                
-                # Get current goals for storage
-                goals = agent.get_goals_from_reward_map()
-                if len(goals) == 0:
-                    goals = [(self.env_size // 2, self.env_size // 2)]
-                
-                # Store transition
-                agent.store_transition(current_state, action, reward, next_state, done, goals)
-                
-                # === Reward Predictor Training ===
-                target_7x7 = self._create_target_7x7(agent)
-                triggered, rp_loss = agent.train_reward_predictor_online(next_obs, target_7x7)
-                if triggered:
-                    rp_triggers += 1
-                    episode_rp_losses.append(rp_loss)
-                
-                # If goal found, do retrospective training
-                if done and step < max_steps - 1:
-                    reward_pos = tuple(agent.internal_pos)
-                    agent.mark_goal_found(reward_pos)
-                    retro_loss = agent.train_reward_predictor_retrospective(reward_pos)
-                    episode_rp_losses.append(retro_loss)
-                
-                total_reward += reward
-                steps += 1
-                obs = next_obs
-                
-                if done or truncated:
-                    break
-            
-            # Process episode for replay buffer
-            agent.process_episode()
-            
-            # Train Q-network after episode
-            if len(agent.memory) >= agent.batch_size:
-                wvf_loss = agent.train_q_network()
-                episode_wvf_losses.append(wvf_loss)
-                wvf_losses.append(wvf_loss)
-            else:
-                wvf_losses.append(0.0)
-            
-            agent.decay_epsilon()
-            
-            episode_rewards.append(total_reward)
-            episode_lengths.append(steps)
-            rp_triggers_per_episode.append(rp_triggers)
-            
-            if len(episode_rp_losses) > 0:
-                rp_losses.append(np.mean(episode_rp_losses))
-            else:
-                rp_losses.append(0.0)
-            
-            # Logging
-            if episode % 100 == 0:
-                avg_reward = np.mean(episode_rewards[-100:]) if len(episode_rewards) >= 100 else np.mean(episode_rewards)
-                avg_length = np.mean(episode_lengths[-100:]) if len(episode_lengths) >= 100 else np.mean(episode_lengths)
-                avg_wvf_loss = np.mean(wvf_losses[-100:]) if len(wvf_losses) >= 100 else np.mean(wvf_losses)
-                
-                print(f"\nEpisode {episode}")
-                print(f"  Avg Reward (last 100): {avg_reward:.3f}")
-                print(f"  Avg Length (last 100): {avg_length:.1f}")
-                print(f"  Avg WVF Loss: {avg_wvf_loss:.6f}")
-                print(f"  Epsilon: {agent.epsilon:.4f}")
-                print(f"  Goals detected: {len(agent.get_goals_from_reward_map())}")
-            
-            # Visualizations
-            if episode % 250 == 0 and episode > 0:
-                self._save_visualizations(agent, episode, wvf_losses, rp_losses, 
-                                         episode_rewards, rp_triggers_per_episode)
+        # LSTM for temporal reasoning over partial observations
+        self.lstm = nn.LSTM(
+            input_size=self.conv_output_size,
+            hidden_size=lstm_hidden_dim,
+            num_layers=1,
+            batch_first=True
+        )
         
-        print(f"\nLSTM-WVF Summary for seed {seed}:")
-        print(f"Final epsilon: {agent.epsilon:.4f}")
-        print(f"Average reward (final 100): {np.mean(episode_rewards[-100:]):.3f}")
-        print(f"Average length (final 100): {np.mean(episode_lengths[-100:]):.1f}")
+        # Dueling architecture: V(s, g) and A(s, a, g)
+        self.value_stream = nn.Sequential(
+            nn.Linear(lstm_hidden_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 1)
+        )
         
-        return {
-            "rewards": episode_rewards,
-            "lengths": episode_lengths,
-            "wvf_losses": wvf_losses,
-            "rp_losses": rp_losses,
-            "rp_triggers": rp_triggers_per_episode,
-            "final_epsilon": agent.epsilon,
-            "algorithm": "LSTM-WVF"
-        }
+        self.advantage_stream = nn.Sequential(
+            nn.Linear(lstm_hidden_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, num_actions)
+        )
+        
+        self._initialize_weights()
     
-    def _create_mock_env(self):
-        """Create a mock environment for testing."""
-        class MockEnv:
-            def __init__(self, size=10):
-                self.size = size
-                self.agent_pos = np.array([1, 1])
-                self.agent_dir = 0
-                self.goal_pos = np.array([8, 8])
-                self.grid = MockGrid(size)
-            
-            def reset(self):
-                self.agent_pos = np.array([1, 1])
-                self.agent_dir = 0
-                obs = {'image': np.random.rand(7, 7, 3).astype(np.float32)}
-                return obs, {}
-            
-            def step(self, action):
-                if action == 0:
-                    self.agent_dir = (self.agent_dir - 1) % 4
-                elif action == 1:
-                    self.agent_dir = (self.agent_dir + 1) % 4
-                elif action == 2:
-                    dx, dy = [(1, 0), (0, 1), (-1, 0), (0, -1)][self.agent_dir]
-                    new_pos = self.agent_pos + np.array([dx, dy])
-                    if 0 <= new_pos[0] < self.size and 0 <= new_pos[1] < self.size:
-                        self.agent_pos = new_pos
-                
-                done = np.array_equal(self.agent_pos, self.goal_pos)
-                reward = 1.0 if done else -0.01
-                obs = {'image': np.random.rand(7, 7, 3).astype(np.float32)}
-                return obs, reward, done, False, {}
-        
-        class MockGrid:
-            def __init__(self, size):
-                self.size = size
-            def get(self, x, y):
-                return None
-        
-        return MockEnv(self.env_size)
+    def _initialize_weights(self):
+        """Initialize network weights."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.LSTM):
+                for name, param in m.named_parameters():
+                    if 'weight_ih' in name:
+                        nn.init.xavier_uniform_(param.data)
+                    elif 'weight_hh' in name:
+                        nn.init.orthogonal_(param.data)
+                    elif 'bias' in name:
+                        nn.init.constant_(param.data, 0)
     
-    def _create_target_7x7(self, agent):
-        """Create target 7x7 reward map from agent's current knowledge."""
-        target = np.zeros((7, 7), dtype=np.float32)
+    def tile_goal(self, state, goal):
+        """
+        Tile goal position across spatial dimensions and concatenate with state.
         
-        agent_x, agent_y = agent.internal_pos
-        agent_dir = agent.internal_dir
-        ego_center_x, ego_center_y = 3, 6
+        Args:
+            state: (batch, k, H, W) stacked frames
+            goal: (batch, 2) normalized goal position [x, y] in [0, 1]
         
-        for view_y in range(7):
-            for view_x in range(7):
-                dx_ego = view_x - ego_center_x
-                dy_ego = view_y - ego_center_y
-                
-                if agent_dir == 3:
-                    dx_world, dy_world = dx_ego, dy_ego
-                elif agent_dir == 0:
-                    dx_world, dy_world = -dy_ego, dx_ego
-                elif agent_dir == 1:
-                    dx_world, dy_world = -dx_ego, -dy_ego
-                elif agent_dir == 2:
-                    dx_world, dy_world = dy_ego, -dx_ego
-                else:
-                    dx_world, dy_world = dx_ego, dy_ego
-                
-                global_x = agent_x + dx_world
-                global_y = agent_y + dy_world
-                
-                if 0 <= global_x < agent.grid_size and 0 <= global_y < agent.grid_size:
-                    target[view_y, view_x] = agent.true_reward_map[global_y, global_x]
+        Returns:
+            combined: (batch, k + 2, H, W)
+        """
+        batch_size = state.size(0)
+        H, W = state.size(2), state.size(3)
         
-        return target
+        # Tile goal: (batch, 2) -> (batch, 2, H, W)
+        goal_expanded = goal.view(batch_size, 2, 1, 1)
+        goal_tiled = goal_expanded.expand(batch_size, 2, H, W)
+        
+        # Concatenate: state + goal
+        combined = torch.cat([state, goal_tiled], dim=1)
+        
+        return combined
     
-    def _get_manual_action(self, agent, obs, episode, step):
-        """Get action from manual input."""
-        print(f"Episode {episode}, Step {step} - W=fwd, A=left, D=right")
-        import sys
-        if sys.platform == 'win32':
-            import msvcrt
-            key = msvcrt.getch().decode('utf-8').lower()
+    def forward(self, state, goal, hidden=None, return_hidden=False):
+        """
+        Forward pass with goal conditioning.
+        
+        Args:
+            state: (batch, k, H, W) stacked frames
+            goal: (batch, 2) normalized goal position
+            hidden: Optional LSTM hidden state (h, c)
+            return_hidden: Whether to return updated hidden state
+        
+        Returns:
+            q_values: (batch, num_actions)
+            hidden: (optional) Updated LSTM hidden state
+        """
+        batch_size = state.size(0)
+        
+        # Tile goal and concatenate with state
+        combined = self.tile_goal(state, goal)  # (batch, k+2, H, W)
+        
+        # CNN features
+        conv_features = self.conv(combined)
+        conv_features = conv_features.view(batch_size, -1)  # (batch, conv_output_size)
+        
+        # LSTM expects (batch, seq_len, features)
+        conv_features = conv_features.unsqueeze(1)  # (batch, 1, conv_output_size)
+        
+        if hidden is not None:
+            lstm_out, new_hidden = self.lstm(conv_features, hidden)
         else:
-            import tty, termios
-            fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(fd)
-            try:
-                tty.setraw(sys.stdin.fileno())
-                key = sys.stdin.read(1).lower()
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            lstm_out, new_hidden = self.lstm(conv_features)
         
-        if key == 'w':
-            return 2
-        elif key == 'a':
-            return 0
-        elif key == 'd':
-            return 1
-        else:
-            return agent.select_action(obs)
+        lstm_out = lstm_out[:, -1, :]  # (batch, lstm_hidden_dim)
+        
+        # Dueling Q-values: Q(s,a,g) = V(s,g) + [A(s,a,g) - mean(A(s,a,g))]
+        value = self.value_stream(lstm_out)
+        advantage = self.advantage_stream(lstm_out)
+        q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
+        
+        if return_hidden:
+            return q_values, new_hidden
+        return q_values
     
-    def _save_visualizations(self, agent, episode, wvf_losses, rp_losses, 
-                            episode_rewards, rp_triggers):
-        """Save training visualizations."""
-        
-        # WVF Loss
-        if len(wvf_losses) > 10:
-            plt.figure(figsize=(10, 5))
-            plt.plot(wvf_losses, alpha=0.7, label='WVF Loss')
-            if len(wvf_losses) >= 50:
-                smoothed = np.convolve(wvf_losses, np.ones(50)/50, mode='valid')
-                plt.plot(range(25, len(wvf_losses) - 24), smoothed, 'r-', lw=2, label='Smoothed')
-            plt.xlabel('Episode')
-            plt.ylabel('Loss')
-            plt.title(f'LSTM-WVF Loss (ep {episode})')
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.savefig(generate_save_path(f'lstm_wvf_loss/wvf_loss_ep_{episode}.png'))
-            plt.close()
-        
-        # Rewards
-        plt.figure(figsize=(10, 5))
-        plt.plot(episode_rewards, alpha=0.7)
-        if len(episode_rewards) >= 50:
-            smoothed = np.convolve(episode_rewards, np.ones(50)/50, mode='valid')
-            plt.plot(range(25, len(episode_rewards) - 24), smoothed, 'g-', lw=2)
-        plt.xlabel('Episode')
-        plt.ylabel('Reward')
-        plt.title(f'LSTM-WVF Learning Curve (ep {episode})')
-        plt.grid(True, alpha=0.3)
-        plt.savefig(generate_save_path(f'lstm_wvf_rewards/rewards_ep_{episode}.png'))
-        plt.close()
-        
-        # Q-values
-        q_values = agent.get_all_q_values()
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        for a, name in enumerate(['Left', 'Right', 'Forward']):
-            im = axes[a].imshow(q_values[:, :, a], cmap='viridis')
-            axes[a].set_title(f'{name} Q-values')
-            plt.colorbar(im, ax=axes[a])
-        plt.tight_layout()
-        plt.savefig(generate_save_path(f'lstm_wvf_qvalues/qvalues_ep_{episode}.png'))
-        plt.close()
-        
-        # Reward map
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        im1 = axes[0].imshow(agent.true_reward_map, cmap='viridis', origin='lower')
-        axes[0].set_title('Learned Reward Map')
-        plt.colorbar(im1, ax=axes[0])
-        im2 = axes[1].imshow(agent.visited_positions.astype(float), cmap='Blues', origin='lower')
-        axes[1].set_title('Visited Positions')
-        plt.colorbar(im2, ax=axes[1])
-        plt.tight_layout()
-        plt.savefig(generate_save_path(f'lstm_wvf_maps/maps_ep_{episode}.png'))
-        plt.close()
+    def init_hidden(self, batch_size=1, device='cpu'):
+        """Initialize LSTM hidden state."""
+        h = torch.zeros(1, batch_size, self.lstm_hidden_dim, device=device)
+        c = torch.zeros(1, batch_size, self.lstm_hidden_dim, device=device)
+        return (h, c)
+
+
+class SequenceReplayBuffer:
+    """
+    Episode-based replay buffer for LSTM training.
+    Stores complete episodes and samples sequences.
+    """
     
-    def run_comparison_experiment(self, episodes=5000, max_steps=200, manual=False, env=None):
-        """Run experiments across multiple seeds."""
-        all_results = {}
+    def __init__(self, capacity=5000, sequence_length=16):
+        self.episodes = deque(maxlen=capacity)
+        self.current_episode = []
+        self.sequence_length = sequence_length
+    
+    def push(self, state, goal, action, reward, next_state, done):
+        """Add transition to current episode."""
+        self.current_episode.append((state, goal, action, reward, next_state, done))
         
-        for seed in range(self.num_seeds):
-            print(f"\n{'='*60}")
-            print(f"Running LSTM-WVF with seed {seed}")
-            print(f"{'='*60}")
+        if done:
+            self._finalize_episode()
+    
+    def _finalize_episode(self):
+        """Store completed episode in buffer."""
+        if len(self.current_episode) > 0:
+            self.episodes.append(list(self.current_episode))
+            self.current_episode = []
+    
+    def sample(self, batch_size):
+        """Sample random sequences from stored episodes."""
+        if len(self.episodes) < batch_size:
+            return None
+        
+        sequences = []
+        
+        for _ in range(batch_size):
+            # Sample random episode
+            episode = random.choice(self.episodes)
             
-            results = self.run_lstm_wvf_experiment(
-                episodes=episodes, max_steps=max_steps, 
-                seed=seed, manual=manual, env=env
+            if len(episode) <= self.sequence_length:
+                # Use entire episode if shorter than sequence length
+                sequences.append(episode)
+            else:
+                # Sample random subsequence
+                start_idx = random.randint(0, len(episode) - self.sequence_length)
+                sequences.append(episode[start_idx:start_idx + self.sequence_length])
+        
+        return sequences
+    
+    def __len__(self):
+        return len(self.episodes)
+
+
+class GoalConditionedLSTMDQN:
+    """
+    Goal-Conditioned LSTM-DQN Agent (UVF baseline for 2D Minigrid).
+    
+    Key features:
+    - **View-based goal conditioning**: Q(s, a, g) where g = goal position in 7×7 view
+    - LSTM for memory over partial observations
+    - No vision model (no reward predictor)
+    - Frame stacking for short-term visual context
+    - Sequence-based replay for LSTM training
+    
+    How it handles changing goal positions:
+    - Goals spawn at random positions each episode
+    - Agent conditions on goal position WITHIN its current 7×7 view
+    - When goal visible: learns "goal at (x,y) in view -> take action a"
+    - When goal NOT visible: uses default position (exploration mode)
+    - This relative encoding generalizes across episodes!
+    
+    This parallels the 3D WVF agent but without composition.
+    """
+    
+    def __init__(self, env, 
+                 frame_stack_k=4,
+                 sequence_length=16,
+                 lstm_hidden_dim=128,
+                 learning_rate=0.00005,
+                 gamma=0.99,
+                 epsilon_start=1.0,
+                 epsilon_end=0.05,
+                 epsilon_decay=0.9995,
+                 memory_size=5000,
+                 batch_size=16,
+                 target_update_freq=200):
+        
+        self.env = env
+        self.grid_size = env.size
+        self.action_dim = 3  # turn_left, turn_right, forward
+        
+        # Hyperparameters
+        self.frame_stack_k = frame_stack_k
+        self.sequence_length = sequence_length
+        self.lstm_hidden_dim = lstm_hidden_dim
+        self.learning_rate = learning_rate
+        self.gamma = gamma
+        self.epsilon = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay = epsilon_decay
+        self.batch_size = batch_size
+        self.target_update_freq = target_update_freq
+        
+        # Device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Goal-Conditioned LSTM-DQN using device: {self.device}")
+        
+        # Frame stacker
+        self.frame_stack = FrameStack(k=frame_stack_k)
+        
+        # Networks
+        self.q_network = GoalConditionedLSTMNetwork(
+            frame_stack_size=frame_stack_k,
+            lstm_hidden_dim=lstm_hidden_dim,
+            num_actions=self.action_dim,
+            input_height=7,
+            input_width=7
+        ).to(self.device)
+        
+        self.target_network = GoalConditionedLSTMNetwork(
+            frame_stack_size=frame_stack_k,
+            lstm_hidden_dim=lstm_hidden_dim,
+            num_actions=self.action_dim,
+            input_height=7,
+            input_width=7
+        ).to(self.device)
+        self.target_network.load_state_dict(self.q_network.state_dict())
+        self.target_network.eval()
+        
+        # Optimizer
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
+        
+        # Replay buffer
+        self.memory = SequenceReplayBuffer(
+            capacity=memory_size,
+            sequence_length=sequence_length
+        )
+        
+        # Episode state
+        self.current_episode = []
+        self.hidden_state = None
+        self.current_goal = None
+        
+        # Update counter
+        self.update_counter = 0
+        
+        total_params = sum(p.numel() for p in self.q_network.parameters())
+        print(f"  Network parameters: {total_params:,}")
+        print(f"  Frame stack: {frame_stack_k} frames")
+        print(f"  Sequence length: {sequence_length}")
+        print(f"  LSTM hidden dim: {lstm_hidden_dim}")
+    
+    def _extract_frame(self, obs):
+        """Extract single frame from observation."""
+        if isinstance(obs, dict) and 'image' in obs:
+            frame = obs['image']
+            if len(frame.shape) == 3:
+                frame = frame[0] if frame.shape[0] < frame.shape[2] else frame[:, :, 0]
+        else:
+            frame = obs
+            if len(frame.shape) == 3:
+                frame = frame[0] if frame.shape[0] < frame.shape[2] else frame[:, :, 0]
+        
+        return np.array(frame, dtype=np.float32)
+    
+    def _get_goal_in_view(self, obs):
+        """
+        Extract goal position from agent's 7×7 partial observation.
+        
+        This is view-based goal conditioning - agent only conditions on goals it can see.
+        When no goal is visible, returns center position (exploration mode).
+        
+        Args:
+            obs: Current observation (dict or array)
+        
+        Returns:
+            np.array([gx_norm, gy_norm]) normalized to [0, 1] within 7×7 view
+        """
+        # Extract 7×7 view
+        if isinstance(obs, dict) and 'image' in obs:
+            view = obs['image'][0]  # Shape: (7, 7)
+        else:
+            view = obs
+            if len(view.shape) == 3:
+                view = view[0] if view.shape[0] < view.shape[2] else view[:, :, 0]
+        
+        # Find goal in view (goal type == 8 in Minigrid)
+        goal_positions = np.argwhere(view == 8)
+        
+        if len(goal_positions) == 0:
+            # No goal visible - use neutral position (center of view)
+            # This allows network to learn exploration behavior
+            return np.array([0.5, 0.5], dtype=np.float32)
+        
+        # Take first (or closest) goal in view
+        gy, gx = goal_positions[0]
+        
+        # Normalize to [0, 1] within the 7×7 view
+        # View coordinates: (0,0) is top-left, (6,6) is bottom-right
+        gx_norm = gx / 6.0
+        gy_norm = gy / 6.0
+        
+        return np.array([gx_norm, gy_norm], dtype=np.float32)
+    
+    def reset_episode(self, obs):
+        """Reset for new episode."""
+        # Extract frame and initialize stack
+        frame = self._extract_frame(obs)
+        stacked = self.frame_stack.reset(frame)
+        
+        # Initialize LSTM hidden state
+        self.hidden_state = self.q_network.init_hidden(batch_size=1, device=self.device)
+        
+        # Get goal from current view (not from environment state)
+        # This ensures we only use information the agent can actually see
+        self.current_goal = self._get_goal_in_view(obs)
+        
+        # Store for episode replay
+        self.current_episode = []
+        
+        return stacked
+    
+    def get_stacked_state(self):
+        """Get current stacked state."""
+        return self.frame_stack.get_stack()
+    
+    def select_action(self, obs, epsilon=None):
+        """
+        Select action using epsilon-greedy policy with goal conditioning.
+        
+        Goal is extracted from the current 7×7 view - agent only conditions on
+        goals it can actually see. This ensures true partial observability.
+        
+        Args:
+            obs: Current observation (can be dict or array)
+            epsilon: Exploration rate (uses self.epsilon if None)
+        
+        Returns:
+            action: Selected action (0=left, 1=right, 2=forward)
+        """
+        if epsilon is None:
+            epsilon = self.epsilon
+        
+        # Epsilon-greedy exploration
+        if random.random() < epsilon:
+            return random.randint(0, self.action_dim - 1)
+        
+        # Update goal from current view (what agent can see NOW)
+        self.current_goal = self._get_goal_in_view(obs)
+        
+        # Get current stacked state
+        state = self.get_stacked_state()
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        
+        # Goal is already normalized from view (no need for additional normalization)
+        goal_tensor = torch.FloatTensor(self.current_goal).unsqueeze(0).to(self.device)
+        
+        # Forward pass through Q-network
+        self.q_network.eval()
+        with torch.no_grad():
+            q_values, new_hidden = self.q_network(
+                state_tensor, goal_tensor, self.hidden_state, return_hidden=True
             )
+            # Update hidden state for next step
+            self.hidden_state = (new_hidden[0].detach(), new_hidden[1].detach())
+        
+        return q_values.argmax().item()
+    
+    def store_transition(self, state, action, reward, next_state, done):
+        """
+        Store transition in current episode buffer.
+        
+        Note: self.current_goal is already normalized from _get_goal_in_view()
+        """
+        # Current goal is already normalized, use it directly
+        self.current_episode.append((state, self.current_goal, action, reward, next_state, done))
+    
+    def process_episode(self):
+        """Process completed episode into replay buffer."""
+        for transition in self.current_episode:
+            state, goal, action, reward, next_state, done = transition
+            self.memory.push(state, goal, action, reward, next_state, done)
+        
+        self.current_episode = []
+    
+    def train(self):
+        """Train Q-network on sampled sequences."""
+        if len(self.memory) < self.batch_size:
+            return 0.0
+        
+        # Sample sequences
+        sequences = self.memory.sample(self.batch_size)
+        if sequences is None:
+            return 0.0
+        
+        total_loss = 0.0
+        
+        self.q_network.train()
+        
+        for sequence in sequences:
+            # Unpack sequence
+            states = torch.stack([
+                torch.FloatTensor(s[0]) for s in sequence
+            ]).to(self.device)
+            goals = torch.stack([
+                torch.FloatTensor(s[1]) for s in sequence
+            ]).to(self.device)
+            actions = torch.tensor([s[2] for s in sequence], dtype=torch.long).to(self.device)
+            rewards = torch.tensor([s[3] for s in sequence], dtype=torch.float32).to(self.device)
+            next_states = torch.stack([
+                torch.FloatTensor(s[4]) for s in sequence
+            ]).to(self.device)
+            dones = torch.tensor([s[5] for s in sequence], dtype=torch.bool).to(self.device)
             
-            if 'LSTM-WVF' not in all_results:
-                all_results['LSTM-WVF'] = []
-            all_results['LSTM-WVF'].append(results)
+            # Add batch dimension
+            states = states.unsqueeze(0)  # (1, seq_len, k, H, W)
+            goals = goals.unsqueeze(0)  # (1, seq_len, 2)
+            next_states = next_states.unsqueeze(0)
             
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            seq_len = states.size(1)
+            
+            # Initialize hidden states
+            h_0 = torch.zeros(1, 1, self.lstm_hidden_dim).to(self.device)
+            c_0 = torch.zeros(1, 1, self.lstm_hidden_dim).to(self.device)
+            init_hidden = (h_0, c_0)
+            
+            # Forward pass through Q-network
+            q_values_list = []
+            hidden = init_hidden
+            
+            for t in range(seq_len):
+                q_vals, hidden = self.q_network(
+                    states[:, t], goals[:, t], hidden, return_hidden=True
+                )
+                q_values_list.append(q_vals)
+                hidden = (hidden[0].detach(), hidden[1].detach())
+            
+            q_values = torch.stack(q_values_list, dim=1).squeeze(0)  # (seq_len, num_actions)
+            current_q = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+            
+            # Target Q-values (Double DQN)
+            with torch.no_grad():
+                # Get next actions from online network
+                next_q_list = []
+                hidden = init_hidden
+                
+                for t in range(seq_len):
+                    nq, hidden = self.q_network(
+                        next_states[:, t], goals[:, t], hidden, return_hidden=True
+                    )
+                    next_q_list.append(nq)
+                    hidden = (hidden[0].detach(), hidden[1].detach())
+                
+                next_q_values = torch.stack(next_q_list, dim=1).squeeze(0)
+                next_actions = next_q_values.argmax(1, keepdim=True)
+                
+                # Evaluate with target network
+                target_q_list = []
+                hidden = init_hidden
+                
+                for t in range(seq_len):
+                    tq, hidden = self.target_network(
+                        next_states[:, t], goals[:, t], hidden, return_hidden=True
+                    )
+                    target_q_list.append(tq)
+                    hidden = (hidden[0].detach(), hidden[1].detach())
+                
+                target_q_values = torch.stack(target_q_list, dim=1).squeeze(0)
+                next_q = target_q_values.gather(1, next_actions).squeeze(1)
+                
+                target_q = rewards + (self.gamma * next_q * ~dones)
+            
+            # Compute loss
+            loss = F.smooth_l1_loss(current_q, target_q)
+            
+            # Backprop
+            self.optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
+            self.optimizer.step()
+            
+            total_loss += loss.item()
         
-        self.results = all_results
-        return all_results
+        # Update target network
+        self.update_counter += 1
+        if self.update_counter % self.target_update_freq == 0:
+            self.target_network.load_state_dict(self.q_network.state_dict())
+        
+        return total_loss / len(sequences)
     
-    def analyze_results(self, window=100):
-        """Analyze and plot results."""
-        if not self.results:
-            print("No results to analyze.")
-            return
-        
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-        
-        # Rewards
-        ax1 = axes[0, 0]
-        for alg, runs in self.results.items():
-            rewards = np.array([r["rewards"] for r in runs])
-            mean = pd.Series(np.mean(rewards, axis=0)).rolling(window).mean()
-            std = pd.Series(np.std(rewards, axis=0)).rolling(window).mean()
-            ax1.plot(mean, label=alg, lw=2)
-            ax1.fill_between(range(len(mean)), mean-std, mean+std, alpha=0.3)
-        ax1.set_xlabel("Episode")
-        ax1.set_ylabel("Reward")
-        ax1.set_title("Learning Curves")
-        ax1.legend()
-        ax1.grid(True)
-        
-        # Lengths
-        ax2 = axes[0, 1]
-        for alg, runs in self.results.items():
-            lengths = np.array([r["lengths"] for r in runs])
-            mean = pd.Series(np.mean(lengths, axis=0)).rolling(window).mean()
-            ax2.plot(mean, label=alg, lw=2)
-        ax2.set_xlabel("Episode")
-        ax2.set_ylabel("Steps")
-        ax2.set_title("Episode Lengths")
-        ax2.legend()
-        ax2.grid(True)
-        
-        # WVF Loss
-        ax3 = axes[1, 0]
-        for alg, runs in self.results.items():
-            losses = np.array([r["wvf_losses"] for r in runs])
-            mean = pd.Series(np.mean(losses, axis=0)).rolling(window).mean()
-            ax3.plot(mean, label=alg, lw=2)
-        ax3.set_xlabel("Episode")
-        ax3.set_ylabel("Loss")
-        ax3.set_title("WVF Loss")
-        ax3.legend()
-        ax3.grid(True)
-        
-        # Final performance
-        ax4 = axes[1, 1]
-        final = {alg: [np.mean(r["rewards"][-100:]) for r in runs] 
-                 for alg, runs in self.results.items()}
-        ax4.boxplot(final.values(), labels=final.keys())
-        ax4.set_ylabel("Reward")
-        ax4.set_title("Final Performance")
-        ax4.grid(True)
-        
-        plt.tight_layout()
-        plt.savefig(generate_save_path("lstm_wvf_analysis.png"), dpi=300)
-        print(f"Saved to: {generate_save_path('lstm_wvf_analysis.png')}")
-        
-        self.save_results()
-    
-    def save_results(self):
-        """Save results to JSON."""
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filepath = generate_save_path(f"lstm_wvf_results_{timestamp}.json")
-        
-        json_results = {}
-        for alg, runs in self.results.items():
-            json_results[alg] = [{
-                "rewards": [float(r) for r in run["rewards"]],
-                "lengths": [int(l) for l in run["lengths"]],
-                "wvf_losses": [float(x) for x in run["wvf_losses"]],
-                "final_epsilon": float(run["final_epsilon"]),
-                "algorithm": run["algorithm"]
-            } for run in runs]
-        
-        with open(filepath, "w") as f:
-            json.dump(json_results, f, indent=2)
-        print(f"Results saved to: {filepath}")
-
-
-def main():
-    """Run the LSTM-WVF experiment."""
-    print("="*60)
-    print("LSTM-WVF Experiment")
-    print("="*60)
-    print("\nCombines: LSTM memory + Goal conditioning + Learned reward prediction")
-    print()
-    
-    runner = LSTM_WVF_ExperimentRunner(env_size=10, num_seeds=2)
-    from env import SimpleEnv
-    env = SimpleEnv(size=10)
-    results = runner.run_comparison_experiment(episodes=3000, max_steps=200, env=env)
-    
-    # For testing with mock environment:
-    # results = runner.run_comparison_experiment(episodes=500, max_steps=200)
-    
-    runner.analyze_results(window=50)
-    print("\nDone! Check results/ folder.")
+    def decay_epsilon(self):
+        """Decay exploration rate."""
+        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
 
 if __name__ == "__main__":
-    main()
+    print("Goal-Conditioned LSTM-DQN (UVF baseline) loaded successfully.")
+    print("\nKey features:")
+    print("  ✓ Goal conditioning Q(s, a, g) - Universal Value Function approach")
+    print("  ✓ LSTM for memory over partial observations")
+    print("  ✓ Frame stacking for short-term visual context")
+    print("  ✓ No vision model (no reward predictor)")
+    print("  ✓ Sequence-based replay for temporal learning")
+    print("\nThis is the UVF baseline that parallels 3D WVF compositional learning.")
