@@ -70,8 +70,9 @@ class FrameStack:
         return self._get_stacked()
     
     def _get_stacked(self):
-        """Stack frames along channel dimension."""
-        return np.concatenate(list(self.frames), axis=0)
+        """Stack frames along channel dimension to get shape (k, H, W)."""
+        # Stack along first dimension to get (k, H, W)
+        return np.stack(list(self.frames), axis=0)
 
 
 class LSTM_WVF_Network(nn.Module):
