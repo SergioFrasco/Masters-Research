@@ -969,11 +969,12 @@ class ExperimentRunner:
     
     def run_lstm_wvf_experiment(self, episodes=5000, max_steps=200, seed=20, manual=False):
         """
-        Run Goal-Conditioned LSTM-DQN experiment (UVF baseline).
+        Run LSTM_WVF_Agent experiment (UVF baseline, view-based).
         
         This agent:
         - Uses VIEW-BASED goal conditioning Q(s, a, g) where g = goal position in 7×7 view
         - LSTM for memory over partial observations
+        - NO vision model (no reward predictor)
         - Frame stacking for visual context
         - Sequence-based training
         
@@ -998,10 +999,10 @@ class ExperimentRunner:
             env = SimpleEnv(size=self.env_size)
         
         # Import the agent
-        from agents import GoalConditionedLSTMDQN
+        from lstm_wvf_agent import LSTM_WVF_Agent
         
         # Initialize agent
-        agent = GoalConditionedLSTMDQN(
+        agent = LSTM_WVF_Agent(
             env,
             frame_stack_k=4,
             sequence_length=16,
@@ -1021,7 +1022,7 @@ class ExperimentRunner:
         episode_lengths = []
         training_losses = []
         
-        for episode in tqdm(range(episodes), desc=f"Goal-Conditioned LSTM-DQN (seed {seed})"):
+        for episode in tqdm(range(episodes), desc=f"LSTM_WVF_Agent (seed {seed})"):
             # Reset environment
             obs, _ = env.reset()
             if isinstance(obs, dict) and 'image' in obs:
@@ -1115,11 +1116,11 @@ class ExperimentRunner:
                             color='red', linewidth=2, label='Smoothed')
                 plt.xlabel('Episode')
                 plt.ylabel('Loss')
-                plt.title(f'Goal-Conditioned LSTM-DQN Loss (up to ep {episode})')
+                plt.title(f'LSTM_WVF_Agent Loss (up to ep {episode})')
                 plt.legend()
                 plt.grid(True, alpha=0.3)
                 plt.tight_layout()
-                plt.savefig(generate_save_path(f'goal_lstm_dqn/loss/loss_ep_{episode}.png'))
+                plt.savefig(generate_save_path(f'lstm_wvf/loss/loss_ep_{episode}.png'))
                 plt.close()
                 
                 # Reward plot
@@ -1131,14 +1132,14 @@ class ExperimentRunner:
                             color='green', linewidth=2, label='Smoothed')
                 plt.xlabel('Episode')
                 plt.ylabel('Reward')
-                plt.title(f'Goal-Conditioned LSTM-DQN Learning Curve (up to ep {episode})')
+                plt.title(f'LSTM_WVF_Agent Learning Curve (up to ep {episode})')
                 plt.legend()
                 plt.grid(True, alpha=0.3)
                 plt.tight_layout()
-                plt.savefig(generate_save_path(f'goal_lstm_dqn/rewards/rewards_ep_{episode}.png'))
+                plt.savefig(generate_save_path(f'lstm_wvf/rewards/rewards_ep_{episode}.png'))
                 plt.close()
         
-        print(f"\nGoal-Conditioned LSTM-DQN Summary for seed {seed}:")
+        print(f"\nLSTM_WVF_Agent Summary for seed {seed}:")
         print(f"Final epsilon: {agent.epsilon:.4f}")
         print(f"Average reward (final 100): {np.mean(episode_rewards[-100:]):.3f}")
         print(f"Average length (final 100): {np.mean(episode_lengths[-100:]):.1f}")
@@ -1148,9 +1149,8 @@ class ExperimentRunner:
             "lengths": episode_lengths,
             "training_losses": training_losses,
             "final_epsilon": agent.epsilon,
-            "algorithm": "Goal-Conditioned LSTM-DQN (UVF)"
+            "algorithm": "LSTM_WVF_Agent (UVF, view-based)"
         }
-
     # ========================================================================
     # COMPARISON FRAMEWORK (UPDATED)
     # ========================================================================

@@ -1,7 +1,9 @@
 """
-Goal-Conditioned LSTM-DQN Agent (Universal Value Function approach)
+========================================================================
+GOAL-CONDITIONED LSTM-DQN AGENT - VIEW-BASED (NO VISION MODEL)
+========================================================================
 
-This is the 2D baseline that parallels the 3D WVF compositional agent.
+This is the CORRECTED implementation for your 2D Minigrid baseline.
 
 KEY FEATURE: View-Based Goal Conditioning
 - Agent conditions on goal position WITHIN its 7×7 partial observation
@@ -15,6 +17,12 @@ Why this works:
 - Network learns: "when goal is at (x,y) in my view, take action a"
 - No vision model needed - just uses what's already in the observation
 
+NO VISION MODEL:
+- Just reads goal position from observation (like reading agent position)
+- No learned reward predictor
+- No neural network for vision
+- Just np.argwhere(view == 8) to find goal
+
 Differences from 3D WVF:
 - Conditions on GOAL POSITION (x, y) instead of task features
 - No composition (2D env has identical goals)  
@@ -26,6 +34,8 @@ Based on:
 
 Architecture:
     [Image frames (stacked) | Goal position (2D)] -> CNN -> LSTM -> Dueling Q
+
+========================================================================
 """
 
 import numpy as np
@@ -64,7 +74,7 @@ class FrameStack:
         return np.concatenate(list(self.frames), axis=0)
 
 
-class GoalConditionedLSTMNetwork(nn.Module):
+class LSTM_WVF_Network(nn.Module):
     """
     Goal-Conditioned Q-Network with LSTM (UVF approach).
     
@@ -81,7 +91,7 @@ class GoalConditionedLSTMNetwork(nn.Module):
     
     def __init__(self, frame_stack_size=4, lstm_hidden_dim=128, 
                  num_actions=3, input_height=7, input_width=7):
-        super(GoalConditionedLSTMNetwork, self).__init__()
+        super(LSTM_WVF_Network, self).__init__()
         
         self.frame_stack_size = frame_stack_size
         self.lstm_hidden_dim = lstm_hidden_dim
@@ -266,9 +276,9 @@ class SequenceReplayBuffer:
         return len(self.episodes)
 
 
-class GoalConditionedLSTMDQN:
+class LSTM_WVF_Agent:
     """
-    Goal-Conditioned LSTM-DQN Agent (UVF baseline for 2D Minigrid).
+    LSTM_WVF_Agent - View-based goal conditioning (UVF baseline for 2D Minigrid).
     
     Key features:
     - **View-based goal conditioning**: Q(s, a, g) where g = goal position in 7×7 view
@@ -318,13 +328,13 @@ class GoalConditionedLSTMDQN:
         
         # Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Goal-Conditioned LSTM-DQN using device: {self.device}")
+        print(f"LSTM_WVF_Agent (view-based) using device: {self.device}")
         
         # Frame stacker
         self.frame_stack = FrameStack(k=frame_stack_k)
         
         # Networks
-        self.q_network = GoalConditionedLSTMNetwork(
+        self.q_network = LSTM_WVF_Network(
             frame_stack_size=frame_stack_k,
             lstm_hidden_dim=lstm_hidden_dim,
             num_actions=self.action_dim,
@@ -332,7 +342,7 @@ class GoalConditionedLSTMDQN:
             input_width=7
         ).to(self.device)
         
-        self.target_network = GoalConditionedLSTMNetwork(
+        self.target_network = LSTM_WVF_Network(
             frame_stack_size=frame_stack_k,
             lstm_hidden_dim=lstm_hidden_dim,
             num_actions=self.action_dim,
@@ -609,7 +619,7 @@ class GoalConditionedLSTMDQN:
 
 
 if __name__ == "__main__":
-    print("Goal-Conditioned LSTM-DQN (UVF baseline) loaded successfully.")
+    print("LSTM_WVF_Agent (view-based, no vision model) loaded successfully.")
     print("\nKey features:")
     print("  ✓ Goal conditioning Q(s, a, g) - Universal Value Function approach")
     print("  ✓ LSTM for memory over partial observations")
