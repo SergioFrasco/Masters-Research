@@ -10,7 +10,7 @@ from agents import (
     SuccessorAgentPartialQLearning, 
     DQNAgentPartial, 
     LSTM_DQN_Agent,
-    GoalConditionedLSTMDQN
+    LSTM_WVF_Agent
 )
 from models import Autoencoder
 from utils.plotting import generate_save_path
@@ -999,7 +999,7 @@ class ExperimentRunner:
             env = SimpleEnv(size=self.env_size)
         
         # Import the agent
-        from lstm_wvf_agent import LSTM_WVF_Agent
+        from agents import LSTM_WVF_Agent
         
         # Initialize agent
         agent = LSTM_WVF_Agent(
