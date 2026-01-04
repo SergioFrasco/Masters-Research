@@ -474,8 +474,13 @@ class LSTM_WVF_Agent:
         self.current_goal = self._get_goal_in_view(obs)
         
         # Get current stacked state
-        state = self.get_stacked_state()
+        state = self.get_stacked_state()  # Shape: (k, 7, 7)
+        
+        # Add batch dimension: (k, 7, 7) -> (1, k, 7, 7)
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        
+        # Normalize state (divide by max value in Minigrid)
+        state_tensor = state_tensor / 10.0
         
         # Goal is already normalized from view (no need for additional normalization)
         goal_tensor = torch.FloatTensor(self.current_goal).unsqueeze(0).to(self.device)
@@ -526,15 +531,19 @@ class LSTM_WVF_Agent:
             # Unpack sequence
             states = torch.stack([
                 torch.FloatTensor(s[0]) for s in sequence
-            ]).to(self.device)
+            ]).to(self.device) / 10.0  # Normalize
+            
             goals = torch.stack([
                 torch.FloatTensor(s[1]) for s in sequence
             ]).to(self.device)
+            
             actions = torch.tensor([s[2] for s in sequence], dtype=torch.long).to(self.device)
             rewards = torch.tensor([s[3] for s in sequence], dtype=torch.float32).to(self.device)
+            
             next_states = torch.stack([
                 torch.FloatTensor(s[4]) for s in sequence
-            ]).to(self.device)
+            ]).to(self.device) / 10.0  # Normalize
+            
             dones = torch.tensor([s[5] for s in sequence], dtype=torch.bool).to(self.device)
             
             # Add batch dimension
