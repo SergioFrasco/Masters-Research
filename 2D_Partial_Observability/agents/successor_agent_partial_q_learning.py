@@ -169,42 +169,31 @@ class SuccessorAgentPartialQLearning:
             return np.random.choice([0, 1])
         
         return 2
-
+    
     def update_sr(self, current_exp, next_exp):
-        """
-        Q-LEARNING UPDATE for successor features.
-        Key difference: uses MAX over actions for next state, not the actual next action.
-        """
-        s = current_exp[0]    # current state index
-        s_a = current_exp[1]  # current action
-        s_1 = current_exp[2]  # next state index
-        done = current_exp[4] # terminal flag
+        """Q-LEARNING UPDATE for successor features with NON-NEGATIVITY constraint"""
+        s = current_exp[0]
+        s_a = current_exp[1]
+        s_1 = current_exp[2]
+        done = current_exp[4]
         
-        # MiniGrid action constants
-        TURN_LEFT = 0
-        TURN_RIGHT = 1
         MOVE_FORWARD = 2
         
-        # Only update SR for move forward actions (actual state transitions)
         if s_a != MOVE_FORWARD:
             return 0.0
-        
-        # Additional safety check: ensure we actually transitioned states
-        # if s == s_1 and not done:
-        #     return 0.0
         
         I = self._onehot(s, self.state_size)
         
         if done:
-            # Terminal state: no future state occupancy expected
             td_target = I
         else:
-            # Q-LEARNING: Take MAX over all forward actions from next state
-            # We consider only MOVE_FORWARD action since turns don't change SR
             td_target = I + self.gamma * self.M[MOVE_FORWARD, s_1, :]
         
         td_error = td_target - self.M[s_a, s, :]
         self.M[s_a, s, :] += self.learning_rate * td_error
+        
+        # ADDING NON-NEGATIVITY CONSTRAINT:
+        self.M[s_a, s, :] = np.maximum(0, self.M[s_a, s, :])
         
         return np.mean(np.abs(td_error))
 
