@@ -9,7 +9,29 @@ Key changes:
 - During evaluation: can use 'green' task index for zero-shot generalization
 - Same Option A approach: Q(s, a, task) with min() composition
 
-Based on Nangue Tasse et al.'s Boolean Task Algebra (NeurIPS 2020)
+--------------------------------------------
+
+Input: Stacked RGB frames (k=4) → (12, 60, 80)
+       ↓
+Task Encoding: One-hot vector for task → (5,) 
+       ↓ (tiled spatially)
+Task Channels: → (5, 60, 80)
+       ↓
+Concatenation: [Frames | Task] → (17, 60, 80)
+       ↓
+CNN Backbone: 3 conv layers (32→64→64 filters)
+       ↓
+Flattened Features → (~3000 dims)
+       ↓
+LSTM: Temporal processing (64 hidden units)
+       ↓
+Dueling Head: 
+  - Value stream → V(s)
+  - Advantage stream → A(s,a)
+  - Combined: Q(s,a,task) = V + (A - mean(A))
+       ↓
+Output: Q-values per action (3 actions)
+
 """
 
 import numpy as np

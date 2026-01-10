@@ -154,11 +154,23 @@ def select_task():
 
 if __name__ == "__main__":
     # Create environment
-    env = DiscreteMiniWorldWrapper(size=10, render_mode="human")
+    # env = DiscreteMiniWorldWrapper(size=10, render_mode="human")
     # env = DiscreteMiniWorldWrapper(size=10)
 
     # Select and set task
     task = select_task()
+
+    # Determine if we need evaluation mode (green objects)
+    needs_green = any('green' in str(f).lower() for f in task.get('features', []))
+    training_mode = not needs_green  # False if green is needed
+    
+    # Create environment with appropriate mode
+    env = DiscreteMiniWorldWrapper(
+        size=10, 
+        render_mode="human",
+        training_mode=training_mode
+    )
+
     env.set_task(task)
     
     # Choose mode

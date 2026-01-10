@@ -200,6 +200,31 @@ class ExperimentRunner:
 
                 save_env_map_pred(agent = agent, normalized_grid = normalized_grid, predicted_reward_map_2d = predicted_reward_map_2d, episode = episode, save_path=generate_save_path(f"predictions/episode_{episode}"))
             
+            # Add this after your existing "if episode % 100 == 0:" block
+            if episode > 0 and episode % 1000 == 0:
+                averaged_M = np.mean(agent.M, axis=0)
+                
+                sr_dir = 'results/sr_matrices'
+                os.makedirs(sr_dir, exist_ok=True)
+                
+                np.save(os.path.join(sr_dir, f'sr_matrix_episode_{episode}.npy'), averaged_M)
+                
+                metadata = {
+                    'episode': episode,
+                    'grid_size': agent.grid_size,
+                    'state_size': agent.state_size,
+                    'gamma': agent.gamma,
+                    'learning_rate': agent.learning_rate,
+                    'mean': float(np.mean(averaged_M)),
+                    'std': float(np.std(averaged_M)),
+                    'max': float(np.max(averaged_M)),
+                    'min': float(np.min(averaged_M))
+                }
+                
+                with open(os.path.join(sr_dir, f'sr_metadata_episode_{episode}.json'), 'w') as f:
+                    json.dump(metadata, f, indent=2)
+                
+                print(f"\n✓ Saved SR matrix for grid cell analysis: episode {episode}")
 
             epsilon = max(epsilon_end, epsilon * epsilon_decay)
             episode_rewards.append(total_reward)
@@ -399,7 +424,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=2000, max_steps=200)
+    results = runner.run_comparison_experiment(episodes=6001, max_steps=200)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
