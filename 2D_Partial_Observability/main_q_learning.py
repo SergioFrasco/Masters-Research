@@ -491,6 +491,15 @@ class ExperimentRunner:
                     plt.tight_layout()
                     plt.savefig(generate_save_path(f'ae_triggers/triggers_up_to_ep_{episode}.png'))
                     plt.close()
+
+                # Every 1000 episodes, save the SR matrix
+                if episode > 0 and episode % 1000 == 0:
+                    averaged_M = np.mean(agent.M, axis=0)  # Average across actions
+                    
+                    # Save as .npy file
+                    np.save(f'results/sr_matrices/sr_matrix_episode_{episode}.npy', averaged_M)
+                    
+
                     
                 epsilon = max(epsilon_end, epsilon * epsilon_decay)
                 episode_rewards.append(total_reward)
@@ -802,7 +811,7 @@ def main():
     runner = ExperimentRunner(env_size=10, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=5000, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=6001, max_steps=200, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
