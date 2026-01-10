@@ -81,7 +81,7 @@ def compute_squareness_score(rate_map, grid_size):
     return gridness, squareness, autocorr, correlations
 
 
-def analyze_sr_matrix(sr_path, output_dir='grid_cell_analysis', n_eigenvectors=30):
+def analyze_sr_matrix(sr_path, output_dir='grid_cell_analysis', n_eigenvectors=24):
     """
     Load an SR matrix and analyze it for grid cell patterns.
     
@@ -300,7 +300,7 @@ def main():
                        help='Directory containing SR matrices')
     parser.add_argument('--output_dir', type=str, default='grid_cell_analysis',
                        help='Output directory for visualizations')
-    parser.add_argument('--n_eigenvectors', type=int, default=30,
+    parser.add_argument('--n_eigenvectors', type=int, default=24,
                        help='Number of eigenvectors to analyze')
     
     args = parser.parse_args()
