@@ -833,10 +833,10 @@ def main():
     print("Starting baseline comparison experiment with path integration...")
 
     # Initialize experiment runner
-    runner = ExperimentRunner(env_size=20, num_seeds=1)
+    runner = ExperimentRunner(env_size=50, num_seeds=1)
 
     # Run experiments
-    results = runner.run_comparison_experiment(episodes=9001, max_steps=200, manual = False)
+    results = runner.run_comparison_experiment(episodes=5001, max_steps=500, manual = False)
 
     # Analyze and plot results
     summary = runner.analyze_results(window=100)
