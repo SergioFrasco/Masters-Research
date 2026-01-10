@@ -496,8 +496,33 @@ class ExperimentRunner:
                 if episode > 0 and episode % 1000 == 0:
                     averaged_M = np.mean(agent.M, axis=0)  # Average across actions
                     
+                    # CREATE DIRECTORY FIRST - this was missing!
+                    sr_dir = 'results/sr_matrices'
+                    os.makedirs(sr_dir, exist_ok=True)
+                    
                     # Save as .npy file
-                    np.save(f'results/sr_matrices/sr_matrix_episode_{episode}.npy', averaged_M)
+                    sr_save_path = os.path.join(sr_dir, f'sr_matrix_episode_{episode}.npy')
+                    np.save(sr_save_path, averaged_M)
+                    
+                    # Also save metadata
+                    metadata = {
+                        'episode': episode,
+                        'grid_size': agent.grid_size,
+                        'state_size': agent.state_size,
+                        'gamma': agent.gamma,
+                        'learning_rate': agent.learning_rate,
+                        'shape': averaged_M.shape,
+                        'mean': float(np.mean(averaged_M)),
+                        'std': float(np.std(averaged_M)),
+                        'max': float(np.max(averaged_M)),
+                        'min': float(np.min(averaged_M))
+                    }
+                    
+                    metadata_path = os.path.join(sr_dir, f'sr_metadata_episode_{episode}.json')
+                    with open(metadata_path, 'w') as f:
+                        json.dump(metadata, f, indent=2)
+                    
+                    print(f"\n✓ Saved SR matrix: {sr_save_path}")
                     
 
                     
