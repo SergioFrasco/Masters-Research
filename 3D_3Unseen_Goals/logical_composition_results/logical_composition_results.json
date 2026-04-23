@@ -1,0 +1,186 @@
+{
+  "red AND box": {
+    "category": "AND",
+    "success_rate": 0.845,
+    "mean_reward": 0.845,
+    "std_reward": 0.3619046835839514,
+    "successes": 169,
+    "total_episodes": 200
+  },
+  "red AND sphere": {
+    "category": "AND",
+    "success_rate": 0.865,
+    "mean_reward": 0.865,
+    "std_reward": 0.34172357249683555,
+    "successes": 173,
+    "total_episodes": 200
+  },
+  "blue AND box": {
+    "category": "AND",
+    "success_rate": 0.835,
+    "mean_reward": 0.835,
+    "std_reward": 0.37118054905934933,
+    "successes": 167,
+    "total_episodes": 200
+  },
+  "blue AND sphere": {
+    "category": "AND",
+    "success_rate": 0.88,
+    "mean_reward": 0.88,
+    "std_reward": 0.3249615361854384,
+    "successes": 176,
+    "total_episodes": 200
+  },
+  "green AND box": {
+    "category": "AND",
+    "success_rate": 0.81,
+    "mean_reward": 0.81,
+    "std_reward": 0.39230090491866065,
+    "successes": 162,
+    "total_episodes": 200
+  },
+  "green AND sphere": {
+    "category": "AND",
+    "success_rate": 0.78,
+    "mean_reward": 0.78,
+    "std_reward": 0.4142463035441596,
+    "successes": 156,
+    "total_episodes": 200
+  },
+  "red OR blue": {
+    "category": "OR",
+    "success_rate": 0.88,
+    "mean_reward": 0.88,
+    "std_reward": 0.3249615361854384,
+    "successes": 176,
+    "total_episodes": 200
+  },
+  "red OR green": {
+    "category": "OR",
+    "success_rate": 0.885,
+    "mean_reward": 0.885,
+    "std_reward": 0.31902194281898544,
+    "successes": 177,
+    "total_episodes": 200
+  },
+  "blue OR green": {
+    "category": "OR",
+    "success_rate": 0.89,
+    "mean_reward": 0.89,
+    "std_reward": 0.3128897569432403,
+    "successes": 178,
+    "total_episodes": 200
+  },
+  "box OR sphere": {
+    "category": "OR",
+    "success_rate": 0.945,
+    "mean_reward": 0.945,
+    "std_reward": 0.22798026230356,
+    "successes": 189,
+    "total_episodes": 200
+  },
+  "red OR box": {
+    "category": "OR",
+    "success_rate": 0.91,
+    "mean_reward": 0.91,
+    "std_reward": 0.28618176042508364,
+    "successes": 182,
+    "total_episodes": 200
+  },
+  "blue OR sphere": {
+    "category": "OR",
+    "success_rate": 0.88,
+    "mean_reward": 0.88,
+    "std_reward": 0.3249615361854384,
+    "successes": 176,
+    "total_episodes": 200
+  },
+  "NOT red (any non-red object)": {
+    "category": "NOT",
+    "success_rate": 0.875,
+    "mean_reward": 0.875,
+    "std_reward": 0.33071891388307384,
+    "successes": 175,
+    "total_episodes": 200
+  },
+  "NOT blue (any non-blue object)": {
+    "category": "NOT",
+    "success_rate": 0.88,
+    "mean_reward": 0.88,
+    "std_reward": 0.3249615361854384,
+    "successes": 176,
+    "total_episodes": 200
+  },
+  "NOT green (any non-green object)": {
+    "category": "NOT",
+    "success_rate": 0.81,
+    "mean_reward": 0.81,
+    "std_reward": 0.39230090491866065,
+    "successes": 162,
+    "total_episodes": 200
+  },
+  "NOT box (any non-box object)": {
+    "category": "NOT",
+    "success_rate": 0.73,
+    "mean_reward": 0.73,
+    "std_reward": 0.4439594576084622,
+    "successes": 146,
+    "total_episodes": 200
+  },
+  "NOT sphere (any non-sphere object)": {
+    "category": "NOT",
+    "success_rate": 0.72,
+    "mean_reward": 0.72,
+    "std_reward": 0.44899888641287294,
+    "successes": 144,
+    "total_episodes": 200
+  },
+  "(red AND sphere) OR (blue AND box)": {
+    "category": "COMPLEX",
+    "success_rate": 0.88,
+    "mean_reward": 0.88,
+    "std_reward": 0.3249615361854384,
+    "successes": 176,
+    "total_episodes": 200
+  },
+  "(red OR blue) AND sphere": {
+    "category": "COMPLEX",
+    "success_rate": 0.84,
+    "mean_reward": 0.84,
+    "std_reward": 0.3666060555964672,
+    "successes": 168,
+    "total_episodes": 200
+  },
+  "(red OR blue) AND NOT green": {
+    "category": "COMPLEX",
+    "success_rate": 0.875,
+    "mean_reward": 0.875,
+    "std_reward": 0.33071891388307384,
+    "successes": 175,
+    "total_episodes": 200
+  },
+  "red AND (sphere OR box)": {
+    "category": "COMPLEX",
+    "success_rate": 0.87,
+    "mean_reward": 0.87,
+    "std_reward": 0.33630343441600474,
+    "successes": 174,
+    "total_episodes": 200
+  },
+  "(green AND box) OR (NOT red AND sphere)": {
+    "category": "COMPLEX",
+    "success_rate": 0.885,
+    "mean_reward": 0.885,
+    "std_reward": 0.31902194281898544,
+    "successes": 177,
+    "total_episodes": 200
+  },
+  "NOT (green AND box)": {
+    "category": "COMPLEX",
+    "success_rate": 0.195,
+    "mean_reward": 0.195,
+    "std_reward": 0.3962007067131506,
+    "successes": 39,
+    "total_episodes": 200
+  }
+}

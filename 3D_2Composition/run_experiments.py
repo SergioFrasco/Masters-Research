@@ -46,7 +46,7 @@ TRAINING_CONFIG = {
     "eval_episodes_per_task": 1500,
     "max_steps": 200,
     "env_size": 10,
-    "sr_freeze_episode": 3000,
+    "sr_freeze_episode": 20000,  # set to training_episodes so SR is never frozen; lower this for debugging only
     "learning_rate": 0.0001,
     "gamma": 0.99,
     "epsilon_start": 1.0,

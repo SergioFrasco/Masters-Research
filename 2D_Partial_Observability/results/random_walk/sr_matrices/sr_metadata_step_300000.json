@@ -1,0 +1,9 @@
+{
+  "step": 300000,
+  "grid_size": 40,
+  "state_size": 1600,
+  "gamma": 0.95,
+  "learning_rate": 0.1,
+  "mean_td_error": 0.003828844361605905,
+  "total_steps": 500000
+}

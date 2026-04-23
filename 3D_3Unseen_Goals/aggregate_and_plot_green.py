@@ -309,7 +309,7 @@ def create_comparison_plot(aggregated, metadata, output_path, window=50):
     ax.axhline(y=0.5, color='gray', linestyle='--', linewidth=1, alpha=0.3)
     
     # Legend
-    ax.legend(loc='lower right', fontsize=11, framealpha=0.95, ncol=2)
+    ax.legend(loc='lower left', fontsize=11, framealpha=0.95, ncol=2)
     
     # Grid
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
