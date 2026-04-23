@@ -7,11 +7,35 @@ Supervisors: **Devon Jarvis** and **Geraud Nangue Tasse**
 
 ## What This Project Is About
 
-This codebase contains all experiments from a Masters research project investigating whether reinforcement learning agents can learn to combine simple skills into more complex ones, and whether they can do so for tasks they have never explicitly been trained on.
+The study of decision-making in biological agents reveals a fascinating interplay be-
+tween vision and spatial reasoning. While animals can navigate complex environments
+and locate rewards without exhaustive exploration, traditional reinforcement learning
+approaches often require extensive trial-and-error. Much like how humans can visu-
+ally identify a coffee cup and plan a path to reach it without physically bumping into
+every object in the room, We propose VISTR (Vision Integration for Successor Task
+Representations), a framework that combines visual understanding with learned spa-
+tial representations.
 
-The central question is this: if an agent learns what a red object looks like, and separately learns what a sphere looks like, can it navigate to a red sphere without ever having been rewarded for doing so? And what about finding a green object, if it has never seen the colour green in training at all?
-
-This is the problem of **compositional generalisation** and **zero-shot transfer** in reinforcement learning. The project tracks the development of several algorithms across increasingly challenging environments, starting from simple 2D grids and ending in a 3D first-person visual environment.
+Our approach integrates vision-based reward identification with successor representa-
+tions to construct adaptive world value functions. By using vision to compress the envi-
+ronment into discrete 2D reward maps and combining these with successor representation-
+derived occupancy predictions, we create a structured representation that enables log-
+ical composition of tasks and zero-shot behaviour. This marriage of visual and spa-
+tial learning mirrors biological systems: while the successor representation component
+learns hard spatial relationships through experience, the vision component enables im-
+mediate reward identification and task planning without direct interaction.
+We demonstrate this system’s effectiveness by transitioning from allocentric to egocen-
+tric representations, reflecting the biological basis of mammalian spatial processing. By
+grounding our approach in biological plausibility, this research addresses key limita-
+tions of traditional RL models, improving their ability to learn efficiently and flexibly
+with minimal environmental interaction, however, this comes with a trade-off: the vi-
+sion system is pretrained at certain stages, meaning it does not learn entirely from
+scratch within the environment. While spatial reasoning remains computationally dif-
+ficult, our approach makes this process more transferable across tasks, significantly
+reducing the spatial exploration needed when adapting to new reward configurations.
+We anticipate our findings will contribute to developing more adaptive and general-
+izable artificial agents, bridging the gap between biological intelligence and artificial
+reinforcement learning systems.
 
 ---
 
